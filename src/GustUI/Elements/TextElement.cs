@@ -23,30 +23,31 @@ namespace GustUI.Elements
     {
         public override void Draw(SpriteBatch spriteBatch, Element parent)
         {
-            
-            
+            if (this.ElementTrait<FontTrait>().Value().Family != null)
+            {
 
-            string fontName = this.ElementTrait<FontTrait>().Value().Family;
-            float fontSize = this.ElementTrait<FontTrait>().Value().Size;
-            string text = this.ElementTrait<TextTrait>().Value().Text;
-            int border = this.ElementTrait<FontTrait>().Value().Border;
-            Color foreground = this.ElementTrait<ForegroundColorTrait>().Value().AsXna;
-            var font = Resources.StaticResources.FontManager.LoadFont(fontName, fontSize);
-
-
-            Vector2 thisSize = font.MeasureString(text) * GustConstants.FontScale;
-
-            TVVector actualPosition = this.GetActualPosition(parent, thisSize);
+                string fontName = this.ElementTrait<FontTrait>().Value().Family;
+                float fontSize = this.ElementTrait<FontTrait>().Value().Size;
+                string text = this.ElementTrait<TextTrait>().Value().Text;
+                int border = this.ElementTrait<FontTrait>().Value().Border;
+                Color foreground = this.ElementTrait<ForegroundColorTrait>().Value().AsXna;
+                var font = Resources.StaticResources.FontManager.LoadFont(fontName, fontSize);
 
 
+                Vector2 thisSize = font.MeasureString(text) * GustConstants.FontScale;
 
-            spriteBatch.DrawString(
-                font,
-                text,
-                actualPosition.AsXna,
-                foreground,
-                border);
+                TVVector actualPosition = this.GetActualPosition(parent, thisSize);
 
+
+
+                spriteBatch.DrawString(
+                    font,
+                    text,
+                    actualPosition.AsXna,
+                    foreground,
+                    border);
+
+            }
 
             base.Draw(spriteBatch, parent);
         }

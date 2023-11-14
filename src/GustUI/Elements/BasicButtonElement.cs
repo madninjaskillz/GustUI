@@ -13,24 +13,40 @@ using System.Threading.Tasks;
 
 namespace GustUI.Elements
 {
-    [ElementTraits(typeof(TextTrait), typeof(FontTrait), typeof(ForegroundColorTrait))]
+    [ElementTraits(typeof(TextTrait), typeof(FontTrait), typeof(ForegroundColorTrait), typeof(OnClickTrait))]
     public class BasicButtonElement : FilledRectangleElement
     {
-        private TextElement textElement;
+        private TextElement textElement = new TextElement();
         public BasicButtonElement()
         {
-            textElement = new TextElement();
-            TVFont font = ElementTrait<FontTrait>().Value();
+            Sync(textElement);
 
+            Setup();
+        }
+
+        public BasicButtonElement(TVFont font, string text, Color foreground, Color background, TVVector position = null, TVVector size = null)
+        {
+            Sync(textElement);
+
+            Set<FontTrait>(font);
+            Set<ForegroundColorTrait>(new TVColor(foreground));
+            Set<BackgroundColorTrait>(new TVColor(background));
+            Set<TextTrait>(new TVText(text));
+            Set<PositionTrait>(position ?? new TVVector(0,0));
+            Set<SizeTrait>(size ?? new TVVector(0, 0));
+
+
+            Setup();
+        }
+
+        private void Setup()
+        {
             textElement.Set<HorizontalAlignmentTrait, TVHorizontalAlignment>(new TVHorizontalAlignment { Alignment = HorizontalAlignment.Center });
             textElement.Set<VerticalAlignmentTrait, TVVerticalAlignment>(new TVVerticalAlignment { Alignment = VerticalAlignment.Center });
 
             Set<BorderSizeTrait, TVInt>(new TVInt(2));
             ElementTrait<ChildrenTrait>().Value().Items.Add(textElement);
 
-            //Sync() is available for all children but this seems overzealous - position etc will filter down
-
-            Sync(textElement);
         }
 
 

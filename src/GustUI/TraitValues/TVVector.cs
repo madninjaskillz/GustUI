@@ -30,7 +30,6 @@ public class TVVector : TraitValue
     public Vector2 AsXna => new Vector2(X, Y);
 
     public Rectangle Rectangle(TVVector size) => new Rectangle(this.X.AsInt(), this.Y.AsInt(), size.X.AsInt(), size.Y.AsInt());
-
 }
 
 

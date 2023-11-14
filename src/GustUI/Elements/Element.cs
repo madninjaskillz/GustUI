@@ -3,6 +3,7 @@ using GustUI.Extensions;
 using GustUI.Traits;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework.Graphics;
+using Microsoft.Xna.Framework.Input;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -91,6 +92,40 @@ public class Element
                 child.Draw(spriteBatch, this);
             }
         }
+
+        //for now lets call update from draw to test logic.
+        this.Update(parent);
+    }
+
+    MouseState previousMouseState = Mouse.GetState();
+    public void Update(Element parent)
+    {
+        MouseState mouseState = Mouse.GetState();
+        if (parent != null && HasTrait<SizeTrait>() && HasTrait<PositionTrait>()) 
+        {
+            TVVector actualPosition = this.GetActualPosition(parent);
+            TVVector size = ElementTrait<SizeTrait>().Value();
+
+            if (mouseState.Position.X>=actualPosition.X &&
+                mouseState.Position.X<=actualPosition.X + size.X &&
+                mouseState.Position.Y>=actualPosition.Y &&
+                mouseState.Position.Y <= actualPosition.Y + size.Y)
+            {
+                if (previousMouseState.LeftButton == ButtonState.Released &&
+                    mouseState.LeftButton == ButtonState.Pressed) 
+                { 
+                    if (HasTrait<OnClickTrait>())
+                    {
+                        TVEvent act = ElementTrait<OnClickTrait>().Value();
+                        if (act?.TriggerAction != null)
+                        {
+                            act.TriggerAction(this);
+                        }
+                    }
+                }
+            }
+        }
+        previousMouseState = mouseState;
     }
 
     internal void Sync(object sender, TraitChangedEventArgs e, object child)

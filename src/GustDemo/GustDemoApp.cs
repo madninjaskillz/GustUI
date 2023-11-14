@@ -4,6 +4,7 @@ using Microsoft.Xna.Framework.Input;
 using GustUI.Elements;
 using GustUI.Traits;
 using GustUI.TraitValues;
+using System.Diagnostics;
 
 namespace GustDemo
 {
@@ -34,20 +35,21 @@ namespace GustDemo
             _spriteBatch = new SpriteBatch(GraphicsDevice);
             _window = new WindowElement(this.Window, GraphicsDevice);
 
-            FilledRectangleElement rectangle = new();
-            rectangle.Set<SizeTrait, TVVector>(new TVVector(200, 80));
-            rectangle.Set<PositionTrait, TVVector>(new TVVector(300, 300));
+            FilledRectangleElement rectangle = new(300, 300, 200, 80, Color.Pink ,2, Color.Red);
             
-            rectangle.Set<BackgroundColorTrait, TVColor>(new TVColor(Color.Pink));
+            BasicButtonElement button = new BasicButtonElement(
+                new TVFont() { Family = "C:\\Windows\\Fonts\\arial.ttf", Size = 72, Border = 0 }, 
+                "hello",
+                Color.White,
+                Color.Blue,
+                new TVVector(40,40),
+                new TVVector(200,80));
 
-            
-            BasicButtonElement button = new BasicButtonElement();
-            button.Set<FontTrait>(new TVFont() { Family = "C:\\Windows\\Fonts\\arial.ttf", Size = 72, Border = 0 });
-            button.Set<ForegroundColorTrait>(new TVColor(Color.Pink));
-            button.Set<BackgroundColorTrait>(new TVColor(Color.DarkGreen));
-            button.Set<TextTrait>(new TVText("Hello!"));
-            button.Set<PositionTrait>(new TVVector(40, 40));
-            button.Set<SizeTrait>(new TVVector(200, 80));
+            button.Set<OnClickTrait>(new TVEvent((object sender) => 
+            {
+                Debug.WriteLine("Oh hai!");
+                Debug.WriteLine(sender);
+            }));
 
             _window.Children.Add(button);
             _window.Children.Add(rectangle);

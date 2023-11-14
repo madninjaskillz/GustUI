@@ -26,4 +26,11 @@ namespace GustUI.TraitValues
         public TVInt() { }
         public TVInt(int value) { Int = value; }
     }
+
+    public class TVEvent : TraitValue
+    {
+        public Action<object> TriggerAction { get; set; }
+        public TVEvent() { }
+        public TVEvent(Action<object> triggerAction) { TriggerAction = triggerAction; }
+    }
 }
