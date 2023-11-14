@@ -48,6 +48,7 @@ namespace GustDemo
             button.Set<OnClickTrait>(new TVEvent((object sender) => 
             {
                 Debug.WriteLine("Oh hai!");
+                button.Set<PositionTrait>(button.ElementTrait<PositionTrait>().Value() + new TVVector(10, 10));
                 Debug.WriteLine(sender);
             }));
 
