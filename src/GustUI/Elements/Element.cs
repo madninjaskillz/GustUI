@@ -119,7 +119,12 @@ public class Element
                         TVEvent act = ElementTrait<OnClickTrait>().Value();
                         if (act?.TriggerAction != null)
                         {
-                            act.TriggerAction(this);
+                            act.TriggerAction(new ClickEventArgs
+                            {
+                                GlobalMousePosition = new TVVector(mouseState.X, mouseState.Y),
+                                RelativeMousePosition = new TVVector(mouseState.X-actualPosition.X, mouseState.Y-actualPosition.Y),
+                                MouseState = mouseState
+                            });
                         }
                     }
                 }

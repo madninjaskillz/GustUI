@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Xna.Framework.Input;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -29,8 +30,18 @@ namespace GustUI.TraitValues
 
     public class TVEvent : TraitValue
     {
-        public Action<object> TriggerAction { get; set; }
+        public Action<TVEventArgs> TriggerAction { get; set; }
         public TVEvent() { }
-        public TVEvent(Action<object> triggerAction) { TriggerAction = triggerAction; }
+        public TVEvent(Action<TVEventArgs> triggerAction) { TriggerAction = triggerAction; }
+    }
+
+    public class TVEventArgs { }
+
+    public class ClickEventArgs : TVEventArgs
+    {
+        public TVVector GlobalMousePosition { get; set; }
+        public TVVector RelativeMousePosition { get; set; }
+        public MouseState MouseState { get; set; }
+
     }
 }
