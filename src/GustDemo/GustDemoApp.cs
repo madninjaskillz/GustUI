@@ -40,17 +40,17 @@ namespace GustDemo
             
             rectangle.Set<BackgroundColorTrait, TVColor>(new TVColor(Color.Pink));
 
-            _window.ElementTrait<ChildrenTrait>().Value().Add(rectangle);
-
+            
             BasicButtonElement button = new BasicButtonElement();
             button.Set<FontTrait>(new TVFont() { Family = "C:\\Windows\\Fonts\\arial.ttf", Size = 72, Border = 0 });
             button.Set<ForegroundColorTrait>(new TVColor(Color.Pink));
             button.Set<BackgroundColorTrait>(new TVColor(Color.DarkGreen));
-            button.Set<TextTrait>(new TVText() { Text = "Hello!" });
+            button.Set<TextTrait>(new TVText("Hello!"));
             button.Set<PositionTrait>(new TVVector(40, 40));
             button.Set<SizeTrait>(new TVVector(200, 80));
 
-            _window.ElementTrait<ChildrenTrait>().Value().Add(button);
+            _window.Children.Add(button);
+            _window.Children.Add(rectangle);
 
             // TODO: use this.Content to load your game content here
         }

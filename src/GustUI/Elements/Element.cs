@@ -28,7 +28,7 @@ public class Element
     {
         if (HasTrait<ChildrenTrait>())
         {
-            foreach(var child in ElementTrait<ChildrenTrait>().Value().Items)
+            foreach (var child in ElementTrait<ChildrenTrait>().Value().Items)
             {
                 Sync(child);
             }
@@ -44,7 +44,7 @@ public class Element
 
         foreach (Type sharedTraitType in sharedTraitTypes)
         {
-            object trait = traits.Values.First(x=>x.GetType() == sharedTraitType);
+            object trait = traits.Values.First(x => x.GetType() == sharedTraitType);
 
             MethodInfo theMethod = sharedTraitType.GetMethod("SyncSubscribe");
             object[] pr = new object[] { child };
@@ -56,8 +56,28 @@ public class Element
 
     public TraitType ElementTrait<TraitType>() => (TraitType)traits[typeof(TraitType)];
 
-    public object ElementTraitByType(Type type)=> traits[type];
-    
+    public TVElements Children
+    {
+        get
+        {
+            if (HasTrait<ChildrenTrait>())
+            {
+                return ETV<ChildrenTrait, TVElements>();
+            }
+
+            throw new Exception("Element doesnt have children");
+        }
+    }
+
+    public TraitTypeValue ETV<TraitType, TraitTypeValue>()
+        where TraitTypeValue : TraitValue
+        where TraitType : Trait<TraitTypeValue>
+    { 
+        return ((TraitType)traits[typeof(TraitType)]).Value(); 
+    }
+
+    public object ElementTraitByType(Type type) => traits[type];
+
     public bool Set<TraitType, TraitValueType>(TraitValueType value) where TraitValueType : TraitValue where TraitType : Trait<TraitValueType> => ElementTrait<TraitType>().Set(value);
 
     public bool Set<TraitType>(TraitValue value) => (bool)typeof(TraitType).GetMethod("Set").Invoke(this.ElementTraitByTypeFromObject(typeof(TraitType)), new object[] { value });
