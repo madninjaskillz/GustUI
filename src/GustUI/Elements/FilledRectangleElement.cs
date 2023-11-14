@@ -7,16 +7,16 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace GustUI.Elements;
 
-[ElementTraits(typeof(BackgroundColorTrait))]
+[ElementTraits(typeof(BackgroundFillTrait))]
 public class FilledRectangleElement : RectangleElement
 {
     public FilledRectangleElement() { }
-    public FilledRectangleElement(int left, int top, int width, int height, Color background, int border = 0, Color? borderColor = null)
+    public FilledRectangleElement(int left, int top, int width, int height, TVFill fill, int border = 0, Color? borderColor = null)
     {
-        Set<PositionTrait>(new TVVector(left,top));
-        Set<SizeTrait>(new TVVector(width,height));
+        Set<PositionTrait>(new TVVector(left, top));
+        Set<SizeTrait>(new TVVector(width, height));
 
-        Set<BackgroundColorTrait, TVColor>(new TVColor(background));
+        Set<BackgroundFillTrait>(fill);
 
         if (border > 0)
         {
@@ -34,9 +34,27 @@ public class FilledRectangleElement : RectangleElement
         TVVector size = this.ElementTrait<SizeTrait>().Value();
 
         Rectangle rect = new Rectangle(actualPosition.X.AsInt(), actualPosition.Y.AsInt(), size.X.AsInt(), size.Y.AsInt());
-        Color color = this.ElementTrait<BackgroundColorTrait>().Value().AsXna;
+        
+        BackgroundFillTrait fill = ElementTrait<BackgroundFillTrait>();
 
-        spriteBatch.DrawFilledRectangle(rect, color);
+        switch (fill.Value())
+        {
+            case TVFillSolidColor solidColor:
+                {
+                    spriteBatch.DrawFilledRectangle(rect, solidColor.Color);
+                    break;
+                }
+            case TVFillImage image:
+                {
+                    spriteBatch.Draw(image.Texture, rect, Color.White);
+                    break;
+                }
+            case TVFillSimpleGradient image:
+                {
+                    spriteBatch.Draw(image.Texture, rect, Color.White);
+                    break;
+                }
+        }
         base.Draw(spriteBatch, parent);
     }
 }

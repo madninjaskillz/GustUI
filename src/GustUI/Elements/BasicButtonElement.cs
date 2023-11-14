@@ -24,13 +24,13 @@ namespace GustUI.Elements
             Setup();
         }
 
-        public BasicButtonElement(TVFont font, string text, Color foreground, Color background, TVVector position = null, TVVector size = null)
+        public BasicButtonElement(TVFont font, string text, Color foreground, TVFill background, TVVector position = null, TVVector size = null)
         {
             Sync(textElement);
 
             Set<FontTrait>(font);
             Set<ForegroundColorTrait>(new TVColor(foreground));
-            Set<BackgroundColorTrait>(new TVColor(background));
+            Set<BackgroundFillTrait>(background);
             Set<TextTrait>(new TVText(text));
             Set<PositionTrait>(position ?? new TVVector(0,0));
             Set<SizeTrait>(size ?? new TVVector(0, 0));

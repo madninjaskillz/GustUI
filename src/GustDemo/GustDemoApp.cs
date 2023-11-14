@@ -35,13 +35,13 @@ namespace GustDemo
             _spriteBatch = new SpriteBatch(GraphicsDevice);
             _window = new WindowElement(this.Window, GraphicsDevice);
 
-            FilledRectangleElement rectangle = new(300, 300, 200, 80, Color.Pink ,2, Color.Red);
+            FilledRectangleElement rectangle = new(300, 300, 200, 80, new TVFillSimpleGradient(GraphicsDevice, Color.Red, Color.Blue, Direction.Horizontally) ,2, Color.Red);
             
             BasicButtonElement button = new BasicButtonElement(
                 new TVFont() { Family = "C:\\Windows\\Fonts\\arial.ttf", Size = 72, Border = 0 }, 
                 "hello",
                 Color.White,
-                Color.Blue,
+                new TVFillSimpleGradient(GraphicsDevice, Color.Blue,Color.Black, Direction.Vertically),
                 new TVVector(40,40),
                 new TVVector(200,80));
 

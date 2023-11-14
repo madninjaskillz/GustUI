@@ -19,7 +19,7 @@ public class WindowElement : FilledRectangleElement
         gameWindow.ClientSizeChanged += GameWindow_ClientSizeChanged;
         ElementTrait<SizeTrait>().Set(new TVVector(gameWindow.ClientBounds.Width, gameWindow.ClientBounds.Height));
 
-        this.Set<BackgroundColorTrait, TVColor>(new TVColor(Color.Black));
+        this.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Black));
         this.Set<BorderColorTrait, TVColor>(new TVColor(Color.White));
         this.Set<BorderSizeTrait, TVInt>(new TVInt(0));
     }
