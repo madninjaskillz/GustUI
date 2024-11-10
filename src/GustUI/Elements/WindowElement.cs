@@ -12,9 +12,9 @@ namespace GustUI.Elements;
 [ElementTraits(typeof(SizeTrait), typeof(PositionTrait), typeof(ChildrenTrait))]
 public class WindowElement : FilledRectangleElement
 {
-    public WindowElement(GameWindow gameWindow, GraphicsDevice graphicsDevice) : base()
+    public WindowElement(GameWindow gameWindow, GraphicsDevice graphicsDevice, VirtualContent content) : base()
     {
-        Resources.StaticResources = new Resources(graphicsDevice);
+        Resources.StaticResources = new Resources(graphicsDevice, content);
 
         gameWindow.ClientSizeChanged += GameWindow_ClientSizeChanged;
         ElementTrait<SizeTrait>().Set(new TVVector(gameWindow.ClientBounds.Width, gameWindow.ClientBounds.Height));

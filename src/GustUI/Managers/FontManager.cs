@@ -1,4 +1,10 @@
-﻿using Microsoft.Xna.Framework.Graphics;
+﻿using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Audio;
+using Microsoft.Xna.Framework.Graphics;
+using Microsoft.Xna.Framework.Input;
+using Microsoft.Xna.Framework.Input.Touch;
+using Microsoft.Xna.Framework.Media;
+using nkast.Wasm.Dom;
 using SpriteFontPlus;
 using System;
 using System.Collections.Generic;
@@ -12,9 +18,11 @@ namespace GustUI.Managers
     public class FontManager
     {
         GraphicsDevice graphicsDevice;
-        public FontManager(GraphicsDevice graphicsDevice)
+        VirtualContent content;
+        public FontManager(GraphicsDevice graphicsDevice, VirtualContent content)
         {
             this.graphicsDevice = graphicsDevice;
+            this.content = content; 
         }
 
         private readonly Dictionary<string, SpriteFont> FontCache = new();
@@ -28,7 +36,9 @@ namespace GustUI.Managers
                 return cachedFont;
             }
 
-            var font = TtfFontBaker.Bake(File.ReadAllBytes(path), size / GustConstants.FontScale, 1024, 1024, new[] { CharacterRange.BasicLatin }).CreateSpriteFont(graphicsDevice);
+            var bake = TtfFontBaker.Bake(content.ReadAllBytes(path), size / GustConstants.FontScale, 1024, 1024, new[] { CharacterRange.BasicLatin });
+
+            var font = bake.CreateSpriteFont(graphicsDevice);
 
             FontCache.Add(key, font);
 

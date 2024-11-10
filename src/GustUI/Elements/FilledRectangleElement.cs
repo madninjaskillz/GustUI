@@ -29,14 +29,14 @@ public class FilledRectangleElement : RectangleElement
     }
     public override void Draw(SpriteBatch spriteBatch, Element parent)
     {
-        TVVector actualPosition = this.GetActualPosition(parent);
-
-        TVVector size = this.ElementTrait<SizeTrait>().Value();
-
-        Rectangle rect = new Rectangle(actualPosition.X.AsInt(), actualPosition.Y.AsInt(), size.X.AsInt(), size.Y.AsInt());
-        
         BackgroundFillTrait fill = ElementTrait<BackgroundFillTrait>();
+        Ensure.NotNull(fill, nameof(fill));
 
+        TVVector actualPosition = this.GetActualPosition(parent);
+        TVVector size = this.ElementTrait<SizeTrait>().Value();
+        Rectangle rect = new Rectangle(actualPosition.X.AsInt(), actualPosition.Y.AsInt(), size.X.AsInt(), size.Y.AsInt());
+        Ensure.NotNull(rect, nameof(rect));
+        
         switch (fill.Value())
         {
             case TVFillSolidColor solidColor:
@@ -55,6 +55,7 @@ public class FilledRectangleElement : RectangleElement
                     break;
                 }
         }
+        
         base.Draw(spriteBatch, parent);
     }
 }

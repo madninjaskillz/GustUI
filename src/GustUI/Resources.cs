@@ -12,12 +12,12 @@ namespace GustUI
     public class Resources
     {
         public Texture2D Pixel;
-        public Resources(GraphicsDevice graphicsDevice)
+        public Resources(GraphicsDevice graphicsDevice, VirtualContent content)
         {
             Pixel = new Texture2D(graphicsDevice, 1, 1);
             Pixel.SetData<Color>(new Color[1] { Color.White });
 
-            FontManager = new FontManager(graphicsDevice);  
+            FontManager = new FontManager(graphicsDevice, content);  
         }
 
         public FontManager FontManager;

@@ -33,21 +33,25 @@ namespace GustUI.Elements
                 Color foreground = this.ElementTrait<ForegroundColorTrait>().Value().AsXna;
                 var font = Resources.StaticResources.FontManager.LoadFont(fontName, fontSize);
 
+                if (Ensure.NotNull(font, nameof(font)) &&
+                Ensure.NotNull(text, nameof(text)) &&
+                Ensure.NotNull(foreground, nameof(foreground)) &&
+                Ensure.NotNull(border, nameof(border)))
+                {
 
-                Vector2 thisSize = font.MeasureString(text) * GustConstants.FontScale;
+                    Vector2 thisSize = font.MeasureString(text) * GustConstants.FontScale;
 
-                TVVector actualPosition = this.GetActualPosition(parent, thisSize);
+                    TVVector actualPosition = this.GetActualPosition(parent, thisSize);
 
 
-
-                spriteBatch.DrawString(
-                    font,
-                    text,
-                    actualPosition.AsXna,
-                    foreground,
-                    border);
-
-            }
+                    spriteBatch.DrawString(
+                        font,
+                        text,
+                        actualPosition.AsXna,
+                        foreground,
+                        border);
+                }
+            }            
 
             base.Draw(spriteBatch, parent);
         }

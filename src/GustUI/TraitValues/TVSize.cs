@@ -21,7 +21,7 @@ namespace GustUI.TraitValues
      
     }
 
-    public class TVPercentSize : TVSize
+    public class TVPercentSize : TVSize { }
 
 
 }

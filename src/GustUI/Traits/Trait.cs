@@ -16,7 +16,7 @@ namespace GustUI.Traits
         }
         public void SyncSubscribe(Element child)
         {
-            ValueChangedEventHandler+= (object sender, TraitChangedEventArgs e) => Sync(sender, e, child);
+            ValueChangedEventHandler += (object sender, TraitChangedEventArgs e) => Sync(sender, e, child);
         }
 
         internal void Sync(object sender, TraitChangedEventArgs e, object child)
@@ -25,6 +25,22 @@ namespace GustUI.Traits
 
             object localCopy = sender;
             object rc = child.ElementTraitByTypeFromObject(thisType);
+            MethodInfo theMethod = thisType.GetMethod("CopyTo");
+            object[] pr = new object[] { rc };
+            theMethod.Invoke(localCopy, pr);
+        }
+
+        public void SubscribeMapped(Element child, Type targetType)
+        {
+            ValueChangedEventHandler += (object sender, TraitChangedEventArgs e) => SyncMapped(sender, e, child, targetType);
+        }
+
+        internal void SyncMapped(object sender, TraitChangedEventArgs e, object child, Type targetType)
+        {
+            Type thisType = sender.GetType();
+
+            object localCopy = sender;
+            object rc = child.ElementTraitByTypeFromObject(targetType);
             MethodInfo theMethod = thisType.GetMethod("CopyTo");
             object[] pr = new object[] { rc };
             theMethod.Invoke(localCopy, pr);
