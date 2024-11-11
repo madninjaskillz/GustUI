@@ -16,6 +16,7 @@ namespace GustUI.Elements;
 
 public class Element
 {
+    public string ElementName { get; set; }
     private Dictionary<Type, object> traits = new Dictionary<Type, object>();
     private Dictionary<string , Tuple<Element,string>> traitMapping = new Dictionary<string, Tuple<Element, string>>();
     public Element()
@@ -65,6 +66,8 @@ public class Element
             object[] pr = new object[] { child };
             theMethod.Invoke(trait, pr);
         }
+
+        SyncMappings(child);
     }
 
     public void SyncMappings(Element child)
@@ -115,12 +118,11 @@ public class Element
 
 
 
-            MethodInfo theMethod = traitType.GetMethod("SubscribeMapped", BindingFlags.Public | BindingFlags.NonPublic |
-                              BindingFlags.Static | BindingFlags.Instance);
+            MethodInfo theMethod = traitType.GetMethod("SubscribeMapped");
 
             if (theMethod.NotNull(theMethod.Name)){
                 Log.This("Using method: " + theMethod.Name);
-                Debugging.DebugBreak();
+                //Debugging.DebugBreak();
                 object[] pr = new object[] { child, targetType };
                 theMethod.Invoke(trait, pr);
 
@@ -150,7 +152,7 @@ public class Element
         }
     }
 
-    public void AddChild(Element child) => Children.Add(child);
+    public void AddChild(Element child, string name) => Children.Add(child, name);
 
     public TraitTypeValue ETV<TraitType, TraitTypeValue>()
         where TraitTypeValue : TraitValue
@@ -165,14 +167,13 @@ public class Element
 
     public bool Set<TraitType>(TraitValue value) => (bool)typeof(TraitType).GetMethod("Set").Invoke(this.ElementTraitByTypeFromObject(typeof(TraitType)), new object[] { value });
 
-    public virtual void Draw(SpriteBatch spriteBatch, Element parent)
+    public virtual void Draw(SpriteBatch spriteBatch, Element parent=null)
     {
-        Log.This("Drawing element: " + this.GetType().Name);
+        
         if (this.HasTrait<ChildrenTrait>())
         {
             foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
             {
-                Log.This("Drawing child: " + child.GetType().Name);
                 child.Draw(spriteBatch, this);
             }
         }
@@ -182,9 +183,9 @@ public class Element
     }
 
     MouseState previousMouseState = Mouse.GetState();
-    public void Update(Element parent)
+    public void Update(Element parent = null)
     {
-        Log.This("Updating element: " + this.GetType().Name);
+      
         MouseState mouseState = Mouse.GetState();
         if (parent != null && HasTrait<SizeTrait>() && HasTrait<PositionTrait>())
         {

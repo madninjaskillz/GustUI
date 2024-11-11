@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace GustUI.Elements
 {
-    [ElementTraits(typeof(TitleTextTrait), typeof(FontTrait), typeof(OnExitTrait))]
+    [ElementTraits(typeof(FontTrait), typeof(OnExitTrait))]
     public class ModalTitleBarElement : FilledRectangleElement
     {
         private TextElement textElement = new TextElement();
@@ -23,27 +23,41 @@ namespace GustUI.Elements
             Setup();
         }
 
-        public ModalTitleBarElement(TVFont font, string title, TVVector position = null, TVVector size = null)
+        public ModalTitleBarElement(string title, TVVector position = null, TVVector size = null)
         {
             Sync(textElement);
             Sync(closeButton);
-            Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Gray));
+            //Sync();
+            textElement.Set<TextTrait>(new TVText(title));
+            
+
+            Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Green, Color.DarkGreen, Direction.Vertically));
             Set<BorderSizeTrait>(new TVInt(0));
-            Set<FontTrait>(font);
-            Set<TitleTextTrait>(new TVText(title));
+            Set<BorderColorTrait>(new TVColor(Color.Gray));
+            Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
             Set<PositionTrait>(position ?? new TVVector(0, 0));
             Set<SizeTrait>(size ?? new TVVector(0, 0));
+
+            closeButton.Set<SizeTrait>(new TVVector(size.Y, size.Y));
+            closeButton.Set<TextTrait>(new TVText("X"));
+            closeButton.Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
+            closeButton.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Red, Color.DarkRed, Direction.Vertically));
+            closeButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
+            closeButton.Set<PositionTrait>(new TVVector(size.X - size.Y, 0));
+
             Setup();
         }
 
         private void Setup()
         {
-            Set<BorderSizeTrait, TVInt>(new TVInt(2));
-            MapTraitToChild<TitleTextTrait>(textElement, nameof(TextTrait));
-            ElementTrait<ChildrenTrait>().Value().Items.Add(textElement);
+            textElement.Set<HorizontalAlignmentTrait, TVHorizontalAlignment>(new TVHorizontalAlignment { Alignment = HorizontalAlignment.Center });
+            textElement.Set<VerticalAlignmentTrait, TVVerticalAlignment>(new TVVerticalAlignment { Alignment = VerticalAlignment.Center });
 
-            Sync();
+            Set<BorderSizeTrait, TVInt>(new TVInt(0));
 
+
+            this.AddChild(closeButton, "closeButton");
+            this.AddChild(textElement,"titleText");
         }
     }
 }

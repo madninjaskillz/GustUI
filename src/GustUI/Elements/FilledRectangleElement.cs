@@ -27,7 +27,7 @@ public class FilledRectangleElement : RectangleElement
             }
         }
     }
-    public override void Draw(SpriteBatch spriteBatch, Element parent)
+    public override void Draw(SpriteBatch spriteBatch, Element parent = null)
     {
         BackgroundFillTrait fill = ElementTrait<BackgroundFillTrait>();
         Ensure.NotNull(fill, nameof(fill));

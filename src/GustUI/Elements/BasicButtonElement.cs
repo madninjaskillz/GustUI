@@ -45,8 +45,7 @@ namespace GustUI.Elements
             textElement.Set<VerticalAlignmentTrait, TVVerticalAlignment>(new TVVerticalAlignment { Alignment = VerticalAlignment.Center });
 
             Set<BorderSizeTrait, TVInt>(new TVInt(2));
-            ElementTrait<ChildrenTrait>().Value().Items.Add(textElement);
-
+            this.AddChild(textElement, "buttonText");
         }
 
 

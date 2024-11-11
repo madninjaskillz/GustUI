@@ -6,7 +6,7 @@ using System.Collections.Generic;
 
 namespace GustUI.Elements
 {
-    [ElementTraits(typeof(TitleTextTrait), typeof(BodyTextTrait), typeof(FontTrait), typeof(ForegroundColorTrait), typeof(OnClickTrait))]
+    [ElementTraits(typeof(BodyTextTrait), typeof(FontTrait), typeof(ForegroundColorTrait), typeof(OnClickTrait))]
     public class ModalWindowElement : FilledRectangleElement
     {
         private TextElement textElement = new TextElement();
@@ -17,14 +17,13 @@ namespace GustUI.Elements
 
             Setup();
         }
-        public ModalWindowElement(TVFont font, string title, string body, Color foreground, TVFill background, List<BasicButtonElement> buttons = null, TVVector position = null, TVVector size = null)
+        public ModalWindowElement(string title, string body, Color foreground, TVFill background, List<BasicButtonElement> buttons = null, TVVector position = null, TVVector size = null)
         {
             Sync(textElement);
 
-            Set<FontTrait>(font);
+            Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
             Set<ForegroundColorTrait>(new TVColor(foreground));
             Set<BackgroundFillTrait>(background);
-            Set<TitleTextTrait>(new TVText(title));
             Set<BodyTextTrait>(new TVText(body));
             Set<PositionTrait>(position ?? new TVVector(0, 0));
             Set<SizeTrait>(size ?? new TVVector(0, 0));

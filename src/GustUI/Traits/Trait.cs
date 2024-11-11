@@ -32,11 +32,20 @@ namespace GustUI.Traits
 
         public void SubscribeMapped(Element child, Type targetType)
         {
-            ValueChangedEventHandler += (object sender, TraitChangedEventArgs e) => SyncMapped(sender, e, child, targetType);
+            Log.This("Subscribing mapped trait: TargetType:" + targetType.Name+" from child:"+child.GetType().Name);
+            ValueChangedEventHandler += (object sender, TraitChangedEventArgs e) =>
+            {
+                Log.This("Value changed event handler!");
+                Log.This("Sender: " + sender.GetType().Name);
+                Log.This("Child: " + child.GetType().Name);
+
+                SyncMapped(sender, e, child, targetType);
+            };
         }
 
         internal void SyncMapped(object sender, TraitChangedEventArgs e, object child, Type targetType)
         {
+            Log.This("Sync mapped!");
             Type thisType = sender.GetType();
 
             object localCopy = sender;

@@ -34,7 +34,7 @@ namespace GustUI.TraitValues
         public Color SecondaryColor { get; }
         public Direction Direction { get; }
 
-        public TVFillSimpleGradient(GraphicsDevice graphicsDevice, Color primary, Color secondary, Direction direction)
+        public TVFillSimpleGradient(Color primary, Color secondary, Direction direction)
         {
             int w = 1;
             int h = 1;
@@ -47,7 +47,7 @@ namespace GustUI.TraitValues
                 h = 256;
             }
 
-            Texture2D result = new Texture2D(graphicsDevice, w, h);
+            Texture2D result = new Texture2D(Resources.StaticResources.GraphicsDevice, w, h);
             Color[] c = new Color[256];
 
             Color col = primary;

@@ -10,7 +10,8 @@ namespace GustUI
     internal static class Ensure
     {
         private const bool THROW = false;
-        public static bool NotNull(this object obj,string propName, [CallerMemberName] string memberName = "")
+        private const bool LOG = true;
+        public static bool NotNull(this object obj, string propName, [CallerMemberName] string memberName = "")
         {
             if (obj == null)
             {
@@ -18,10 +19,12 @@ namespace GustUI
                 {
                     throw new Exception("Object is null: " + propName + " (" + memberName + ")");
                 }
-                else
+
+                if (LOG)
                 {
                     Log.This("Object is null: " + propName + " (" + memberName + ")");
                 }
+
 
                 return false;
             }
