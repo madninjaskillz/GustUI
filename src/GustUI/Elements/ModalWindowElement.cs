@@ -9,16 +9,18 @@ namespace GustUI.Elements
     [ElementTraits(typeof(BodyTextTrait), typeof(FontTrait), typeof(ForegroundColorTrait), typeof(OnClickTrait))]
     public class ModalWindowElement : FilledRectangleElement
     {
-        private TextElement textElement = new TextElement();
+        private TextElement textElement;
         private List<BasicButtonElement> buttons = new List<BasicButtonElement>();
         public ModalWindowElement()
         {
+            textElement = this.CreateElement<TextElement>();
             Sync(textElement);
 
             Setup();
         }
         public ModalWindowElement(string title, string body, Color foreground, TVFill background, List<BasicButtonElement> buttons = null, TVVector position = null, TVVector size = null)
         {
+            textElement = this.CreateElement<TextElement>();
             Sync(textElement);
 
             Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
@@ -31,6 +33,10 @@ namespace GustUI.Elements
             if (buttons != null)
             {
                 this.buttons.AddRange(buttons);
+            }
+            else
+            {
+                this.buttons = new List<BasicButtonElement>();
             }
 
             foreach (var button in this.buttons)

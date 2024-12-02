@@ -10,9 +10,9 @@ namespace GustUI.Elements;
 [ElementTraits(typeof(PositionTrait), typeof(SizeTrait), typeof(ChildrenTrait), typeof(BorderColorTrait), typeof(BorderSizeTrait))]
 public class RectangleElement : Element
 {
-    public override void Draw(SpriteBatch spriteBatch, Element parent)
+    public override void Draw(SpriteBatch spriteBatch)
     {
-        TVVector actualPosition = this.GetActualPosition(parent);
+        TVVector actualPosition = this.GetActualPosition();
 
         TVVector size = ElementTrait<SizeTrait>().Value();
 
@@ -22,7 +22,7 @@ public class RectangleElement : Element
             spriteBatch.DrawRectangle(actualPosition.Rectangle(size), ElementTrait<BorderColorTrait>().Value().AsXna, borderSize);
         }
 
-        base.Draw(spriteBatch, parent);
+        base.Draw(spriteBatch);
     }
 }
 

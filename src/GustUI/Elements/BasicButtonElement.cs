@@ -16,9 +16,10 @@ namespace GustUI.Elements
     [ElementTraits(typeof(TextTrait), typeof(FontTrait), typeof(ForegroundColorTrait), typeof(OnClickTrait))]
     public class BasicButtonElement : FilledRectangleElement
     {
-        private TextElement textElement = new TextElement();
+        private TextElement textElement;
         public BasicButtonElement()
         {
+            textElement = this.CreateElement<TextElement>();
             Sync(textElement);
 
             Setup();
@@ -26,6 +27,7 @@ namespace GustUI.Elements
 
         public BasicButtonElement(TVFont font, string text, Color foreground, TVFill background, TVVector position = null, TVVector size = null)
         {
+            textElement = this.CreateElement<TextElement>();
             Sync(textElement);
 
             Set<FontTrait>(font);

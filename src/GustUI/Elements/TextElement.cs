@@ -6,6 +6,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -21,7 +22,7 @@ namespace GustUI.Elements
         typeof(HorizontalAlignmentTrait))]
     public class TextElement : Element
     {
-        public override void Draw(SpriteBatch spriteBatch, Element parent)
+        public override void Draw(SpriteBatch spriteBatch)
         {
             if (this.ElementTrait<FontTrait>().Value().Family != null)
             {
@@ -41,7 +42,7 @@ namespace GustUI.Elements
 
                     Vector2 thisSize = font.MeasureString(text) * GustConstants.FontScale;
 
-                    TVVector actualPosition = this.GetActualPosition(parent, thisSize);
+                    TVVector actualPosition = this.GetActualPosition(thisSize);
 
 
                     spriteBatch.DrawString(
@@ -53,7 +54,7 @@ namespace GustUI.Elements
                 }
             }            
 
-            base.Draw(spriteBatch, parent);
+            base.Draw(spriteBatch);
         }
     }
 }

@@ -27,12 +27,12 @@ public class FilledRectangleElement : RectangleElement
             }
         }
     }
-    public override void Draw(SpriteBatch spriteBatch, Element parent = null)
+    public override void Draw(SpriteBatch spriteBatch)
     {
         BackgroundFillTrait fill = ElementTrait<BackgroundFillTrait>();
         Ensure.NotNull(fill, nameof(fill));
 
-        TVVector actualPosition = this.GetActualPosition(parent);
+        TVVector actualPosition = this.GetActualPosition();
         TVVector size = this.ElementTrait<SizeTrait>().Value();
         Rectangle rect = new Rectangle(actualPosition.X.AsInt(), actualPosition.Y.AsInt(), size.X.AsInt(), size.Y.AsInt());
         Ensure.NotNull(rect, nameof(rect));
@@ -56,7 +56,6 @@ public class FilledRectangleElement : RectangleElement
                 }
         }
         
-        base.Draw(spriteBatch, parent);
+        base.Draw(spriteBatch);
     }
 }
-

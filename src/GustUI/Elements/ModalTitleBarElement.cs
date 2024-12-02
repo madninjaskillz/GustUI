@@ -13,11 +13,13 @@ namespace GustUI.Elements
     [ElementTraits(typeof(FontTrait), typeof(OnExitTrait))]
     public class ModalTitleBarElement : FilledRectangleElement
     {
-        private TextElement textElement = new TextElement();
-        private BasicButtonElement closeButton = new BasicButtonElement();
+        private TextElement textElement;
+        private BasicButtonElement closeButton;
 
         public ModalTitleBarElement()
         {
+            textElement = CreateElement<TextElement>();
+            closeButton = CreateElement<BasicButtonElement>();
             Sync(textElement);
             Sync(closeButton);
             Setup();
@@ -25,11 +27,13 @@ namespace GustUI.Elements
 
         public ModalTitleBarElement(string title, TVVector position = null, TVVector size = null)
         {
+            textElement = CreateElement<TextElement>();
+            closeButton = CreateElement<BasicButtonElement>();
             Sync(textElement);
             Sync(closeButton);
             //Sync();
             textElement.Set<TextTrait>(new TVText(title));
-            
+
 
             Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Green, Color.DarkGreen, Direction.Vertically));
             Set<BorderSizeTrait>(new TVInt(0));
@@ -57,7 +61,7 @@ namespace GustUI.Elements
 
 
             this.AddChild(closeButton, "closeButton");
-            this.AddChild(textElement,"titleText");
+            this.AddChild(textElement, "titleText");
         }
     }
 }

@@ -16,9 +16,10 @@ namespace GustUI.Elements;
 
 public class Element
 {
+    public Element Parent { get; set; } = null;
     public string ElementName { get; set; }
     private Dictionary<Type, object> traits = new Dictionary<Type, object>();
-    private Dictionary<string , Tuple<Element,string>> traitMapping = new Dictionary<string, Tuple<Element, string>>();
+    private Dictionary<string, Tuple<Element, string>> traitMapping = new Dictionary<string, Tuple<Element, string>>();
     public Element()
     {
         traits = Reflection.GetTraitsFromAttributes(this.GetType());
@@ -26,6 +27,13 @@ public class Element
         foreach (KeyValuePair<Type, object> trait in traits)
         {
         }
+    }
+
+    public T CreateElement<T>() where T : Element
+    {
+        var result = Activator.CreateInstance<T>();
+        ((Element)result).Parent = this;
+        return result as T;
     }
 
     public void Sync()
@@ -45,12 +53,17 @@ public class Element
         traitMapping.Add(parent, new Tuple<Element, string>(child, childName));
     }
 
-    public void MapTraitToChild<TraitType>(Element child, string childTraitType) {
+    public void MapTraitToChild<TraitType>(Element child, string childTraitType)
+    {
         AddChildTraitMapping(typeof(TraitType).Name, child, childTraitType);
     }
 
     public void Sync(Element child)
     {
+        if (child==null)
+        {
+            return;
+        }
         var thisTraits = Reflection.GetAllTraitTypes(this.GetType()).ToList();
         var childTraits = Reflection.GetAllTraitTypes(child.GetType()).ToList();
 
@@ -62,7 +75,7 @@ public class Element
             object trait = traits.Values.First(x => x.GetType() == sharedTraitType);
             Log.This("Syncing trait: " + trait + " -> " + sharedTraitType);
             MethodInfo theMethod = sharedTraitType.GetMethod("SyncSubscribe");
-            
+
             object[] pr = new object[] { child };
             theMethod.Invoke(trait, pr);
         }
@@ -77,7 +90,7 @@ public class Element
 
         foreach (var x in traitMapping.Where(p => p.Value.Item1 == child))
         {
-            
+
             string sourceName = x.Key;
             string targetName = x.Value.Item2;
 
@@ -101,7 +114,7 @@ public class Element
 
             Type traitType = trait.GetType();
 
-            Log.This("Trait object: " + trait+", '"+ traitType+"'");
+            Log.This("Trait object: " + trait + ", '" + traitType + "'");
 
             foreach (var m in traitType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic |
                               BindingFlags.Static | BindingFlags.Instance))
@@ -120,7 +133,8 @@ public class Element
 
             MethodInfo theMethod = traitType.GetMethod("SubscribeMapped");
 
-            if (theMethod.NotNull(theMethod.Name)){
+            if (theMethod.NotNull(theMethod.Name))
+            {
                 Log.This("Using method: " + theMethod.Name);
                 //Debugging.DebugBreak();
                 object[] pr = new object[] { child, targetType };
@@ -167,29 +181,29 @@ public class Element
 
     public bool Set<TraitType>(TraitValue value) => (bool)typeof(TraitType).GetMethod("Set").Invoke(this.ElementTraitByTypeFromObject(typeof(TraitType)), new object[] { value });
 
-    public virtual void Draw(SpriteBatch spriteBatch, Element parent=null)
+    public virtual void Draw(SpriteBatch spriteBatch)
     {
-        
+
         if (this.HasTrait<ChildrenTrait>())
         {
             foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
             {
-                child.Draw(spriteBatch, this);
+                child.Draw(spriteBatch);
             }
         }
 
         //for now lets call update from draw to test logic.
-        this.Update(parent);
+        //this.Update(parent);
     }
 
     MouseState previousMouseState = Mouse.GetState();
     public void Update(Element parent = null)
     {
-      
+
         MouseState mouseState = Mouse.GetState();
         if (parent != null && HasTrait<SizeTrait>() && HasTrait<PositionTrait>())
         {
-            TVVector actualPosition = this.GetActualPosition(parent);
+            TVVector actualPosition = this.GetActualPosition();
             TVVector size = ElementTrait<SizeTrait>().Value();
 
             if (mouseState.Position.X >= actualPosition.X &&
