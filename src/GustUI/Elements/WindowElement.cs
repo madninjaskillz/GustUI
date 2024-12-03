@@ -15,6 +15,7 @@ public class WindowElement : FilledRectangleElement
     public WindowElement(GameWindow gameWindow, GraphicsDevice graphicsDevice, VirtualContent content) : base()
     {
         Resources.StaticResources = new Resources(graphicsDevice, content, this);
+        Resources.StaticResources.Theme = new Theme();
 
         gameWindow.ClientSizeChanged += GameWindow_ClientSizeChanged;
         ElementTrait<SizeTrait>().Set(new TVVector(gameWindow.ClientBounds.Width, gameWindow.ClientBounds.Height));

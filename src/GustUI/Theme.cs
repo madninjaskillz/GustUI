@@ -1,7 +1,7 @@
 ﻿using GustUI.TraitValues;
+using Microsoft.Xna.Framework;
 using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -15,6 +15,11 @@ namespace GustUI
         public TVFont AltSymbolFont = new TVFont() { Family = "SegoeIcons.ttf", Size = 32, Border = 0 };
 
         public Icons Icons = new Icons();
+
+        public TVFill PositiveButtonFill = new TVFillSimpleGradient(Color.DarkGreen, Color.DarkGreen * 0.5f, Direction.Vertically);
+        public TVFill NegativeButtonFill = new TVFillSimpleGradient(Color.DarkRed, Color.DarkRed * 0.5f, Direction.Vertically);
+        public TVFill NeutralButtonFill = new TVFillSimpleGradient(Color.Gray, Color.Gray * 0.5f, Direction.Vertically);
+
     }
 
     public class Icons

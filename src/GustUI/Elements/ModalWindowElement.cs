@@ -18,6 +18,10 @@ namespace GustUI.Elements
         private ModalTitleBarElement titleBarElement;
         private List<BasicButtonElement> buttons = new List<BasicButtonElement>();
         private FilledRectangleElement buttonBackgroundElement;
+        private FilledRectangleElement backdropTop;
+        private FilledRectangleElement backdropBottom;
+        private FilledRectangleElement backdropLeft;
+        private FilledRectangleElement backdropRight;
         public ModalWindowElement()
         {
             textElement = this.AddChildElement<TextElement>();
@@ -61,6 +65,14 @@ namespace GustUI.Elements
             {
                 buttonBackgroundElement = this.AddChildElement<FilledRectangleElement>();
             }
+
+            backdropBottom = this.AddChildElement<FilledRectangleElement>();
+            backdropTop = this.AddChildElement<FilledRectangleElement>();
+            backdropLeft = this.AddChildElement<FilledRectangleElement>();
+            backdropRight = this.AddChildElement<FilledRectangleElement>();
+
+
+
             Setup();
         }
 
@@ -75,6 +87,7 @@ namespace GustUI.Elements
             textElement.Set<SizeTrait>(new TVVector(size.X - 20, 0));
 
             textElement.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment() { Alignment = HorizontalAlignment.Left });
+
 
             float buttonHeight = (this.buttons.Count > 0 ? 80 : 10);
             float textSize = textElement.CalculatedSize().Y;
@@ -102,6 +115,26 @@ namespace GustUI.Elements
 
                 }
             }
+            Vector2 calculatedModalSize = size.AsXna;
+            Vector2 actualPosition = this.GetActualPosition().AsXna;
+            Vector2 windowSize = Resources.StaticResources.RootWindow.GetSize().AsXna;
+
+            backdropLeft.Set<PositionTrait>(new TVVector(-actualPosition));
+            backdropLeft.Set<SizeTrait>(new TVVector(actualPosition.X, windowSize.Y));
+            backdropLeft.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Black * 0.5f));
+
+            backdropRight.Set<PositionTrait>(new TVVector(new Vector2(calculatedModalSize.X,-actualPosition.Y)));
+            backdropRight.Set<SizeTrait>(new TVVector(windowSize.X-(actualPosition.X+calculatedModalSize.X), windowSize.Y));
+            backdropRight.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Black * 0.5f));
+
+            backdropTop.Set<PositionTrait>(new TVVector(0, -actualPosition.Y));
+            backdropTop.Set<SizeTrait>(new TVVector(calculatedModalSize.X, actualPosition.Y));
+            backdropTop.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Black * 0.5f));
+
+            backdropBottom.Set<PositionTrait>(new TVVector(0, calculatedModalSize.Y));
+            backdropBottom.Set<SizeTrait>(new TVVector(calculatedModalSize.X, windowSize.Y-(actualPosition.Y+calculatedModalSize.Y)));
+            backdropBottom.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Black * 0.5f));
+
         }
 
     }
