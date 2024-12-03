@@ -19,6 +19,6 @@ namespace GustUI
 
     public class Icons
     {
-        public String CloseIcon = "";
+        public String CloseIcon = Char.ConvertFromUtf32((int)UIFont.Symbol.Cancel);
     }
 }

@@ -10,6 +10,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace GustUI.Elements
 {
@@ -34,16 +35,16 @@ namespace GustUI.Elements
                 Color foreground = this.ElementTrait<ForegroundColorTrait>().Value().AsXna;
                 var font = Resources.StaticResources.FontManager.LoadFont(fontName, fontSize);
 
-                if (Ensure.NotNull(font, nameof(font)) &&
+
+                    if (Ensure.NotNull(font, nameof(font)) &&
                 Ensure.NotNull(text, nameof(text)) &&
                 Ensure.NotNull(foreground, nameof(foreground)) &&
                 Ensure.NotNull(border, nameof(border)))
                 {
 
                     Vector2 thisSize = font.MeasureString(text) * GustConstants.FontScale;
-
+                    //this.Set<SizeTrait>(new TVVector(thisSize.X, thisSize.Y));
                     TVVector actualPosition = this.GetActualPosition(thisSize);
-
 
                     spriteBatch.DrawString(
                         font,
@@ -55,6 +56,18 @@ namespace GustUI.Elements
             }            
 
             base.Draw(spriteBatch);
+        }
+
+        public Vector2 CalculatedSize()
+        {
+            string fontName = this.ElementTrait<FontTrait>().Value().Family;
+            float fontSize = this.ElementTrait<FontTrait>().Value().Size;
+            string text = this.ElementTrait<TextTrait>().Value().Text;
+
+            var font = Resources.StaticResources.FontManager.LoadFont(fontName, fontSize);
+
+            var result = font.MeasureString(text) * GustConstants.FontScale;
+            return result;
         }
     }
 }

@@ -36,7 +36,7 @@ namespace GustUI.Managers
                 return cachedFont;
             }
 
-            var bake = TtfFontBaker.Bake(content.ReadAllBytes(path), size / GustConstants.FontScale, 1024, 1024, new[] { CharacterRange.BasicLatin });
+            var bake = TtfFontBaker.Bake(content.ReadAllBytes(path), size / GustConstants.FontScale, 1024, 1024, new[] { CharacterRange.BasicLatin, new CharacterRange((char)Enum.GetValues(typeof(UIFont.Symbol)).Cast<UIFont.Symbol>().Min(), (char)Enum.GetValues(typeof(UIFont.Symbol)).Cast<UIFont.Symbol>().Max()) });
 
             var font = bake.CreateSpriteFont(graphicsDevice);
 

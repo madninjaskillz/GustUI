@@ -7,10 +7,10 @@ using System.Threading.Tasks;
 
 namespace GustUI
 {
-    internal static class Log
+    public static class Log
     {
-        internal const bool ENABLED = true;
-        internal static void This(string message)
+        public const bool ENABLED = true;
+        public static void This(string message)
         {
             if (ENABLED)
             {

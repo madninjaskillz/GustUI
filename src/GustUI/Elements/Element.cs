@@ -10,15 +10,20 @@ using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Metadata;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace GustUI.Elements;
 
 
 public class Element
 {
+    [JsonIgnore]
     public Element Parent { get; set; } = null;
-    public string ElementName { get; set; }
+    private string elementName = null;
+    public string ElementName { get => elementName ?? this.ToString(); set => elementName = value; }
     private Dictionary<Type, object> traits = new Dictionary<Type, object>();
+
     private Dictionary<string, Tuple<Element, string>> traitMapping = new Dictionary<string, Tuple<Element, string>>();
     public Element()
     {
@@ -29,13 +34,35 @@ public class Element
         }
     }
 
-    public T CreateElement<T>() where T : Element
+    public T AddChildElement<T>(string name = null) where T : Element
     {
         var result = Activator.CreateInstance<T>();
         ((Element)result).Parent = this;
+
+        if (this.HasTrait<ChildrenTrait>())
+        {
+            this.AddChild(result, result.ElementName);
+        }
+
         return result as T;
     }
 
+    public void AddChildElement(Element element, string overrideName = null)
+    {
+        element.Parent = this;
+        if (this.HasTrait<ChildrenTrait>())
+        {
+            this.AddChild(element, element.ElementName);
+        }
+    }
+
+    public void Kill()
+    {
+        if (Parent != null)
+        {
+            Parent.Children.Remove(this);
+        }
+    }
     public void Sync()
     {
         if (HasTrait<ChildrenTrait>())
@@ -60,7 +87,7 @@ public class Element
 
     public void Sync(Element child)
     {
-        if (child==null)
+        if (child == null)
         {
             return;
         }
@@ -162,11 +189,16 @@ public class Element
                 return ETV<ChildrenTrait, TVElements>();
             }
 
-            throw new Exception("Element doesnt have children");
+            return null;
         }
     }
 
-    public void AddChild(Element child, string name) => Children.Add(child, name);
+    public void AddChild(Element child, string name)
+    {
+        child.ElementName = name;
+        Children.Add(child, name);
+        child.Parent = this;
+    }
 
     public TraitTypeValue ETV<TraitType, TraitTypeValue>()
         where TraitTypeValue : TraitValue
@@ -231,6 +263,14 @@ public class Element
             }
         }
         previousMouseState = mouseState;
+
+        if (this.HasTrait<ChildrenTrait>())
+        {
+            foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
+            {
+                child.Update(this);
+            }
+        }
     }
 
     internal void Sync(object sender, TraitChangedEventArgs e, object child)
@@ -243,5 +283,4 @@ public class Element
         object[] pr = new object[] { rc };
         theMethod.Invoke(localCopy, pr);
     }
-
 }

@@ -18,8 +18,8 @@ namespace GustUI.Elements
 
         public ModalTitleBarElement()
         {
-            textElement = CreateElement<TextElement>();
-            closeButton = CreateElement<BasicButtonElement>();
+            textElement = AddChildElement<TextElement>();
+            closeButton = AddChildElement<BasicButtonElement>();
             Sync(textElement);
             Sync(closeButton);
             Setup();
@@ -27,8 +27,8 @@ namespace GustUI.Elements
 
         public ModalTitleBarElement(string title, TVVector position = null, TVVector size = null)
         {
-            textElement = CreateElement<TextElement>();
-            closeButton = CreateElement<BasicButtonElement>();
+            textElement = AddChildElement<TextElement>();
+            closeButton = AddChildElement<BasicButtonElement>();
             Sync(textElement);
             Sync(closeButton);
             //Sync();
@@ -43,11 +43,12 @@ namespace GustUI.Elements
             Set<SizeTrait>(size ?? new TVVector(0, 0));
 
             closeButton.Set<SizeTrait>(new TVVector(size.Y, size.Y));
-            closeButton.Set<TextTrait>(new TVText("X"));
-            closeButton.Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
+            closeButton.Set<TextTrait>(Resources.StaticResources.Theme.Icons.CloseIcon.ToTextTrait());
+            closeButton.Set<FontTrait>(Resources.StaticResources.Theme.AltSymbolFont);
             closeButton.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Red, Color.DarkRed, Direction.Vertically));
             closeButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
             closeButton.Set<PositionTrait>(new TVVector(size.X - size.Y, 0));
+            closeButton.Set<OnClickTrait>(new TVEvent((x) => Parent.Kill()));
 
             Setup();
         }

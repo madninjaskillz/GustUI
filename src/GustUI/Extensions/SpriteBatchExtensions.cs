@@ -33,8 +33,9 @@ namespace GustUI.Extensions
                     }
                 }
             }
-
+            
             spriteBatch.DrawString(font, text, position, color, 0, Vector2.Zero, GustConstants.FontScale, SpriteEffects.None, 1f);
+
         }
 
         public static void DrawLine(this SpriteBatch spriteBatch, Vector2 start, Vector2 end, Color color)
@@ -58,11 +59,11 @@ namespace GustUI.Extensions
         {
             for (int i = 0; i < borderSize; i++)
             {
-                spriteBatch.Draw(Resources.StaticResources.Pixel, new Rectangle(rectangle.Left, rectangle.Top+i, rectangle.Width, 1), color);
-                spriteBatch.Draw(Resources.StaticResources.Pixel, new Rectangle(rectangle.Left, rectangle.Bottom-i, rectangle.Width, 1), color);
+                spriteBatch.Draw(Resources.StaticResources.Pixel, new Rectangle(rectangle.Left, rectangle.Top + i, rectangle.Width, 1), color);
+                spriteBatch.Draw(Resources.StaticResources.Pixel, new Rectangle(rectangle.Left, rectangle.Bottom - i, rectangle.Width, 1), color);
 
-                spriteBatch.Draw(Resources.StaticResources.Pixel, new Rectangle(rectangle.Left+i, rectangle.Top, 1, rectangle.Height), color);
-                spriteBatch.Draw(Resources.StaticResources.Pixel, new Rectangle(rectangle.Right-i, rectangle.Top, 1, rectangle.Height), color);
+                spriteBatch.Draw(Resources.StaticResources.Pixel, new Rectangle(rectangle.Left + i, rectangle.Top, 1, rectangle.Height), color);
+                spriteBatch.Draw(Resources.StaticResources.Pixel, new Rectangle(rectangle.Right - i, rectangle.Top, 1, rectangle.Height), color);
             }
         }
 

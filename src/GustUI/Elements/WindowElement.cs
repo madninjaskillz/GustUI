@@ -14,12 +14,12 @@ public class WindowElement : FilledRectangleElement
 {
     public WindowElement(GameWindow gameWindow, GraphicsDevice graphicsDevice, VirtualContent content) : base()
     {
-        Resources.StaticResources = new Resources(graphicsDevice, content);
+        Resources.StaticResources = new Resources(graphicsDevice, content, this);
 
         gameWindow.ClientSizeChanged += GameWindow_ClientSizeChanged;
         ElementTrait<SizeTrait>().Set(new TVVector(gameWindow.ClientBounds.Width, gameWindow.ClientBounds.Height));
 
-        this.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Black));
+        this.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.DarkBlue,Color.Purple, Direction.Vertically));
         this.Set<BorderColorTrait, TVColor>(new TVColor(Color.White));
         this.Set<BorderSizeTrait, TVInt>(new TVInt(0));
     }

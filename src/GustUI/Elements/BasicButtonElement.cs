@@ -19,15 +19,20 @@ namespace GustUI.Elements
         private TextElement textElement;
         public BasicButtonElement()
         {
-            textElement = this.CreateElement<TextElement>();
+            textElement = this.AddChildElement<TextElement>();
             Sync(textElement);
 
             Setup();
         }
 
-        public BasicButtonElement(TVFont font, string text, Color foreground, TVFill background, TVVector position = null, TVVector size = null)
+        public BasicButtonElement(string text, Color foreground, TVFill background, TVVector position = null, TVVector size = null, TVEvent onClick = null) : this(Resources.StaticResources.Theme.UiFont, text, foreground, background, position, size, onClick)
         {
-            textElement = this.CreateElement<TextElement>();
+            
+        }
+
+        public BasicButtonElement(TVFont font, string text, Color foreground, TVFill background, TVVector position = null, TVVector size = null, TVEvent onClick = null)
+        {
+            textElement = this.AddChildElement<TextElement>();
             Sync(textElement);
 
             Set<FontTrait>(font);
@@ -36,7 +41,7 @@ namespace GustUI.Elements
             Set<TextTrait>(new TVText(text));
             Set<PositionTrait>(position ?? new TVVector(0, 0));
             Set<SizeTrait>(size ?? new TVVector(0, 0));
-
+            Set<OnClickTrait>(onClick);
 
             Setup();
         }
@@ -47,7 +52,7 @@ namespace GustUI.Elements
             textElement.Set<VerticalAlignmentTrait, TVVerticalAlignment>(new TVVerticalAlignment { Alignment = VerticalAlignment.Center });
 
             Set<BorderSizeTrait, TVInt>(new TVInt(2));
-            this.AddChild(textElement, "buttonText");
+            this.AddChild(textElement, $"button Text: "+this.ElementTrait<TextTrait>().Value().Text);
         }
 
 
