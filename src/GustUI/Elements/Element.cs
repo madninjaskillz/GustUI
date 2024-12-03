@@ -231,7 +231,7 @@ public class Element
     }
 
     MouseState previousMouseState = Mouse.GetState();
-    public void Update(Element parent = null)
+    public virtual void Update(Element parent = null)
     {
 
         MouseState mouseState = Mouse.GetState();
