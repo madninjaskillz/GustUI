@@ -67,7 +67,7 @@ public class Element
     {
         if (HasTrait<ChildrenTrait>())
         {
-            foreach (var child in ElementTrait<ChildrenTrait>().Value().Items)
+            foreach (Element child in ElementTrait<ChildrenTrait>().Value().Items)
             {
                 Sync(child);
                 SyncMappings(child);
@@ -100,11 +100,13 @@ public class Element
         foreach (Type sharedTraitType in sharedTraitTypes)
         {
             object trait = traits.Values.First(x => x.GetType() == sharedTraitType);
-            Log.This("Syncing trait: " + trait + " -> " + sharedTraitType);
-            MethodInfo theMethod = sharedTraitType.GetMethod("SyncSubscribe");
+            if (!(trait is PositionTrait))
+            {
+                MethodInfo theMethod = sharedTraitType.GetMethod("SyncSubscribe");
 
-            object[] pr = new object[] { child };
-            theMethod.Invoke(trait, pr);
+                object[] pr = new object[] { child };
+                theMethod.Invoke(trait, pr);
+            }
         }
 
         SyncMappings(child);

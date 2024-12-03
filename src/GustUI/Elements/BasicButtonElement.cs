@@ -42,7 +42,7 @@ namespace GustUI.Elements
             Set<PositionTrait>(position ?? new TVVector(0, 0));
             Set<SizeTrait>(size ?? new TVVector(0, 0));
             Set<OnClickTrait>(onClick);
-
+            
             Setup();
         }
 

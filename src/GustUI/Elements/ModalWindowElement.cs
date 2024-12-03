@@ -72,6 +72,9 @@ namespace GustUI.Elements
             textElement.Set<TextTrait>(new TVText(body));
             textElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
             textElement.Set<ForegroundColorTrait>(new TVColor(Color.Black));
+            textElement.Set<SizeTrait>(new TVVector(size.X - 20, 0));
+
+            textElement.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment() { Alignment = HorizontalAlignment.Left });
 
             float buttonHeight = (this.buttons.Count > 0 ? 80 : 10);
             float textSize = textElement.CalculatedSize().Y;
