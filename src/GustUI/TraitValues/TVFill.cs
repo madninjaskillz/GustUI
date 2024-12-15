@@ -13,6 +13,12 @@ namespace GustUI.TraitValues
         public Texture2D Texture { get; set; }
     }
 
+    public class TVSmartFill : TVFill
+    {
+        private ButtonStates buttonStates;
+        public ButtonStates States { get; set; }
+    }
+
     public class TVFillImage : TVFill
     {
         

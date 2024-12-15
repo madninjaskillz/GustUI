@@ -20,7 +20,7 @@ namespace GustUI.Extensions
                 return element.ElementTrait<SizeTrait>().Value();
             }
         }
-        public static TVVector GetActualPosition(this Element element, Vector2? thisSize = null, bool managedHorizontalJustification=false )
+        public static TVVector GetActualPosition(this Element element, Vector2? thisSize = null, bool managedHorizontalJustification=false)
         {
             Element parentElement = element.Parent;
             TVVector actualPosition = new TVVector(0, 0);

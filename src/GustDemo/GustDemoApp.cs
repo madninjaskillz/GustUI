@@ -5,6 +5,7 @@ using GustUI.Elements;
 using GustUI.Traits;
 using GustUI.TraitValues;
 using System.Diagnostics;
+using GustUI;
 
 namespace GustDemo
 {
@@ -13,6 +14,7 @@ namespace GustDemo
         private GraphicsDeviceManager _graphics;
         private SpriteBatch _spriteBatch;
         private WindowElement _window;
+        private VirtualContent virtualContent;
 
         public TVFont UiFont { get; private set; }
 
@@ -34,12 +36,13 @@ namespace GustDemo
 
         protected override void LoadContent()
         {
+            virtualContent = new VirtualContent("Content");
             _spriteBatch = new SpriteBatch(GraphicsDevice);
-            _window = new WindowElement(this.Window, GraphicsDevice);
+            _window = new WindowElement(this.Window, GraphicsDevice,virtualContent);
 
             UiFont = new TVFont() { Family = "C:\\Windows\\Fonts\\segoeuisl.ttf", Size = 72, Border = 0 };
 
-            FilledRectangleElement rectangle = new(300, 300, 200, 80, new TVFillSimpleGradient(GraphicsDevice,
+            FilledRectangleElement rectangle = new(300, 300, 200, 80, new TVFillSimpleGradient(
                                                                                                Color.Red,
                                                                                                Color.Blue,
                                                                                                Direction.Horizontally), 2, Color.Red);
@@ -48,7 +51,7 @@ namespace GustDemo
                 UiFont, 
                 "hello",
                 Color.White,
-                new TVFillSimpleGradient(GraphicsDevice, Color.Blue,Color.Black, Direction.Vertically),
+                new TVFillSimpleGradient(Color.Blue,Color.Black, Direction.Vertically),
                 new TVVector(40,40),
                 new TVVector(200,80));
 
@@ -59,8 +62,8 @@ namespace GustDemo
                 Debug.WriteLine(sender);
             }));
 
-            _window.AddChild(button);
-            _window.AddChild(rectangle);
+            _window.AddChild(button, "button");
+            _window.AddChild(rectangle, "rectangle");
 
             // TODO: use this.Content to load your game content here
         }
@@ -79,7 +82,7 @@ namespace GustDemo
             GraphicsDevice.Clear(Color.CornflowerBlue);
 
             _spriteBatch.Begin();
-            _window.Draw(_spriteBatch, null);
+            _window.Draw(_spriteBatch);
             _spriteBatch.End();
             // TODO: Add your drawing code here
 

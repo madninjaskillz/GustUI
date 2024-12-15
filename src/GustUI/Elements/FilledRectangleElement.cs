@@ -4,6 +4,7 @@ using GustUI.Traits;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using static GustUI.Managers.InputManager;
 
 namespace GustUI.Elements;
 
@@ -36,8 +37,26 @@ public class FilledRectangleElement : RectangleElement
         TVVector size = this.ElementTrait<SizeTrait>().Value();
         Rectangle rect = new Rectangle(actualPosition.X.AsInt(), actualPosition.Y.AsInt(), size.X.AsInt(), size.Y.AsInt());
         Ensure.NotNull(rect, nameof(rect));
-        
-        switch (fill.Value())
+
+        var fillType = fill.Value();
+
+        if (fillType is TVSmartFill smartFill)
+        {
+            switch (Resources.StaticResources.InputManager.GetElementState(this))
+            {
+                case ElementState.Hovered:
+                    fillType = smartFill.States.HoveredFill;
+                    break;
+                case ElementState.Pressed:
+                    fillType = smartFill.States.PressedFill;
+                    break;
+                default:
+                    fillType = smartFill.States.NormalFill;
+                    break;
+            }
+        }
+
+        switch (fillType)
         {
             case TVFillSolidColor solidColor:
                 {

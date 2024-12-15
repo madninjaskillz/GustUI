@@ -22,11 +22,18 @@ namespace GustUI
             Pixel = new Texture2D(graphicsDevice, 1, 1);
             Pixel.SetData<Color>(new Color[1] { Color.White });
 
-            FontManager = new FontManager(graphicsDevice, content);  
+            FontManager = new FontManager(graphicsDevice, content);
+            InputManager = new InputManager();
+        }
+
+        public void Update()
+        {
+            InputManager.Update();
+            RootWindow.Update();
         }
 
         public FontManager FontManager;
-
+        public InputManager InputManager;
         public Theme Theme;
 
         public static Resources StaticResources;

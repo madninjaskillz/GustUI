@@ -2,6 +2,7 @@
 using GustUI.Extensions;
 using GustUI.Traits;
 using GustUI.TraitValues;
+using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using System;
@@ -23,6 +24,7 @@ public class Element
     private string elementName = null;
     public string ElementName { get => elementName ?? this.ToString(); set => elementName = value; }
     private Dictionary<Type, object> traits = new Dictionary<Type, object>();
+    public int Depth { get; set; } = 0;
 
     private Dictionary<string, Tuple<Element, string>> traitMapping = new Dictionary<string, Tuple<Element, string>>();
     public Element()
@@ -128,7 +130,6 @@ public class Element
             Type targetType = childTraits.First(t => t.Name == targetName);
             Log.This("Mapping trait (type): " + sourceType + " to " + targetType);
 
-            //object trait = traits.First(x=>x.Key.GetType().Name == sourceName).Value;
 
             object trait = null;
 
@@ -157,8 +158,6 @@ public class Element
             {
                 Log.This("sourceType Method: " + m.Name);
             }
-
-
 
             MethodInfo theMethod = traitType.GetMethod("SubscribeMapped");
 
@@ -213,11 +212,14 @@ public class Element
 
     public bool Set<TraitType, TraitValueType>(TraitValueType value) where TraitValueType : TraitValue where TraitType : Trait<TraitValueType> => ElementTrait<TraitType>().Set(value);
 
-    public bool Set<TraitType>(TraitValue value) => (bool)typeof(TraitType).GetMethod("Set").Invoke(this.ElementTraitByTypeFromObject(typeof(TraitType)), new object[] { value });
+    public bool Set<TraitType>(TraitValue value)
+    {
+        var method = typeof(TraitType).GetMethod("Set");
+        return (bool)method.Invoke(this.ElementTraitByTypeFromObject(typeof(TraitType)), new object[] { value });
+    }
 
     public virtual void Draw(SpriteBatch spriteBatch)
     {
-
         if (this.HasTrait<ChildrenTrait>())
         {
             foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
@@ -225,46 +227,92 @@ public class Element
                 child.Draw(spriteBatch);
             }
         }
-
-        //for now lets call update from draw to test logic.
-        //this.Update(parent);
     }
 
     MouseState previousMouseState = Mouse.GetState();
-    public virtual void Update(Element parent = null)
-    {
 
-        MouseState mouseState = Mouse.GetState();
-        if (parent != null && HasTrait<SizeTrait>() && HasTrait<PositionTrait>())
+    public bool BeingDragged = false;
+    private Vector2 dragOffset = Vector2.Zero;
+    internal void handleStartDrag(TVEventArgs x)
+    {
+        MoveToFront();
+        BeingDragged = true;
+        if (x is ClickEventArgs clickEventArgs)
+        {
+            dragOffset = clickEventArgs.GlobalMousePosition.AsXna;
+
+        }
+    }
+
+    internal void MoveToFront()
+    {
+        this.Depth = Resources.StaticResources.RootWindow.Children.Items.Max(x => x.Depth) + 1;
+
+    }
+
+    internal void handleStopDrag(TVEventArgs x)
+    {
+        BeingDragged = false;
+    }
+
+    private bool IsObstructedAtPoint(Vector2 point, Element parent = null)
+    {
+        bool foundSource = false;
+        foreach (var element in (parent != null ? parent : Resources.StaticResources.RootWindow).Children.Items)
+        {
+            if (element == this)
+            {
+                foundSource = true;
+                continue;
+            }
+            if (element.HasTrait<SizeTrait>() && element.HasTrait<PositionTrait>())
+            {
+                TVVector actualPosition = element.GetActualPosition();
+                TVVector size = element.ElementTrait<SizeTrait>().Value();
+                if (point.X >= actualPosition.X &&
+                    point.X <= actualPosition.X + size.X &&
+                    point.Y >= actualPosition.Y &&
+                    point.Y <= actualPosition.Y + size.Y)
+                {
+                    if (foundSource)
+                    {
+                        return true;
+                    }
+                }
+            }
+            if (foundSource && element != this && element.HasTrait<ChildrenTrait>())
+            {
+                if (IsObstructedAtPoint(point, element))
+                {
+                    return true;
+                }
+
+
+            }
+        }
+
+        return false;
+    }
+
+    public bool IsMouseOver(Vector2 position)
+    {
+        if (HasTrait<SizeTrait>() && HasTrait<PositionTrait>())
         {
             TVVector actualPosition = this.GetActualPosition();
             TVVector size = ElementTrait<SizeTrait>().Value();
 
-            if (mouseState.Position.X >= actualPosition.X &&
-                mouseState.Position.X <= actualPosition.X + size.X &&
-                mouseState.Position.Y >= actualPosition.Y &&
-                mouseState.Position.Y <= actualPosition.Y + size.Y)
-            {
-                if (previousMouseState.LeftButton == ButtonState.Released &&
-                    mouseState.LeftButton == ButtonState.Pressed)
-                {
-                    if (HasTrait<OnClickTrait>())
-                    {
-                        TVEvent act = ElementTrait<OnClickTrait>().Value();
-                        if (act?.TriggerAction != null)
-                        {
-                            act.TriggerAction(new ClickEventArgs
-                            {
-                                GlobalMousePosition = new TVVector(mouseState.X, mouseState.Y),
-                                RelativeMousePosition = new TVVector(mouseState.X - actualPosition.X, mouseState.Y - actualPosition.Y),
-                                MouseState = mouseState
-                            });
-                        }
-                    }
-                }
-            }
+            return
+                position.X >= actualPosition.X &&
+                position.X <= actualPosition.X + size.X &&
+                position.Y >= actualPosition.Y &&
+                position.Y <= actualPosition.Y + size.Y;
         }
-        previousMouseState = mouseState;
+        return false;
+    }
+
+    public virtual void Update(Element parent = null)
+    {
+        MouseState mouseState = Mouse.GetState();
 
         if (this.HasTrait<ChildrenTrait>())
         {
@@ -273,6 +321,27 @@ public class Element
                 child.Update(this);
             }
         }
+
+        if (BeingDragged)
+        {
+            var delta = mouseState.Position.ToVector2() - dragOffset;
+            dragOffset = mouseState.Position.ToVector2();
+            ElementTrait<PositionTrait>().Value().X += (int)delta.X;
+            ElementTrait<PositionTrait>().Value().Y += (int)delta.Y;
+        }
+
+        previousMouseState = mouseState;
+    }
+
+    internal ClickEventArgs GetClickArgs(MouseState mouseState)
+    {
+        TVVector actualPosition = this.GetActualPosition();
+        return new ClickEventArgs
+        {
+            GlobalMousePosition = new TVVector(mouseState.X, mouseState.Y),
+            RelativeMousePosition = new TVVector(mouseState.X - actualPosition.X, mouseState.Y - actualPosition.Y),
+            MouseState = mouseState
+        };
     }
 
     internal void Sync(object sender, TraitChangedEventArgs e, object child)

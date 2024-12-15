@@ -7,7 +7,7 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace GustUI.Elements;
 
-[ElementTraits(typeof(PositionTrait), typeof(SizeTrait), typeof(ChildrenTrait), typeof(BorderColorTrait), typeof(BorderSizeTrait))]
+[ElementTraits(typeof(PositionTrait), typeof(SizeTrait), typeof(ChildrenTrait), typeof(BorderColorTrait), typeof(BorderSizeTrait), typeof(OnMousePress), typeof(OnMouseRelease))]
 public class RectangleElement : Element
 {
     public override void Draw(SpriteBatch spriteBatch)

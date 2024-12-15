@@ -3,36 +3,30 @@ using GustUI.Traits;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace GustUI.Elements
 {
     [ElementTraits(typeof(FontTrait), typeof(OnExitTrait))]
     public class ModalTitleBarElement : FilledRectangleElement
     {
-        private TextElement textElement;
+        private BasicButtonElement dragBarElement;
         private BasicButtonElement closeButton;
 
         public ModalTitleBarElement()
         {
-            textElement = AddChildElement<TextElement>();
+            dragBarElement = AddChildElement<BasicButtonElement>();
             closeButton = AddChildElement<BasicButtonElement>();
-            Sync(textElement);
             Sync(closeButton);
+            Sync(dragBarElement);
             Setup();
         }
 
         public ModalTitleBarElement(string title, TVVector position = null, TVVector size = null)
         {
-            textElement = AddChildElement<TextElement>();
+            dragBarElement = AddChildElement<BasicButtonElement>();
             closeButton = AddChildElement<BasicButtonElement>();
-            Sync(textElement);
             Sync(closeButton);
-            //Sync();
-            textElement.Set<TextTrait>(new TVText(title));
+            Sync(dragBarElement);
 
 
             Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Green, Color.DarkGreen, Direction.Vertically));
@@ -50,19 +44,27 @@ namespace GustUI.Elements
             closeButton.Set<PositionTrait>(new TVVector(size.X - size.Y, 0));
             closeButton.Set<OnClickTrait>(new TVEvent((x) => Parent.Kill()));
 
+            dragBarElement.Set<SizeTrait>(new TVVector(size.X - size.Y, size.Y));
+            dragBarElement.Set<PositionTrait>(new TVVector(0, 0));
+            dragBarElement.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Green, Color.DarkGreen, Direction.Vertically));
+            dragBarElement.Set<TextTrait>(new TVText(title));
+            dragBarElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
+            dragBarElement.Set<ForegroundColorTrait>(new TVColor(Color.White));
+            dragBarElement.Set<OnMousePress>(new TVEvent((x) => ((ModalWindowElement)Parent).handleStartDrag(x)));
+            dragBarElement.Set<OnMouseRelease>(new TVEvent((x) => ((ModalWindowElement)Parent).handleStopDrag(x)));
+
+
             Setup();
         }
 
+
+
         private void Setup()
         {
-            textElement.Set<HorizontalAlignmentTrait, TVHorizontalAlignment>(new TVHorizontalAlignment { Alignment = HorizontalAlignment.Center });
-            textElement.Set<VerticalAlignmentTrait, TVVerticalAlignment>(new TVVerticalAlignment { Alignment = VerticalAlignment.Center });
-
             Set<BorderSizeTrait, TVInt>(new TVInt(0));
 
-
             this.AddChild(closeButton, "closeButton");
-            this.AddChild(textElement, "titleText");
+            this.AddChild(dragBarElement, "titleText");
         }
     }
 }

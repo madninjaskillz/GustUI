@@ -21,7 +21,7 @@ public class TVElements : TraitValue
     }
     public void Remove(Element item) => namedItems.Remove(namedItems.Find(x => x.Item1 == item));
     public void Remove(string name) => namedItems.Remove(namedItems.Find(x => x.Item2 == name));
-    public List<Element> Items => namedItems.Select(x => x.Item1).ToList();
+    public List<Element> Items => namedItems.Select(x => x.Item1).OrderBy(x=>x.Depth).ToList();
     public Element Get(string name)
     {
         var result = namedItems.FirstOrDefault(x => x.Item2 == name);

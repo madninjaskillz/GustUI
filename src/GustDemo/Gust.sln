@@ -7,6 +7,20 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "GustDemo", "GustDemo.csproj
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "GustUI", "..\GustUI\GustUI.csproj", "{F5A1D2DE-43CB-4E84-AA01-A546CE39BAA6}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "GustMultiplatformDemo", "GustMultiplatformDemo", "{B45231FF-61D8-4CA3-8336-A0D6171F9534}"
+EndProject
+Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "GustMultiplatformDemo.Shared", "..\GustMultiplatformDemo\GustMultiplatformDemo.Shared\GustMultiplatformDemo.Shared.shproj", "{F84D86EC-B3A8-480E-B9BB-8EB1E21A1CA0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GustMultiplatformDemo.Android", "..\GustMultiplatformDemo\GustMultiplatformDemo.Android\GustMultiplatformDemo.Android.csproj", "{115F5433-7E73-492D-BE33-52214AA7B86D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GustMultiplatformDemo.WindowsDX", "..\GustMultiplatformDemo\GustMultiplatformDemo.WindowsDX\GustMultiplatformDemo.WindowsDX.csproj", "{1969AC5F-169F-4D5F-8307-57B1AD19A7C5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GustMultiplatformDemo.DesktopGL", "..\GustMultiplatformDemo\GustMultiplatformDemo.DesktopGL\GustMultiplatformDemo.DesktopGL.csproj", "{6C987757-B751-45FB-950F-41FA98211D41}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GustMultiplatformDemo.BlazorGL", "..\GustMultiplatformDemo\GustMultiplatformDemo.BlazorGL\GustMultiplatformDemo.BlazorGL.csproj", "{44B7EB43-CC6C-40C0-A09B-C66B66C96E09}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EzmuzeStudio", "..\..\..\ezmuze-studio\EzmuzeStudio.csproj", "{565DD649-A70C-7291-BF2E-E0BB7F7D9DC8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,11 +35,46 @@ Global
 		{F5A1D2DE-43CB-4E84-AA01-A546CE39BAA6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F5A1D2DE-43CB-4E84-AA01-A546CE39BAA6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F5A1D2DE-43CB-4E84-AA01-A546CE39BAA6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{115F5433-7E73-492D-BE33-52214AA7B86D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{115F5433-7E73-492D-BE33-52214AA7B86D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{115F5433-7E73-492D-BE33-52214AA7B86D}.Debug|Any CPU.Deploy.0 = Debug|Any CPU
+		{115F5433-7E73-492D-BE33-52214AA7B86D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{115F5433-7E73-492D-BE33-52214AA7B86D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1969AC5F-169F-4D5F-8307-57B1AD19A7C5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1969AC5F-169F-4D5F-8307-57B1AD19A7C5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1969AC5F-169F-4D5F-8307-57B1AD19A7C5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1969AC5F-169F-4D5F-8307-57B1AD19A7C5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6C987757-B751-45FB-950F-41FA98211D41}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6C987757-B751-45FB-950F-41FA98211D41}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6C987757-B751-45FB-950F-41FA98211D41}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6C987757-B751-45FB-950F-41FA98211D41}.Release|Any CPU.Build.0 = Release|Any CPU
+		{44B7EB43-CC6C-40C0-A09B-C66B66C96E09}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{44B7EB43-CC6C-40C0-A09B-C66B66C96E09}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{44B7EB43-CC6C-40C0-A09B-C66B66C96E09}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{44B7EB43-CC6C-40C0-A09B-C66B66C96E09}.Release|Any CPU.Build.0 = Release|Any CPU
+		{565DD649-A70C-7291-BF2E-E0BB7F7D9DC8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{565DD649-A70C-7291-BF2E-E0BB7F7D9DC8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{565DD649-A70C-7291-BF2E-E0BB7F7D9DC8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{565DD649-A70C-7291-BF2E-E0BB7F7D9DC8}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{F84D86EC-B3A8-480E-B9BB-8EB1E21A1CA0} = {B45231FF-61D8-4CA3-8336-A0D6171F9534}
+		{115F5433-7E73-492D-BE33-52214AA7B86D} = {B45231FF-61D8-4CA3-8336-A0D6171F9534}
+		{1969AC5F-169F-4D5F-8307-57B1AD19A7C5} = {B45231FF-61D8-4CA3-8336-A0D6171F9534}
+		{6C987757-B751-45FB-950F-41FA98211D41} = {B45231FF-61D8-4CA3-8336-A0D6171F9534}
+		{44B7EB43-CC6C-40C0-A09B-C66B66C96E09} = {B45231FF-61D8-4CA3-8336-A0D6171F9534}
+	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {64B53606-CCAE-4C22-8F9E-91C2AB816256}
+	EndGlobalSection
+	GlobalSection(SharedMSBuildProjectFiles) = preSolution
+		..\GustMultiplatformDemo\GustMultiplatformDemo.Shared\GustMultiplatformDemo.Shared.projitems*{115f5433-7e73-492d-be33-52214aa7b86d}*SharedItemsImports = 5
+		..\GustMultiplatformDemo\GustMultiplatformDemo.Shared\GustMultiplatformDemo.Shared.projitems*{1969ac5f-169f-4d5f-8307-57b1ad19a7c5}*SharedItemsImports = 5
+		..\GustMultiplatformDemo\GustMultiplatformDemo.Shared\GustMultiplatformDemo.Shared.projitems*{44b7eb43-cc6c-40c0-a09b-c66b66c96e09}*SharedItemsImports = 5
+		..\GustMultiplatformDemo\GustMultiplatformDemo.Shared\GustMultiplatformDemo.Shared.projitems*{6c987757-b751-45fb-950f-41fa98211d41}*SharedItemsImports = 5
+		..\GustMultiplatformDemo\GustMultiplatformDemo.Shared\GustMultiplatformDemo.Shared.projitems*{f84d86ec-b3a8-480e-b9bb-8eb1e21a1ca0}*SharedItemsImports = 13
 	EndGlobalSection
 EndGlobal
