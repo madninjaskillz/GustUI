@@ -1,5 +1,6 @@
 ﻿using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using Microsoft.Xna.Framework.Media;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -21,7 +22,7 @@ namespace GustUI.TraitValues
 
     public class TVFillImage : TVFill
     {
-        
+
         public Tiling Tiling { get; set; }
     }
 
@@ -29,11 +30,45 @@ namespace GustUI.TraitValues
     {
         public Color Color { get; set; }
         public TVFillSolidColor() { }
-        public TVFillSolidColor(Color color) {
+        public TVFillSolidColor(Color color)
+        {
             Color = color;
         }
     }
 
+    public class TVVideoFill : TVFill
+    {
+        private Video video;
+        private VideoPlayer player;
+        public TVVideoFill(Video video)
+        {
+            this.video = video;
+            player = new VideoPlayer();
+
+        }
+
+        public Texture2D GetTexture()
+        {
+            try
+            {
+                if (player.State == MediaState.Stopped)
+                {
+                    if (Resources.StaticResources.InputManager.HaveInteracted)
+                    {
+                        player.Play(video);
+                    }
+                }
+
+                return player.GetTexture();
+            }
+            catch (Exception e)
+            {
+
+            }
+
+            return null;
+        }
+    }
     public class TVFillSimpleGradient : TVFill
     {
         public Color PrimaryColor { get; }
@@ -60,12 +95,12 @@ namespace GustUI.TraitValues
             for (int i = 0; i < 256; i++)
             {
                 c[i] = col;
-                col=Color.Lerp(primary, secondary, i/255f);
+                col = Color.Lerp(primary, secondary, i / 255f);
             }
 
             result.SetData(c);
             this.Texture = result;
-            PrimaryColor = primary; 
+            PrimaryColor = primary;
             SecondaryColor = secondary;
             Direction = direction;
         }

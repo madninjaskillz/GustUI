@@ -17,7 +17,7 @@ namespace GustUI.Elements
 
         private string body;
         private TVVector size;
-        private TextElement textElement;
+        
         private ModalTitleBarElement titleBarElement;
         private List<BasicButtonElement> buttons = new List<BasicButtonElement>();
         private FilledRectangleElement buttonBackgroundElement;
@@ -25,9 +25,11 @@ namespace GustUI.Elements
         private FilledRectangleElement backdropBottom;
         private FilledRectangleElement backdropLeft;
         private FilledRectangleElement backdropRight;
+
+        private Element content;
         public ModalWindowElement()
         {
-            textElement = this.AddChildElement<TextElement>();
+            
             titleBarElement = this.AddChildElement<ModalTitleBarElement>();
             buttonBackgroundElement = this.AddChildElement<FilledRectangleElement>();
 
@@ -63,7 +65,65 @@ namespace GustUI.Elements
                 new TVVector(size != null ? size.X : 400, 40));
 
             AddChildElement(titleBarElement);
-            textElement = this.AddChildElement<TextElement>();
+            content = this.AddChildElement<TextElement>();
+
+            content.Set<PositionTrait>(new TVVector(10, 50));
+            content.Set<TextTrait>(new TVText(body));
+            content.Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
+            content.Set<ForegroundColorTrait>(new TVColor(Color.Black));
+            content.Set<SizeTrait>(new TVVector(size.X - 20, 0));
+            content.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment() { Alignment = HorizontalAlignment.Left });
+
+            if (this.buttons.Count > 0)
+            {
+                buttonBackgroundElement = this.AddChildElement<FilledRectangleElement>();
+            }
+
+            backdropBottom = this.AddChildElement<FilledRectangleElement>();
+            backdropTop = this.AddChildElement<FilledRectangleElement>();
+            backdropLeft = this.AddChildElement<FilledRectangleElement>();
+            backdropRight = this.AddChildElement<FilledRectangleElement>();
+
+
+
+            Setup();
+        }
+
+        public ModalWindowElement(string title, Element body, List<BasicButtonElement> buttons = null, TVVector position = null, TVVector size = null)
+        {
+            
+            Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
+            Set<ForegroundColorTrait>(new TVColor(Color.Black));
+            Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.White, new Color(200, 200, 200), Direction.Vertically));
+            
+            Set<PositionTrait>(position ?? new TVVector(0, 0));
+            Set<SizeTrait>(new TVVector(content != null ? content.GetSize().X+20 : size.X ,size.Y) ?? new TVVector(0, 0));
+
+            
+
+
+            if (buttons != null)
+            {
+                this.buttons.AddRange(buttons);
+            }
+            else
+            {
+                this.buttons = new List<BasicButtonElement>();
+            }
+
+            titleBarElement = new ModalTitleBarElement(
+                title,
+                new TVVector(0, 0),
+                new TVVector(size != null ? size.X : 400, 40));
+
+            AddChildElement(titleBarElement);
+
+            this.content = body;
+            this.AddChild(this.content,"content");
+
+            content.Set<PositionTrait>(new TVVector(10, 50));
+            
+
             if (this.buttons.Count > 0)
             {
                 buttonBackgroundElement = this.AddChildElement<FilledRectangleElement>();
@@ -83,19 +143,17 @@ namespace GustUI.Elements
         {
             size = this.GetSize();
 
-            textElement.Set<PositionTrait>(new TVVector(10, 50));
-            textElement.Set<TextTrait>(new TVText(body));
-            textElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
-            textElement.Set<ForegroundColorTrait>(new TVColor(Color.Black));
-            textElement.Set<SizeTrait>(new TVVector(size.X - 20, 0));
 
-            textElement.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment() { Alignment = HorizontalAlignment.Left });
-
-
+            float contentHeight = content is TextElement textElement ? textElement.CalculatedSize().Y : content.GetSize().Y;
+            float contentWidth = content is TextElement tx ? tx.CalculatedSize().X : content.GetSize().X;
             float buttonHeight = (this.buttons.Count > 0 ? 80 : 10);
-            float textSize = textElement.CalculatedSize().Y;
-            float calcHeight = 80 + textSize + buttonHeight;
-            size = new TVVector(size.X, calcHeight);
+        
+            
+            float calcHeight = 80 + contentHeight + buttonHeight;
+            float calcWidth = 20 + contentWidth;
+            size = new TVVector(calcWidth, calcHeight);
+            titleBarElement.Set<SizeTrait>(new TVVector(size.X, 40));
+            
             Set<SizeTrait>(size);
 
             if (this.buttons.Count > 0)
@@ -138,11 +196,15 @@ namespace GustUI.Elements
             backdropBottom.Set<SizeTrait>(new TVVector(calculatedModalSize.X, windowSize.Y - (actualPosition.Y + calculatedModalSize.Y)));
             backdropBottom.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Black * 0.5f));
 
-        }
 
+            justSpawned = true;
+        }
+        private bool justSpawned = false;
         public override void Update(Element parent = null)
         {
             base.Update(parent);
+
+            
 
             Vector2 calculatedModalSize = size.AsXna;
             Vector2 actualPosition = this.GetActualPosition().AsXna;
@@ -164,7 +226,11 @@ namespace GustUI.Elements
             backdropBottom.Set<SizeTrait>(new TVVector(calculatedModalSize.X, windowSize.Y - (actualPosition.Y + calculatedModalSize.Y)));
             backdropBottom.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Black * opacity));
 
-           
+           if (justSpawned)
+            {
+                this.MoveToFront();
+                justSpawned = false;
+            }
         }
         
     }

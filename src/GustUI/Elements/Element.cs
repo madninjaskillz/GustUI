@@ -17,7 +17,7 @@ using System.Text.Json.Serialization;
 namespace GustUI.Elements;
 
 
-public class Element
+public class Element : IDisposable
 {
     [JsonIgnore]
     public Element Parent { get; set; } = null;
@@ -229,6 +229,17 @@ public class Element
         }
     }
 
+    public virtual void DrawOutOfProcess(SpriteBatch spriteBatch)
+    {
+        if (this.HasTrait<ChildrenTrait>())
+        {
+            foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
+            {
+                child.DrawOutOfProcess(spriteBatch);
+            }
+        }
+    }
+
     MouseState previousMouseState = Mouse.GetState();
 
     public bool BeingDragged = false;
@@ -353,5 +364,10 @@ public class Element
         MethodInfo theMethod = thisType.GetMethod("CopyTo");
         object[] pr = new object[] { rc };
         theMethod.Invoke(localCopy, pr);
+    }
+
+    public virtual void Dispose()
+    {
+      
     }
 }

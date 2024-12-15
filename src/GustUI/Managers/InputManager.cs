@@ -14,6 +14,7 @@ namespace GustUI.Managers
 {
     public class InputManager
     {
+        public bool HaveInteracted { get; private set; }
         private MouseState previousMouseState;
         public enum ElementState
         {
@@ -56,6 +57,7 @@ namespace GustUI.Managers
             }
             else if (mouseState.LeftButton == ButtonState.Released && previousMouseState.LeftButton == ButtonState.Pressed)
             {
+                HaveInteracted = true;
 
                 foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnClickTrait>()))
                 {

@@ -73,8 +73,17 @@ public class FilledRectangleElement : RectangleElement
                     spriteBatch.Draw(image.Texture, rect, Color.White);
                     break;
                 }
+            case TVVideoFill video:
+                {
+                    var texture = video.GetTexture();
+                    if (texture != null)
+                    {
+                        spriteBatch.Draw(texture, rect, Color.White);
+                    }
+                    break;
+                }
         }
-        
+
         base.Draw(spriteBatch);
     }
 }

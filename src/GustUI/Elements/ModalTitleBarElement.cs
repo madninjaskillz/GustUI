@@ -1,8 +1,8 @@
 ﻿using GustUI.Attributes;
+using GustUI.Extensions;
 using GustUI.Traits;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
-using System;
 
 namespace GustUI.Elements
 {
@@ -57,6 +57,14 @@ namespace GustUI.Elements
             Setup();
         }
 
+        public override void Update(Element parent = null)
+        {
+            var size = parent.GetSize();
+            closeButton.Set<PositionTrait>(new TVVector(size.X - 40, 0));
+            closeButton.Set<SizeTrait>(new TVVector(40,40));
+            dragBarElement.Set<SizeTrait>(new TVVector(size.X - 40, 40));
+            base.Update(parent);
+        }
 
 
         private void Setup()
