@@ -2,6 +2,7 @@
 using GustUI.Traits;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
 using System;
 using System.Collections.Generic;
@@ -12,9 +13,9 @@ namespace GustUI.Elements;
 [ElementTraits(typeof(SizeTrait), typeof(PositionTrait), typeof(ChildrenTrait))]
 public class WindowElement : FilledRectangleElement
 {
-    public WindowElement(GameWindow gameWindow, GraphicsDevice graphicsDevice, VirtualContent content) : base()
+    public WindowElement(GameWindow gameWindow, GraphicsDevice graphicsDevice, VirtualContent virtualContent, ContentManager content) : base()
     {
-        Resources.StaticResources = new Resources(graphicsDevice, content, this);
+        Resources.StaticResources = new Resources(graphicsDevice, virtualContent, content, this);
         Resources.StaticResources.Theme = new Theme();
 
         gameWindow.ClientSizeChanged += GameWindow_ClientSizeChanged;

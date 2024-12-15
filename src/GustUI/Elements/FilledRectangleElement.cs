@@ -60,17 +60,17 @@ public class FilledRectangleElement : RectangleElement
         {
             case TVFillSolidColor solidColor:
                 {
-                    spriteBatch.DrawFilledRectangle(rect, solidColor.Color);
+                    spriteBatch.DrawFilledRectangle(rect, solidColor.Color*solidColor.Opacity);
                     break;
                 }
             case TVFillImage image:
                 {
-                    spriteBatch.Draw(image.Texture, rect, Color.White);
+                    spriteBatch.Draw(image.Texture, rect, Color.White*image.Opacity);
                     break;
                 }
             case TVFillSimpleGradient image:
                 {
-                    spriteBatch.Draw(image.Texture, rect, Color.White);
+                    spriteBatch.Draw(image.Texture, rect, Color.White*image.Opacity);
                     break;
                 }
             case TVVideoFill video:
@@ -78,7 +78,7 @@ public class FilledRectangleElement : RectangleElement
                     var texture = video.GetTexture();
                     if (texture != null)
                     {
-                        spriteBatch.Draw(texture, rect, Color.White);
+                        spriteBatch.Draw(texture, rect, Color.White*video.Opacity);
                     }
                     break;
                 }

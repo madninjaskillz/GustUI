@@ -1,6 +1,7 @@
 ﻿using GustUI.Elements;
 using GustUI.Managers;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
 using System;
 using System.Collections.Generic;
@@ -15,14 +16,18 @@ namespace GustUI
         public GraphicsDevice GraphicsDevice;
         public Texture2D Pixel;
         public WindowElement RootWindow;
-        public Resources(GraphicsDevice graphicsDevice, VirtualContent content, WindowElement root)
+        public VirtualContent VirtualContent;
+        public ContentManager Content;
+        public Resources(GraphicsDevice graphicsDevice, VirtualContent virtualContent, ContentManager content, WindowElement root)
         {
             RootWindow = root;
             this.GraphicsDevice = graphicsDevice;
             Pixel = new Texture2D(graphicsDevice, 1, 1);
             Pixel.SetData<Color>(new Color[1] { Color.White });
+            VirtualContent = virtualContent;
+            Content = content;
 
-            FontManager = new FontManager(graphicsDevice, content);
+            FontManager = new FontManager(graphicsDevice, virtualContent);
             InputManager = new InputManager();
             DrawOOPManager = new DrawOOPManager();
         }

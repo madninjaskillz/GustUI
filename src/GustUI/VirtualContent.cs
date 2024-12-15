@@ -1,4 +1,5 @@
-﻿using nkast.Wasm.XHR;
+﻿using Microsoft.Xna.Framework.Graphics;
+using nkast.Wasm.XHR;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -58,5 +59,9 @@ namespace GustUI
             }
         }
 
+        internal Texture2D GetTexture(string v)
+        {
+            return Texture2D.FromStream(Resources.StaticResources.GraphicsDevice, OpenStream(v));
+        }
     }
 }

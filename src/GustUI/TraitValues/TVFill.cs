@@ -12,6 +12,7 @@ namespace GustUI.TraitValues
     public class TVFill : TraitValue
     {
         public Texture2D Texture { get; set; }
+        public float Opacity { get; set; } = 1f;
     }
 
     public class TVSmartFill : TVFill
@@ -51,14 +52,12 @@ namespace GustUI.TraitValues
         {
             try
             {
+                player.Volume = 0.0f;
+                player.IsMuted = true;
                 if (player.State == MediaState.Stopped)
                 {
-                    if (Resources.StaticResources.InputManager.HaveInteracted)
-                    {
-                        player.Play(video);
-                    }
+                    player.Play(video);
                 }
-
                 return player.GetTexture();
             }
             catch (Exception e)
