@@ -31,7 +31,7 @@ namespace GustUI.Elements
 
             Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Green, Color.DarkGreen, Direction.Vertically));
             Set<BorderSizeTrait>(new TVInt(0));
-            Set<BorderColorTrait>(new TVColor(Color.Gray));
+            Set<BorderFillTrait>(new TVBorderColorFill(Color.Gray));
             Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
             Set<PositionTrait>(position ?? new TVVector(0, 0));
             Set<SizeTrait>(size ?? new TVVector(0, 0));

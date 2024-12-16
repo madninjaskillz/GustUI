@@ -6,8 +6,12 @@ using System.Threading.Tasks;
 
 namespace GustUI
 {
-    internal class UIFont
+    public static class UIFont
     {
+        public static String Icon(this Symbol symbol)
+        {
+            return Char.ConvertFromUtf32((int)symbol);
+        }
         public enum Symbol
         {
             //

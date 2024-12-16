@@ -199,6 +199,7 @@ public class Element : IDisposable
         child.ElementName = name;
         Children.Add(child, name);
         child.Parent = this;
+        MoveToFront();
     }
 
     public TraitTypeValue ETV<TraitType, TraitTypeValue>()
@@ -257,7 +258,8 @@ public class Element : IDisposable
 
     internal void MoveToFront()
     {
-        this.Depth = Resources.StaticResources.RootWindow.Children.Items.Max(x => x.Depth) + 1;
+        
+        this.Depth = Resources.StaticResources.RootWindow.Children.Items.Any() ? Resources.StaticResources.RootWindow.Children.Items.Max(x => x.Depth) + 1 : 0;
 
     }
 
@@ -351,7 +353,9 @@ public class Element : IDisposable
         {
             GlobalMousePosition = new TVVector(mouseState.X, mouseState.Y),
             RelativeMousePosition = new TVVector(mouseState.X - actualPosition.X, mouseState.Y - actualPosition.Y),
-            MouseState = mouseState
+            MouseState = mouseState,
+            Element = this
+
         };
     }
 

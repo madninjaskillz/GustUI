@@ -6,6 +6,7 @@ using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace GustUI.Elements
 {
@@ -17,25 +18,15 @@ namespace GustUI.Elements
 
         private string body;
         private TVVector size;
-        
+
         private ModalTitleBarElement titleBarElement;
         private List<BasicButtonElement> buttons = new List<BasicButtonElement>();
         private FilledRectangleElement buttonBackgroundElement;
-        private FilledRectangleElement backdropTop;
-        private FilledRectangleElement backdropTopLeft;
-        private FilledRectangleElement backdropTopRight;
-        
-        private FilledRectangleElement backdropLeft;
-        private FilledRectangleElement backdropRight;
-
-        private FilledRectangleElement backdropBottomLeft;
-        private FilledRectangleElement backdropBottomRight;
-        private FilledRectangleElement backdropBottom;
 
         private Element content;
         public ModalWindowElement()
         {
-            
+
             titleBarElement = this.AddChildElement<ModalTitleBarElement>();
             buttonBackgroundElement = this.AddChildElement<FilledRectangleElement>();
 
@@ -54,6 +45,7 @@ namespace GustUI.Elements
             Set<BodyTextTrait>(new TVText(body));
             Set<PositionTrait>(position ?? new TVVector(0, 0));
             Set<SizeTrait>(size ?? new TVVector(0, 0));
+            Set<BorderFillTrait>(new TVBorder9Grid());
 
 
             if (buttons != null)
@@ -85,31 +77,20 @@ namespace GustUI.Elements
                 buttonBackgroundElement = this.AddChildElement<FilledRectangleElement>();
             }
 
-            backdropTop = this.AddChildElement<FilledRectangleElement>();
-            backdropBottom = this.AddChildElement<FilledRectangleElement>();
-            backdropBottomLeft = this.AddChildElement<FilledRectangleElement>();
-            backdropBottomRight = this.AddChildElement<FilledRectangleElement>();
-            backdropTopLeft = this.AddChildElement<FilledRectangleElement>();
-            backdropTopRight = this.AddChildElement<FilledRectangleElement>();
-            backdropLeft = this.AddChildElement<FilledRectangleElement>();
-            backdropRight = this.AddChildElement<FilledRectangleElement>();
-
-
-
             Setup();
         }
 
         public ModalWindowElement(string title, Element body, List<BasicButtonElement> buttons = null, TVVector position = null, TVVector size = null)
         {
-            
+
             Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
             Set<ForegroundColorTrait>(new TVColor(Color.Black));
             Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.White, new Color(200, 200, 200), Direction.Vertically));
-            
-            Set<PositionTrait>(position ?? new TVVector(0, 0));
-            Set<SizeTrait>(new TVVector(content != null ? content.GetSize().X+20 : size.X ,size.Y) ?? new TVVector(0, 0));
 
-            
+            Set<PositionTrait>(position ?? new TVVector(0, 0));
+            Set<SizeTrait>(new TVVector(content != null ? content.GetSize().X + 20 : size.X, size.Y) ?? new TVVector(0, 0));
+
+            Set<BorderFillTrait>(new TVBorder9Grid());
 
 
             if (buttons != null)
@@ -129,28 +110,15 @@ namespace GustUI.Elements
             AddChildElement(titleBarElement);
 
             this.content = body;
-            this.AddChild(this.content,"content");
+            this.AddChild(this.content, "content");
 
             content.Set<PositionTrait>(new TVVector(10, 50));
-            
+
 
             if (this.buttons.Count > 0)
             {
                 buttonBackgroundElement = this.AddChildElement<FilledRectangleElement>();
             }
-
-
-
-            backdropTop = this.AddChildElement<FilledRectangleElement>();
-            backdropBottom = this.AddChildElement<FilledRectangleElement>();
-            backdropBottomLeft = this.AddChildElement<FilledRectangleElement>();
-            backdropBottomRight = this.AddChildElement<FilledRectangleElement>();
-            backdropTopLeft = this.AddChildElement<FilledRectangleElement>();
-            backdropTopRight = this.AddChildElement<FilledRectangleElement>();
-            backdropLeft = this.AddChildElement<FilledRectangleElement>();
-            backdropRight = this.AddChildElement<FilledRectangleElement>();
-
-
 
             Setup();
         }
@@ -158,18 +126,18 @@ namespace GustUI.Elements
         private void Setup()
         {
             size = this.GetSize();
-
+            Set<BorderFillTrait>(new TVBorder9Grid());
 
             float contentHeight = content is TextElement textElement ? textElement.CalculatedSize().Y : content.GetSize().Y;
             float contentWidth = content is TextElement tx ? tx.CalculatedSize().X : content.GetSize().X;
             float buttonHeight = (this.buttons.Count > 0 ? 80 : 10);
-        
-            
+
+
             float calcHeight = 80 + contentHeight + buttonHeight;
             float calcWidth = 20 + contentWidth;
             size = new TVVector(calcWidth, calcHeight);
             titleBarElement.Set<SizeTrait>(new TVVector(size.X, 40));
-            
+
             Set<SizeTrait>(size);
 
             if (this.buttons.Count > 0)
@@ -203,7 +171,7 @@ namespace GustUI.Elements
         {
             base.Update(parent);
 
-            
+
 
             Vector2 calculatedModalSize = size.AsXna;
             Vector2 actualPosition = this.GetActualPosition().AsXna;
@@ -212,47 +180,90 @@ namespace GustUI.Elements
 
             float nineGridSize = 32;
 
-            
-            backdropTopLeft.Set<PositionTrait>(new TVVector(- nineGridSize, - nineGridSize));
-            backdropTopLeft.Set<SizeTrait>(new TVVector(nineGridSize, nineGridSize));
-            backdropTopLeft.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridTopLeft);
 
-            backdropTop.Set<PositionTrait>(new TVVector(0, -nineGridSize));
-            backdropTop.Set<SizeTrait>(new TVVector(calculatedModalSize.X, nineGridSize));
-            backdropTop.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridTop);
+            //backdropTopLeft.Set<PositionTrait>(new TVVector(- nineGridSize, - nineGridSize));
+            //backdropTopLeft.Set<SizeTrait>(new TVVector(nineGridSize, nineGridSize));
+            //backdropTopLeft.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridTopLeft);
 
-            backdropTopRight.Set<PositionTrait>(new TVVector(new Vector2(calculatedModalSize.X, -nineGridSize)));
-            backdropTopRight.Set<SizeTrait>(new TVVector(nineGridSize, nineGridSize));
-            backdropTopRight.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridTopRight);
+            //backdropTop.Set<PositionTrait>(new TVVector(0, -nineGridSize));
+            //backdropTop.Set<SizeTrait>(new TVVector(calculatedModalSize.X, nineGridSize));
+            //backdropTop.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridTop);
 
-            backdropLeft.Set<PositionTrait>(new TVVector(- nineGridSize, 0));
-            backdropLeft.Set<SizeTrait>(new TVVector(nineGridSize, calculatedModalSize.Y));
-            backdropLeft.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridLeft);
+            //backdropTopRight.Set<PositionTrait>(new TVVector(new Vector2(calculatedModalSize.X, -nineGridSize)));
+            //backdropTopRight.Set<SizeTrait>(new TVVector(nineGridSize, nineGridSize));
+            //backdropTopRight.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridTopRight);
+
+            //backdropLeft.Set<PositionTrait>(new TVVector(- nineGridSize, 0));
+            //backdropLeft.Set<SizeTrait>(new TVVector(nineGridSize, calculatedModalSize.Y));
+            //backdropLeft.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridLeft);
 
 
-            backdropRight.Set<PositionTrait>(new TVVector(calculatedModalSize.X, 0));
-            backdropRight.Set<SizeTrait>(new TVVector(nineGridSize, calculatedModalSize.Y));
-            backdropRight.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridRight);
+            //backdropRight.Set<PositionTrait>(new TVVector(calculatedModalSize.X, 0));
+            //backdropRight.Set<SizeTrait>(new TVVector(nineGridSize, calculatedModalSize.Y));
+            //backdropRight.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridRight);
 
-            backdropBottomLeft.Set<PositionTrait>(new TVVector(-nineGridSize, calculatedModalSize.Y));
-            backdropBottomLeft.Set<SizeTrait>(new TVVector(nineGridSize, nineGridSize));
-            backdropBottomLeft.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridBottomLeft);
+            //backdropBottomLeft.Set<PositionTrait>(new TVVector(-nineGridSize, calculatedModalSize.Y));
+            //backdropBottomLeft.Set<SizeTrait>(new TVVector(nineGridSize, nineGridSize));
+            //backdropBottomLeft.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridBottomLeft);
 
-            backdropBottom.Set<PositionTrait>(new TVVector(0, calculatedModalSize.Y));
-            backdropBottom.Set<SizeTrait>(new TVVector(calculatedModalSize.X, nineGridSize));
-            backdropBottom.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridBottom);
+            //backdropBottom.Set<PositionTrait>(new TVVector(0, calculatedModalSize.Y));
+            //backdropBottom.Set<SizeTrait>(new TVVector(calculatedModalSize.X, nineGridSize));
+            //backdropBottom.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridBottom);
 
-            backdropBottomRight.Set<PositionTrait>(new TVVector(new Vector2(calculatedModalSize.X, calculatedModalSize.Y)));
-            backdropBottomRight.Set<SizeTrait>(new TVVector(nineGridSize, nineGridSize));
-            backdropBottomRight.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridBottomRight);
+            //backdropBottomRight.Set<PositionTrait>(new TVVector(new Vector2(calculatedModalSize.X, calculatedModalSize.Y)));
+            //backdropBottomRight.Set<SizeTrait>(new TVVector(nineGridSize, nineGridSize));
+            //backdropBottomRight.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.NineGridBottomRight);
 
+
+            if (actualPosition.X + calculatedModalSize.X > windowSize.X)
+            {
+                Set<PositionTrait>(new TVVector(windowSize.X - calculatedModalSize.X, actualPosition.Y));
+                this.BeingDragged = false;
+            }
+
+            if (actualPosition.Y + calculatedModalSize.Y > windowSize.Y)
+            {
+                Set<PositionTrait>(new TVVector(actualPosition.X, windowSize.Y - calculatedModalSize.Y));
+                this.BeingDragged = false;
+            }
+
+            float topLimit = 0;
+            if (Resources.StaticResources.RootWindow.Children.Items.Any(x => x is FruitMenuElement))
+            {
+                topLimit = Resources.StaticResources.RootWindow.Children.Items.First(x => x is FruitMenuElement).GetSize().Y;
+            }
+
+            if (actualPosition.Y < topLimit)
+            {
+                Set<PositionTrait>(new TVVector(actualPosition.X, topLimit));
+                this.BeingDragged = false;
+            }
+
+            if (actualPosition.X < 0)
+            {
+                Set<PositionTrait>(new TVVector(0, actualPosition.Y));
+                this.BeingDragged = false;
+            }
 
             if (justSpawned)
             {
                 this.MoveToFront();
                 justSpawned = false;
             }
+
+            if (ElementTrait<BorderFillTrait>().Value() is TVBorder9Grid nineGrid)
+            {
+                if (BeingDragged)
+                {
+                    nineGrid.NineGridSize = 16;
+                }
+                else
+                {
+                    nineGrid.NineGridSize = 32;
+                }
+            }
+
         }
-        
+
     }
 }

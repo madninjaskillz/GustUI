@@ -24,7 +24,7 @@ public class FilledRectangleElement : RectangleElement
             Set<BorderSizeTrait>(new TVInt(border));
             if (borderColor.HasValue)
             {
-                Set<BorderColorTrait>(new TVColor(borderColor.Value));
+                Set<BorderFillTrait>(new TVBorderColorFill(borderColor.Value));
             }
         }
     }

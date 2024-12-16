@@ -22,7 +22,7 @@ public class WindowElement : FilledRectangleElement
         ElementTrait<SizeTrait>().Set(new TVVector(gameWindow.ClientBounds.Width, gameWindow.ClientBounds.Height));
 
         this.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.DarkBlue,Color.Purple, Direction.Vertically));
-        this.Set<BorderColorTrait, TVColor>(new TVColor(Color.White));
+        this.Set<BorderFillTrait>(new TVBorderColorFill(Color.White));
         this.Set<BorderSizeTrait, TVInt>(new TVInt(0));
     }
 
