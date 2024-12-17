@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace GustUI
 {
-    public class VirtualContent
+    public class VirtualContent : IContentManager
     {
         private string _rootDirectory;
 
@@ -59,7 +59,7 @@ namespace GustUI
             }
         }
 
-        internal Texture2D GetTexture(string v)
+        public Texture2D GetTexture(string v)
         {
             return Texture2D.FromStream(Resources.StaticResources.GraphicsDevice, OpenStream(v));
         }

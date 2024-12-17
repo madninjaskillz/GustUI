@@ -14,8 +14,26 @@ namespace GustUI.Managers
 {
     public class InputManager
     {
+        public class KeyboardShortcut
+        {
+            public List<KeyboardModifiers> Modifiers;
+            public Keys Key;
+
+            public KeyboardShortcut(Keys keys, params KeyboardModifiers[] modifiers)
+            {
+                Key = keys;
+                Modifiers = modifiers.ToList();
+            }
+        }
+
         public bool HaveInteracted { get; private set; }
         private MouseState previousMouseState;
+        public enum KeyboardModifiers
+        {
+            shift,
+            ctrl,
+            alt
+        }
         public enum ElementState
         {
             Normal,
@@ -32,6 +50,9 @@ namespace GustUI.Managers
 
         private List<Element> currentlyHovered = new List<Element>();
         private List<Element> currentlyClicked = new List<Element>();
+
+        internal int FloatedElementCount { get; private set; }
+        internal string FloatedElementName { get; private set; }
 
         public void Update()
         {
@@ -79,17 +100,23 @@ namespace GustUI.Managers
                 element.ElementTrait<OnEnterTrait>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
             }
 
-            foreach (Element element in newlyHovered.Where(e => e.HasTrait<OnExitTrait>()))
+            foreach (Element element in noLongerHovered.Where(e => e.HasTrait<OnExitTrait>()))
             {
                 element.ElementTrait<OnExitTrait>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
             }
 
+            foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnHoverTrait>()))
+            {
+                element.ElementTrait<OnHoverTrait>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
+            }
+            FloatedElementCount = currentlyHovered.Count;
+            FloatedElementName = string.Join(", ", currentlyHovered.Select(e => e.ElementName));
             previousMouseState = mouseState;
         }
 
-        private List<Element> ProcessHovers(Element element, Vector2 position, int depth = 0, int root  = -1, List<(int, Element)> HoveredElementsIndexed = null)
+        private List<Element> ProcessHovers(Element element, Vector2 position, int depth = 0, int root = -1, List<(int, Element)> HoveredElementsIndexed = null)
         {
-            if ( HoveredElementsIndexed == null)
+            if (HoveredElementsIndexed == null)
             {
                 HoveredElementsIndexed = new List<(int, Element)>();
             }
@@ -100,15 +127,10 @@ namespace GustUI.Managers
 
             if (element.IsMouseOver(position))
             {
-                if (depth != 0) {
-                    string s= "";
-                    for (int i = 0; i < depth; i++)
-                    {
-                        s += "  ";
-                    }
-
+                if (depth != 0)
+                {
                     HoveredElementsIndexed.Add((root, element));
-            }
+                }
                 int ct = depth == 0 ? 0 : root;
                 if (element.HasTrait<ChildrenTrait>())
                 {

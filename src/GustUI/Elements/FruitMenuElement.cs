@@ -14,21 +14,34 @@ namespace GustUI.Elements
     public class FruitMenuElement : FilledRectangleElement
     {
         private List<MenuItemModel> menuItems;
+
+        private FilledRectangleElement logoElement;
         public FruitMenuElement(List<MenuItemModel> items)
         {
             menuItems = items;  
             Set<SizeTrait>(new TVVector(Resources.StaticResources.RootWindow.GetSize().X, 40));
             Set<PositionTrait>(new TVVector(0, 0));
-            Set<BackgroundFillTrait>(new TVFillSolidColor(Microsoft.Xna.Framework.Color.White));
+            Set<BackgroundFillTrait>(new TVFillSolidColor(Microsoft.Xna.Framework.Color.White*0.8f));
+
+
+            if (Resources.StaticResources.Theme.MenuLogo != null)
+            {
+                logoElement = this.AddChildElement<FilledRectangleElement>();
+                logoElement.Set<PositionTrait>(new TVVector(5, 5));
+                logoElement.Set<SizeTrait>(new TVVector(24, 24));
+                logoElement.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.MenuLogo);
+            }
 
             float ps = 32;
             foreach (MenuItemModel item in menuItems)
             {
-                FruitMenuItem i = new FruitMenuItem(item.Text, item.Icon, (ClickEventArgs x) =>
+                FruitMenuItem i = new FruitMenuItem(item, (item.SubItems == null || item.SubItems.Count==0) ? null : (ClickEventArgs x) =>
                 {
-                    FruitPopupMenu popup = new FruitPopupMenu(item.SubItems, 200);
-                    popup.Set<PositionTrait>(new TVVector(x.Element.ElementTrait<PositionTrait>().Value().X, x.Element.ElementTrait<PositionTrait>().Value().Y + x.Element.GetSize().Y));
-                    Resources.StaticResources.RootWindow.AddChild(popup, "popup");
+                    FruitPopupMenu popup = new FruitPopupMenu(item.SubItems, 300);
+                    var ps = x.Element.ElementTrait<PositionTrait>().Value();
+                    var sz = x.Element.GetSize();
+                    popup.Set<PositionTrait>(new TVVector(ps.X, ps.Y + sz.Y));
+                    Resources.StaticResources.RootWindow.AddChild(popup, "popup "+Guid.NewGuid().ToString());
                     popup.Set<BorderFillTrait>(new TVBorder9Grid 
                     { 
                         TopCenter=false,
@@ -36,7 +49,7 @@ namespace GustUI.Elements
                         TopRight = false,
                     });
 
-                }, item.SubItems!=null && item.SubItems.Any(), 100);
+                }, 100, true);
 
                 this.AddChild(i, "fruit item");
 
@@ -47,11 +60,14 @@ namespace GustUI.Elements
 
             }
 
+            
             var shadow = AddChildElement<FilledRectangleElement>();
             shadow.Set<SizeTrait>(new TVVector(Resources.StaticResources.RootWindow.GetSize().X, 10));
             shadow.Set<PositionTrait>(new TVVector(0, 40));
             shadow.Set<BackgroundFillTrait>(new TVFillSimpleGradient(new Microsoft.Xna.Framework.Color(0, 0, 0, 128), new Microsoft.Xna.Framework.Color(0, 0, 0, 0),  Direction.Vertically));
 
         }
+
+
     }
 }

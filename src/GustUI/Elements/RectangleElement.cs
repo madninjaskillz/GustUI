@@ -8,10 +8,10 @@ using System;
 
 namespace GustUI.Elements;
 
-[ElementTraits(typeof(PositionTrait), typeof(SizeTrait), typeof(ChildrenTrait), typeof(BorderFillTrait), typeof(BorderSizeTrait), typeof(OnMousePress), typeof(OnMouseRelease))]
+[ElementTraits(typeof(PositionTrait), typeof(SizeTrait), typeof(ChildrenTrait), typeof(BorderFillTrait), typeof(BorderSizeTrait), typeof(OnMousePress), typeof(OnMouseRelease), typeof(OnExitTrait))]
 public class RectangleElement : Element
 {
-    public override void Draw(SpriteBatch spriteBatch)
+    public override void Draw()
     {
         TVVector actualPosition = this.GetActualPosition();
 
@@ -23,7 +23,7 @@ public class RectangleElement : Element
         {
             if (borderSize > 0)
             {
-                spriteBatch.DrawRectangle(actualPosition.Rectangle(size), borderColorFill.Color, borderSize);
+                Resources.StaticResources.DrawManager.DrawRectangle(actualPosition.Rectangle(size), borderColorFill.Color, borderSize);
             }
         }
 
@@ -32,52 +32,51 @@ public class RectangleElement : Element
             Color color = Color.White * nineGrid.Opacity;
             if (nineGrid.TopLeft)
             {
-                spriteBatch.Draw(Resources.StaticResources.Theme.NineGridTopLeft.Texture, new Rectangle(actualPosition.X.AsInt() - nineGrid.NineGridSize, actualPosition.Y.AsInt() - nineGrid.NineGridSize, nineGrid.NineGridSize, nineGrid.NineGridSize), null, color);
+                Resources.StaticResources.DrawManager.Draw(Resources.StaticResources.Theme.NineGridTopLeft.Texture, new Rectangle(actualPosition.X.AsInt() - (int)nineGrid.NineGridSize, actualPosition.Y.AsInt() - (int)nineGrid.NineGridSize, (int)nineGrid.NineGridSize, (int)nineGrid.NineGridSize), null, color);
             }
 
 
             if (nineGrid.TopCenter)
             {
-                spriteBatch.Draw(Resources.StaticResources.Theme.NineGridTop.Texture, new Rectangle(actualPosition.X.AsInt(), actualPosition.Y.AsInt() - nineGrid.NineGridSize, (int)this.GetSize().X, nineGrid.NineGridSize), null, color);
+                Resources.StaticResources.DrawManager.Draw(Resources.StaticResources.Theme.NineGridTop.Texture, new Rectangle(actualPosition.X.AsInt(), actualPosition.Y.AsInt() - (int)nineGrid.NineGridSize, (int)this.GetSize().X, (int)nineGrid.NineGridSize), null, color);
             }
 
             if (nineGrid.TopRight)
             {
-                spriteBatch.Draw(Resources.StaticResources.Theme.NineGridTopRight.Texture, new Rectangle(actualPosition.X.AsInt() + (int)this.GetSize().X, actualPosition.Y.AsInt() - nineGrid.NineGridSize, nineGrid.NineGridSize, nineGrid.NineGridSize), null, color);
+                Resources.StaticResources.DrawManager.Draw(Resources.StaticResources.Theme.NineGridTopRight.Texture, new Rectangle(actualPosition.X.AsInt() + (int)this.GetSize().X, actualPosition.Y.AsInt() - (int)nineGrid.NineGridSize, (int)nineGrid.NineGridSize, (int)nineGrid.NineGridSize), null, color);
             }
 
 
             if (nineGrid.MiddleLeft)
             {
-                spriteBatch.Draw(Resources.StaticResources.Theme.NineGridLeft.Texture, new Rectangle(actualPosition.X.AsInt() - nineGrid.NineGridSize, actualPosition.Y.AsInt(), nineGrid.NineGridSize, (int)this.GetSize().Y), null, color);
+                Resources.StaticResources.DrawManager.Draw(Resources.StaticResources.Theme.NineGridLeft.Texture, new Rectangle(actualPosition.X.AsInt() - (int)nineGrid.NineGridSize, actualPosition.Y.AsInt(), (int)nineGrid.NineGridSize, (int)this.GetSize().Y), null, color);
             }
 
             if (nineGrid.MiddleRight)
             {
-                spriteBatch.Draw(Resources.StaticResources.Theme.NineGridRight.Texture, new Rectangle(actualPosition.X.AsInt() + (int)this.GetSize().X, actualPosition.Y.AsInt(), nineGrid.NineGridSize, (int)this.GetSize().Y), null, color);
+                Resources.StaticResources.DrawManager.Draw(Resources.StaticResources.Theme.NineGridRight.Texture, new Rectangle(actualPosition.X.AsInt() + (int)this.GetSize().X, actualPosition.Y.AsInt(), (int)nineGrid.NineGridSize, (int)this.GetSize().Y), null, color);
             }
 
 
             if (nineGrid.BottomLeft)
             {
-                spriteBatch.Draw(Resources.StaticResources.Theme.NineGridBottomLeft.Texture, new Rectangle(actualPosition.X.AsInt() - nineGrid.NineGridSize, actualPosition.Y.AsInt() + (int)this.GetSize().Y, nineGrid.NineGridSize, nineGrid.NineGridSize), null, color);
+                Resources.StaticResources.DrawManager.Draw(Resources.StaticResources.Theme.NineGridBottomLeft.Texture, new Rectangle(actualPosition.X.AsInt() - (int)nineGrid.NineGridSize, actualPosition.Y.AsInt() + (int)this.GetSize().Y, (int)nineGrid.NineGridSize, (int)nineGrid.NineGridSize), null, color);
             }
 
 
             if (nineGrid.BottomCenter)
             {
-                spriteBatch.Draw(Resources.StaticResources.Theme.NineGridBottom.Texture, new Rectangle(actualPosition.X.AsInt(), actualPosition.Y.AsInt() + (int)this.GetSize().Y, (int)this.GetSize().X, nineGrid.NineGridSize), null, color);
+                Resources.StaticResources.DrawManager.Draw(Resources.StaticResources.Theme.NineGridBottom.Texture, new Rectangle(actualPosition.X.AsInt(), actualPosition.Y.AsInt() + (int)this.GetSize().Y, (int)this.GetSize().X, (int)nineGrid.NineGridSize), null, color);
             }
 
             if (nineGrid.BottomRight)
             {
-                spriteBatch.Draw(Resources.StaticResources.Theme.NineGridBottomRight.Texture, new Rectangle(actualPosition.X.AsInt() + (int)this.GetSize().X, actualPosition.Y.AsInt() + (int)this.GetSize().Y, nineGrid.NineGridSize, nineGrid.NineGridSize), null, color);
+                Resources.StaticResources.DrawManager.Draw(Resources.StaticResources.Theme.NineGridBottomRight.Texture, new Rectangle(actualPosition.X.AsInt() + (int)this.GetSize().X, actualPosition.Y.AsInt() + (int)this.GetSize().Y, (int)nineGrid.NineGridSize, (int)nineGrid.NineGridSize), null, color);
             }
 
         }
-    
 
-        base.Draw(spriteBatch);
-}
+        base.Draw();
+    }
 }
 

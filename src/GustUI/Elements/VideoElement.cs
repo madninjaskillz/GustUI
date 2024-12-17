@@ -23,14 +23,14 @@ namespace GustUI.Elements
             Set<SizeTrait>(new TVVector(video.Width, video.Height));
         }
 
-        public override void DrawToRenderTarget(SpriteBatch spriteBatch)
+        public override void DrawToRenderTarget()
         {
             if (player.State == MediaState.Stopped)
             {
                 player.Play(vid);
             }
-            spriteBatch.Draw(player.GetTexture(), new Microsoft.Xna.Framework.Rectangle(0, 0, vid.Width, vid.Height), Microsoft.Xna.Framework.Color.White);
-            base.DrawToRenderTarget(spriteBatch);
+            Resources.StaticResources.DrawManager.Draw(player.GetTexture(), new Microsoft.Xna.Framework.Rectangle(0, 0, vid.Width, vid.Height), Microsoft.Xna.Framework.Color.White);
+            base.DrawToRenderTarget();
         }
     }
 }

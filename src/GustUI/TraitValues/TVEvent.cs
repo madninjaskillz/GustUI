@@ -2,10 +2,17 @@
 
 namespace GustUI.TraitValues
 {
-    public class TVEvent : TraitValue
+    public class TVEvent<T> : TraitValue where T : TVEventArgs
     {
-        public Action<TVEventArgs> TriggerAction { get; set; }
+        public Action<T> TriggerAction { get; set; }
         public TVEvent() { }
-        public TVEvent(Action<TVEventArgs> triggerAction) { TriggerAction = triggerAction; }
+        public TVEvent(Action<T> triggerAction) { TriggerAction = triggerAction; }
     }
+
+    //public class TVEvent : TraitValue
+    //{
+    //    public Action<TVEvent> TriggerAction { get; set; }
+    //    public TVEvent() { }
+    //    public TVEvent(Action<TVEvent> triggerAction) { TriggerAction = triggerAction; }
+    //}
 }

@@ -18,8 +18,8 @@ namespace GustUI.Managers
     public class FontManager
     {
         GraphicsDevice graphicsDevice;
-        VirtualContent content;
-        public FontManager(GraphicsDevice graphicsDevice, VirtualContent content)
+        IContentManager content;
+        public FontManager(GraphicsDevice graphicsDevice, IContentManager content)
         {
             this.graphicsDevice = graphicsDevice;
             this.content = content; 

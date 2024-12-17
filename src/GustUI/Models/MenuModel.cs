@@ -1,4 +1,5 @@
-﻿using GustUI.TraitValues;
+﻿using GustUI.Managers;
+using GustUI.TraitValues;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,5 +14,7 @@ namespace GustUI.Models
         public String Icon { get; set; }
         public Action<ClickEventArgs> Action { get; set; }
         public List<MenuItemModel> SubItems { get; set; }
+        public InputManager.KeyboardShortcut Shortcut { get; set; }
+        public bool Enabled { get; set; } = true;
     }
 }

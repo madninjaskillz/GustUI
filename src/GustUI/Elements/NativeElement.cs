@@ -40,37 +40,38 @@ public class NativeElement : Element
     }
         base.Update(parent);
     }
-    public override void Draw(SpriteBatch spriteBatch)
+    public override void Draw()
     {
+        
         TVVector actualPosition = this.GetActualPosition();
 
         TVVector size = ElementTrait<SizeTrait>().Value();
 
         if (renderTarget != null)
         {
-            spriteBatch.Draw(renderTarget, this.GetActualPosition().AsXna, Color.White);
+            Resources.StaticResources.DrawManager.Draw(renderTarget, this.GetActualPosition().AsXna, Color.White);
         }
-
-        base.Draw(spriteBatch);
+        
+        base.Draw();
     }
 
-    public override void DrawOutOfProcess(SpriteBatch spriteBatch)
+    public override void DrawOutOfProcess()
     {
         if (renderTarget != null)
         {
             Resources.StaticResources.GraphicsDevice.SetRenderTarget(renderTarget);
             Resources.StaticResources.GraphicsDevice.Clear(Color.Green);
 
-            spriteBatch.Begin();
-            DrawToRenderTarget(spriteBatch);
-            spriteBatch.End();
+            Resources.StaticResources.DrawManager.Begin();
+            DrawToRenderTarget();
+            Resources.StaticResources.DrawManager.End();
 
             Resources.StaticResources.GraphicsDevice.SetRenderTarget(null);
         }
-        base.DrawOutOfProcess(spriteBatch);
+        base.DrawOutOfProcess();
     }
 
-    public virtual void DrawToRenderTarget(SpriteBatch spriteBatch)
+    public virtual void DrawToRenderTarget()
     {
     }
 }

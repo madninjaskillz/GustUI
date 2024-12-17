@@ -28,8 +28,8 @@ namespace GustUI.TraitValues
 
     public class TVBorder9Grid : TVBorderFill
     {
-        public float Opacity { get; set; } = 0.25f;
-        public int NineGridSize { get; set; } = 32;
+        public float Opacity { get; set; } = 0.5f;
+        public float NineGridSize { get; set; } = 32;
         public bool TopLeft { get; set; } = true;
         public bool TopCenter { get; set; } = true;
         public bool TopRight { get; set; } = true;

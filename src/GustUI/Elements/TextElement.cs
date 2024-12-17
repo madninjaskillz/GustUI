@@ -57,7 +57,7 @@ namespace GustUI.Elements
 
             return newText;
         }
-        public override void Draw(SpriteBatch spriteBatch)
+        public override void Draw()
         {
             if (this.ElementTrait<FontTrait>().Value().Family != null)
             {
@@ -106,7 +106,7 @@ namespace GustUI.Elements
                                     break;
                             }
                         }
-                        spriteBatch.DrawString(
+                        Resources.StaticResources.DrawManager.DrawString(
                         font,
                         line,
                             p+offsetVector,
@@ -118,7 +118,8 @@ namespace GustUI.Elements
                 }
             }            
 
-            base.Draw(spriteBatch);
+            
+            base.Draw();
         }
 
         public Vector2 CalculatedSize()

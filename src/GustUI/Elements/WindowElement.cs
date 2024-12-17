@@ -13,9 +13,9 @@ namespace GustUI.Elements;
 [ElementTraits(typeof(SizeTrait), typeof(PositionTrait), typeof(ChildrenTrait))]
 public class WindowElement : FilledRectangleElement
 {
-    public WindowElement(GameWindow gameWindow, GraphicsDevice graphicsDevice, VirtualContent virtualContent, ContentManager content) : base()
+    public WindowElement(SpriteBatch spriteBatch, GameWindow gameWindow, GraphicsDevice graphicsDevice, VirtualContent virtualContent, ContentManager content) : base()
     {
-        Resources.StaticResources = new Resources(graphicsDevice, virtualContent, content, this);
+        Resources.StaticResources = new Resources(spriteBatch, graphicsDevice, virtualContent, content, this);
         Resources.StaticResources.Theme = new Theme();
 
         gameWindow.ClientSizeChanged += GameWindow_ClientSizeChanged;
@@ -24,6 +24,8 @@ public class WindowElement : FilledRectangleElement
         this.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.DarkBlue,Color.Purple, Direction.Vertically));
         this.Set<BorderFillTrait>(new TVBorderColorFill(Color.White));
         this.Set<BorderSizeTrait, TVInt>(new TVInt(0));
+
+        AddChildElement<BackdropElement>();
     }
 
     private void GameWindow_ClientSizeChanged(object sender, EventArgs e)

@@ -25,6 +25,11 @@ namespace GustUI.TraitValues
     {
 
         public Tiling Tiling { get; set; }
+        public TVFillImage SetOpacity(float opacity)
+        {
+            Opacity = opacity;
+            return this;
+        }
     }
 
     public class TVFillSolidColor : TVFill
@@ -68,6 +73,19 @@ namespace GustUI.TraitValues
             return null;
         }
     }
+
+    public class TVBlurFill : TVFill
+    {
+        public float Ratio { get; set; }
+        public TVBlurFill(float ratio, TVFill overlay)
+        {
+            Ratio = ratio;
+            OverlayFill = overlay;
+        }
+
+        public TVFill OverlayFill { get; set; }
+    }
+
     public class TVFillSimpleGradient : TVFill
     {
         public Color PrimaryColor { get; }

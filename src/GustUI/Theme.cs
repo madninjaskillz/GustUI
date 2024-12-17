@@ -1,4 +1,5 @@
-﻿using GustUI.TraitValues;
+﻿using GustUI.Managers;
+using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using System;
@@ -13,19 +14,31 @@ namespace GustUI
     {
         private const float NineGridOpacity = 0.25f;
         public TVFont UiFont = new() { Family = "segoeuisl.ttf", Size = 24, Border = 0 };
+        public TVFont UiFontLarge = new() { Family = "segoeuisl.ttf", Size = 48, Border = 0 };
+        public TVFont UiFontSmall = new() { Family = "segoeuisl.ttf", Size = 12, Border = 0 };
         public TVFont SymbolFont = new() { Family = "segmdl2.ttf", Size = 24, Border = 0 };
         public TVFont AltSymbolFont = new() { Family = "SegoeIcons.ttf", Size = 24, Border = 0 };
 
         public Icons Icons = new Icons();
 
-        public TVFillImage NineGridTopLeft = new TVFillImage { Texture = Resources.StaticResources.Content.Load<Texture2D>("9grid/tl"), Opacity = NineGridOpacity };
-        public TVFillImage NineGridTop = new TVFillImage { Texture = Resources.StaticResources.Content.Load<Texture2D>("9grid/t"), Opacity = NineGridOpacity };
-        public TVFillImage NineGridTopRight = new TVFillImage { Texture = Resources.StaticResources.Content.Load<Texture2D>("9grid/tr"), Opacity = NineGridOpacity };
-        public TVFillImage NineGridLeft = new TVFillImage { Texture = Resources.StaticResources.Content.Load<Texture2D>("9grid/l"), Opacity = NineGridOpacity };
-        public TVFillImage NineGridRight = new TVFillImage { Texture = Resources.StaticResources.Content.Load<Texture2D>("9grid/r"), Opacity = NineGridOpacity };
-        public TVFillImage NineGridBottomLeft = new TVFillImage { Texture = Resources.StaticResources.Content.Load<Texture2D>("9grid/bl"), Opacity = NineGridOpacity };
-        public TVFillImage NineGridBottom = new TVFillImage { Texture = Resources.StaticResources.Content.Load<Texture2D>("9grid/b"), Opacity = NineGridOpacity };
-        public TVFillImage NineGridBottomRight = new TVFillImage { Texture = Resources.StaticResources.Content.Load<Texture2D>("9grid/br"), Opacity = NineGridOpacity };
+        public TVFillImage MenuLogo = null;
+
+
+        public Dictionary<InputManager.KeyboardModifiers, TVFillImage> KBModifiers = new Dictionary<InputManager.KeyboardModifiers, TVFillImage>
+        {
+            { InputManager.KeyboardModifiers.ctrl, new TVFillImage { Texture = Resources.StaticResources.UUContent.GetTexture("modifier_ctrl.png") } },
+                { InputManager.KeyboardModifiers.shift, new TVFillImage { Texture = Resources.StaticResources.UUContent.GetTexture("modifier_shift.png") } },
+                { InputManager.KeyboardModifiers.alt, new TVFillImage { Texture = Resources.StaticResources.UUContent.GetTexture("modifier_alt.png") } }
+        };
+
+        public TVFillImage NineGridTopLeft = new TVFillImage     { Texture = Resources.StaticResources.UUContent.GetTexture("tl.png"), Opacity = NineGridOpacity };
+        public TVFillImage NineGridTop = new TVFillImage         { Texture = Resources.StaticResources.UUContent.GetTexture("t.png"), Opacity = NineGridOpacity };
+        public TVFillImage NineGridTopRight = new TVFillImage    { Texture = Resources.StaticResources.UUContent.GetTexture("tr.png"), Opacity = NineGridOpacity };
+        public TVFillImage NineGridLeft = new TVFillImage        { Texture = Resources.StaticResources.UUContent.GetTexture("l.png"), Opacity = NineGridOpacity };
+        public TVFillImage NineGridRight = new TVFillImage       { Texture = Resources.StaticResources.UUContent.GetTexture("r.png"), Opacity = NineGridOpacity };
+        public TVFillImage NineGridBottomLeft = new TVFillImage  { Texture = Resources.StaticResources.UUContent.GetTexture("bl.png"), Opacity = NineGridOpacity };
+        public TVFillImage NineGridBottom = new TVFillImage      { Texture = Resources.StaticResources.UUContent.GetTexture("b.png"), Opacity = NineGridOpacity };
+        public TVFillImage NineGridBottomRight = new TVFillImage { Texture = Resources.StaticResources.UUContent.GetTexture("br.png"), Opacity = NineGridOpacity };
 
         public TVFill PositiveButtonFill = new TVFillSimpleGradient(Color.DarkGreen, Color.DarkGreen * 0.5f, Direction.Vertically);
         public TVFill NegativeButtonFill = new TVFillSimpleGradient(Color.DarkRed, Color.DarkRed * 0.5f, Direction.Vertically);
@@ -33,9 +46,9 @@ namespace GustUI
 
         public ButtonStates FruitMenuItemStates = new ButtonStates
         {
-            NormalFill = new TVFillSolidColor(Color.White),
-            HoveredFill = new TVFillSimpleGradient(Color.LightGray, Color.DarkGray, Direction.Vertically),
-            PressedFill = new TVFillSimpleGradient(Color.DarkGray, Color.Black, Direction.Vertically)
+            NormalFill = new TVFillSolidColor(Color.Transparent),
+            HoveredFill = new TVFillSimpleGradient(Color.DarkGray * 0.5f, Color.DarkGray * 0.8f, Direction.Vertically),
+            PressedFill = new TVFillSimpleGradient(Color.DarkGray * 0.7f, Color.DarkGray * 0.9f, Direction.Vertically)
         };
 
         public ButtonStates PositiveButtonStates = new ButtonStates
@@ -70,5 +83,7 @@ namespace GustUI
     public class Icons
     {
         public String CloseIcon = Char.ConvertFromUtf32((int)UIFont.Symbol.Cancel);
+        public String MinimizeIcon = Char.ConvertFromUtf32((int)UIFont.Symbol.BackToWindow);
+        public String MaximizeIcon = Char.ConvertFromUtf32((int)UIFont.Symbol.FullScreen);
     }
 }

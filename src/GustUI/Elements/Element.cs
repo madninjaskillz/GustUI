@@ -1,5 +1,6 @@
 ﻿using GustUI.Attributes;
 using GustUI.Extensions;
+using GustUI.Managers;
 using GustUI.Traits;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
@@ -13,12 +14,15 @@ using System.Reflection;
 using System.Reflection.Metadata;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 
 namespace GustUI.Elements;
 
 
 public class Element : IDisposable
 {
+    private Guid Id = Guid.NewGuid();
+
     [JsonIgnore]
     public Element Parent { get; set; } = null;
     private string elementName = null;
@@ -219,24 +223,51 @@ public class Element : IDisposable
         return (bool)method.Invoke(this.ElementTraitByTypeFromObject(typeof(TraitType)), new object[] { value });
     }
 
-    public virtual void Draw(SpriteBatch spriteBatch)
+    public virtual void Draw()
     {
         if (this.HasTrait<ChildrenTrait>())
         {
             foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
             {
-                child.Draw(spriteBatch);
+                child.Draw();
             }
         }
     }
 
-    public virtual void DrawOutOfProcess(SpriteBatch spriteBatch)
+    public virtual void DebugDraw()
+    {
+        Resources.StaticResources.DrawManager.DrawRectangle(this.GetActualPosition().Rectangle(this.ElementTrait<SizeTrait>().Value()), Color.Red, 1);
+        if (this.HasTrait<ChildrenTrait>())
+        {
+            foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
+            {
+                child.DebugDraw();
+            }
+        }
+    }
+
+    public List<Action> FlattenDraws()
+    {
+        List<Action> existing = new List<Action>();
+        existing.Add(Draw);
+        if (this.HasTrait<ChildrenTrait>())
+        {
+            foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
+            {
+                existing.AddRange(child.FlattenDraws());
+            }
+        }
+
+        return existing;
+    }
+
+    public virtual void DrawOutOfProcess()
     {
         if (this.HasTrait<ChildrenTrait>())
         {
             foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
             {
-                child.DrawOutOfProcess(spriteBatch);
+                child.DrawOutOfProcess();
             }
         }
     }
@@ -252,13 +283,22 @@ public class Element : IDisposable
         if (x is ClickEventArgs clickEventArgs)
         {
             dragOffset = clickEventArgs.GlobalMousePosition.AsXna;
-
         }
+
+        this.Set<OnExitTrait>(new TVEvent<ClickEventArgs>((x) =>
+        {
+            if (x.MouseState.LeftButton == ButtonState.Released)
+            {
+                handleStopDrag(x);
+            }
+        }));
     }
+
+    int escapeDragging = 0;
 
     internal void MoveToFront()
     {
-        
+
         this.Depth = Resources.StaticResources.RootWindow.Children.Items.Any() ? Resources.StaticResources.RootWindow.Children.Items.Max(x => x.Depth) + 1 : 0;
 
     }
@@ -306,7 +346,10 @@ public class Element : IDisposable
 
         return false;
     }
-
+    public bool IsMouseOver()
+    {
+        return IsMouseOver(Mouse.GetState().Position.ToVector2());
+    }
     public bool IsMouseOver(Vector2 position)
     {
         if (HasTrait<SizeTrait>() && HasTrait<PositionTrait>())
@@ -326,6 +369,13 @@ public class Element : IDisposable
     public virtual void Update(Element parent = null)
     {
         MouseState mouseState = Mouse.GetState();
+
+
+        if (BeingDragged && mouseState.LeftButton==ButtonState.Released)
+        {
+            BeingDragged = false;
+        }
+
 
         if (this.HasTrait<ChildrenTrait>())
         {
@@ -372,6 +422,6 @@ public class Element : IDisposable
 
     public virtual void Dispose()
     {
-      
+
     }
 }

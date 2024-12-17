@@ -13,12 +13,16 @@ namespace GustUI
 {
     public class Resources
     {
+       
         public GraphicsDevice GraphicsDevice;
         public Texture2D Pixel;
         public WindowElement RootWindow;
-        public VirtualContent VirtualContent;
+        public IContentManager VirtualContent;
+        public IContentManager UUContent;
         public ContentManager Content;
-        public Resources(GraphicsDevice graphicsDevice, VirtualContent virtualContent, ContentManager content, WindowElement root)
+        public DrawManager DrawManager;
+        public RenderTarget2D RenderTarget;
+        public Resources(SpriteBatch spriteBatch, GraphicsDevice graphicsDevice, VirtualContent virtualContent, ContentManager content, WindowElement root)
         {
             RootWindow = root;
             this.GraphicsDevice = graphicsDevice;
@@ -26,10 +30,12 @@ namespace GustUI
             Pixel.SetData<Color>(new Color[1] { Color.White });
             VirtualContent = virtualContent;
             Content = content;
+            UUContent = new UUContent(new _Embedded.UUContentDictionary());
 
-            FontManager = new FontManager(graphicsDevice, virtualContent);
+            FontManager = new FontManager(graphicsDevice, UUContent);
             InputManager = new InputManager();
             DrawOOPManager = new DrawOOPManager();
+            DrawManager = new DrawManager(spriteBatch);
         }
 
         public void Update()

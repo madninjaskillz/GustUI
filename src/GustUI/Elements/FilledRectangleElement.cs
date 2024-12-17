@@ -28,7 +28,7 @@ public class FilledRectangleElement : RectangleElement
             }
         }
     }
-    public override void Draw(SpriteBatch spriteBatch)
+    public override void Draw()
     {
         BackgroundFillTrait fill = ElementTrait<BackgroundFillTrait>();
         Ensure.NotNull(fill, nameof(fill));
@@ -56,34 +56,37 @@ public class FilledRectangleElement : RectangleElement
             }
         }
 
+        if (fillType is TVBlurFill blurFill)
+        {
+            var rt = Resources.StaticResources.DrawManager.GetBlurredTargetClone(blurFill.Ratio);
+            if (rt != null)
+            {
+                Resources.StaticResources.DrawManager.Draw(rt, rect, rect, Color.White * blurFill.Opacity);
+            }
+            fillType = blurFill.OverlayFill;
+        }
+
         switch (fillType)
         {
             case TVFillSolidColor solidColor:
-                {
-                    spriteBatch.DrawFilledRectangle(rect, solidColor.Color*solidColor.Opacity);
-                    break;
-                }
+                Resources.StaticResources.DrawManager.DrawFilledRectangle(rect, solidColor.Color * solidColor.Opacity);
+                break;
             case TVFillImage image:
-                {
-                    spriteBatch.Draw(image.Texture, rect, Color.White*image.Opacity);
-                    break;
-                }
+                Resources.StaticResources.DrawManager.Draw(image.Texture, rect, Color.White * image.Opacity);
+                break;
             case TVFillSimpleGradient image:
-                {
-                    spriteBatch.Draw(image.Texture, rect, Color.White*image.Opacity);
-                    break;
-                }
+                Resources.StaticResources.DrawManager.Draw(image.Texture, rect, Color.White * image.Opacity);
+                break;
             case TVVideoFill video:
+                var texture = video.GetTexture();
+                if (texture != null)
                 {
-                    var texture = video.GetTexture();
-                    if (texture != null)
-                    {
-                        spriteBatch.Draw(texture, rect, Color.White*video.Opacity);
-                    }
-                    break;
+                    Resources.StaticResources.DrawManager.Draw(texture, rect, Color.White * video.Opacity);
                 }
+                break;
         }
 
-        base.Draw(spriteBatch);
+        
+        base.Draw();
     }
 }

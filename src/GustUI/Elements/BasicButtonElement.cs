@@ -27,7 +27,7 @@ namespace GustUI.Elements
             Setup();
         }
 
-        public BasicButtonElement(string text, Color foreground, ButtonStates buttonStates, TVVector position = null, TVVector size = null, TVEvent onClick = null)
+        public BasicButtonElement(string text, Color foreground, ButtonStates buttonStates, TVVector position = null, TVVector size = null, TVEvent<ClickEventArgs> onClick = null)
         {
             textElement = this.AddChildElement<TextElement>();
             Sync(textElement);
@@ -41,21 +41,21 @@ namespace GustUI.Elements
             Set<OnMouseRelease>(onClick);
 
             this.buttonState = buttonStates;
-            Set<OnEnterTrait>(new TVEvent((x) => Set<BackgroundFillTrait>(buttonState.HoveredFill)));
-            Set<OnExitTrait>(new TVEvent((x) => Set<BackgroundFillTrait>(buttonState.NormalFill)));
-            Set<OnMousePress>(new TVEvent((x) => Set<BackgroundFillTrait>(buttonState.PressedFill)));
-            Set<OnMouseRelease>(new TVEvent((x) => Set<BackgroundFillTrait>(buttonState.NormalFill)));
+            Set<OnEnterTrait>(new TVEvent<ClickEventArgs>((x) => Set<BackgroundFillTrait>(buttonState.HoveredFill)));
+            Set<OnExitTrait>(new TVEvent<ClickEventArgs>((x) => Set<BackgroundFillTrait>(buttonState.NormalFill)));
+            Set<OnMousePress>(new TVEvent<ClickEventArgs>((x) => Set<BackgroundFillTrait>(buttonState.PressedFill)));
+            Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => Set<BackgroundFillTrait>(buttonState.NormalFill)));
 
 
             Setup();
         }
 
-        public BasicButtonElement(string text, Color foreground, TVFill background, TVVector position = null, TVVector size = null, TVEvent onClick = null, TVFill hoverFill = null, TVFill clickFill = null) : this(Resources.StaticResources.Theme.UiFont, text, foreground, background, position, size, onClick, hoverFill, clickFill)
+        public BasicButtonElement(string text, Color foreground, TVFill background, TVVector position = null, TVVector size = null, TVEvent<ClickEventArgs> onClick = null, TVFill hoverFill = null, TVFill clickFill = null) : this(Resources.StaticResources.Theme.UiFont, text, foreground, background, position, size, onClick, hoverFill, clickFill)
         {
 
         }
 
-        public BasicButtonElement(TVFont font, string text, Color foreground, TVFill background, TVVector position = null, TVVector size = null, TVEvent onClick = null, TVFill hoverFill = null, TVFill clickFill = null)
+        public BasicButtonElement(TVFont font, string text, Color foreground, TVFill background, TVVector position = null, TVVector size = null, TVEvent<ClickEventArgs> onClick = null, TVFill hoverFill = null, TVFill clickFill = null)
         {
             textElement = this.AddChildElement<TextElement>();
             Sync(textElement);

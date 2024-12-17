@@ -10,16 +10,16 @@ namespace GustUI.Managers
 {
     public class DrawOOPManager
     {
-        private Dictionary<Element, Action<SpriteBatch>> _drawOutOfProcess = new Dictionary<Element, Action<SpriteBatch>>();
-        public void Draw(SpriteBatch spriteBatch)
+        private Dictionary<Element, Action> _drawOutOfProcess = new Dictionary<Element, Action>();
+        public void Draw()
         {
             foreach (var draw in _drawOutOfProcess.Values)
             {
-                draw(spriteBatch);
+                draw();
             }
         }
 
-        internal void Register(Element element, Action<SpriteBatch> drawOutOfProcess)
+        internal void Register(Element element, Action drawOutOfProcess)
         {
             _drawOutOfProcess.Add(element, drawOutOfProcess);
         }
