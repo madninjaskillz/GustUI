@@ -2,7 +2,7 @@
 
 namespace GustUI.Traits
 {
-    public class OnClickTrait : Trait<TVEvent<ClickEventArgs>> { }
+    public class OnMouseButtonHeldDown : Trait<TVEvent<ClickEventArgs>> { }
 
     public class OnMousePress : Trait<TVEvent<ClickEventArgs>> { }
     public class OnMouseRelease : Trait<TVEvent<ClickEventArgs>> { }
@@ -12,4 +12,5 @@ namespace GustUI.Traits
     public class OnRightClickTrait : Trait<TVEvent<ClickEventArgs>> { }
     public class OnDoubleClickTrait : Trait<TVEvent<ClickEventArgs>> { }
 
+    public class  OnScrollTrait : Trait<TVEvent<ScrollEventArgs>> { }
 }

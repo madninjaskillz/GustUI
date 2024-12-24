@@ -11,47 +11,21 @@ using System.Linq;
 
 namespace GustUI.Elements
 {
-    [ElementTraits(typeof(BodyTextTrait), typeof(FontTrait), typeof(ForegroundColorTrait), typeof(OnClickTrait))]
+    [ElementTraits(typeof(BodyTextTrait), typeof(FontTrait), typeof(ForegroundColorTrait), typeof(OnMouseButtonHeldDown))]
     public class ModalWindowElement : FilledRectangleElement
     {
-        private TVVector fs_prepos;
-        private TVVector fs_presize;
-        internal bool isFullScreen;
-        bool sizeTransition = false;
-
-        private Vector2 desired_position;
-        private Vector2 desired_size = Vector2.Zero;
-        internal void ToggleFullScreen()
-        {
-            isFullScreen = !isFullScreen;
-            if (isFullScreen)
-            {
-                fs_prepos = ElementTrait<PositionTrait>().Value();
-                fs_presize = ElementTrait<SizeTrait>().Value();
-                desired_position = new Vector2(0, 40);
-                desired_size = new Vector2(Resources.StaticResources.RootWindow.GetSize().X, Resources.StaticResources.RootWindow.GetSize().Y - 40);
-                sizeTransition = true;
-            }
-            else
-            {
-                desired_size = fs_presize.AsXna;
-                desired_position = fs_prepos.AsXna;
-                sizeTransition = true;
-            }
-        }
-        
-
         private ModalTitleBarElement titleBarElement;
         private List<BasicButtonElement> buttons = new List<BasicButtonElement>();
         private FilledRectangleElement buttonBackgroundElement;
 
+
+        public bool FitModalToContent { get; private set; } = true;
         private Element content;
         public ModalWindowElement()
         {
 
             titleBarElement = this.AddChildElement<ModalTitleBarElement>();
             buttonBackgroundElement = this.AddChildElement<FilledRectangleElement>();
-
 
             Setup();
         }
@@ -77,6 +51,7 @@ namespace GustUI.Elements
 
             titleBarElement = new ModalTitleBarElement(
                 title,
+                this,
                 new TVVector(0, 0),
                 new TVVector(size != null ? size.X : 400, 40));
 
@@ -121,6 +96,7 @@ namespace GustUI.Elements
 
             titleBarElement = new ModalTitleBarElement(
                 title,
+                this,
                 new TVVector(0, 0),
                 new TVVector(size != null ? size.X : 400, 40));
 
@@ -129,7 +105,7 @@ namespace GustUI.Elements
             this.content = body;
             this.AddChild(this.content, "content");
 
-            content.Set<PositionTrait>(new TVVector(10, 50));
+            content.Set<PositionTrait>(new TVVector(0, 0));
 
 
             if (this.buttons.Count > 0)
@@ -186,9 +162,20 @@ namespace GustUI.Elements
             justSpawned = true;
         }
         private bool justSpawned = false;
+        private int maximizeAttemptCount = 0;
         public override void Update(Element parent = null)
         {
             base.Update(parent);
+
+            if (FitModalToContent)
+            {
+                float contentHeight = content is TextElement textElement ? textElement.CalculatedSize().Y : content.GetSize().Y;
+                float contentWidth = content is TextElement tx ? tx.CalculatedSize().X : content.GetSize().X;
+                float buttonHeight = (this.buttons.Count > 0 ? 80 : 10);
+
+                this.Set<SizeTrait>(new TVVector(contentWidth, 40 + contentHeight + buttonHeight));
+            }
+
             var size = this.GetSize();
 
             Vector2 calculatedModalSize = size.AsXna;
@@ -196,30 +183,63 @@ namespace GustUI.Elements
             Vector2 windowSize = Resources.StaticResources.RootWindow.GetSize().AsXna;
             float opacity = BeingDragged ? 0.15f : 0.35f;
 
-            if (actualPosition.X + calculatedModalSize.X > windowSize.X)
-            {
-                Set<PositionTrait>(new TVVector(windowSize.X - calculatedModalSize.X, actualPosition.Y));
-            }
+            bool limitToScreenSpace = false;
 
-            if (actualPosition.Y + calculatedModalSize.Y > windowSize.Y)
+            if (limitToScreenSpace)
             {
-                Set<PositionTrait>(new TVVector(actualPosition.X, windowSize.Y - calculatedModalSize.Y));
-            }
+                if (actualPosition.X + calculatedModalSize.X > windowSize.X)
+                {
+                    Set<PositionTrait>(new TVVector(windowSize.X - calculatedModalSize.X, actualPosition.Y));
+                }
 
-            float topLimit = 0;
-            if (Resources.StaticResources.RootWindow.Children.Items.Any(x => x is FruitMenuElement))
-            {
-                topLimit = Resources.StaticResources.RootWindow.Children.Items.First(x => x is FruitMenuElement).GetSize().Y;
-            }
+                if (actualPosition.Y + calculatedModalSize.Y > windowSize.Y)
+                {
+                    Set<PositionTrait>(new TVVector(actualPosition.X, windowSize.Y - calculatedModalSize.Y));
+                }
 
-            if (actualPosition.Y < topLimit)
-            {
-                Set<PositionTrait>(new TVVector(actualPosition.X, topLimit));
-            }
+                float topLimit = 0;
+                if (Resources.StaticResources.RootWindow.Children.Items.Any(x => x is FruitMenuElement))
+                {
+                    topLimit = Resources.StaticResources.RootWindow.Children.Items.First(x => x is FruitMenuElement).GetSize().Y;
+                }
 
-            if (actualPosition.X < 0)
+                if (actualPosition.Y < topLimit)
+                {
+                    Set<PositionTrait>(new TVVector(actualPosition.X, topLimit));
+                    
+                }
+
+                if (actualPosition.X < 0)
+                {
+                    Set<PositionTrait>(new TVVector(0, actualPosition.Y));
+                }
+            }
+            else
             {
-                Set<PositionTrait>(new TVVector(0, actualPosition.Y));
+                float topLimit = 0;
+                if (Resources.StaticResources.RootWindow.Children.Items.Any(x => x is FruitMenuElement))
+                {
+                    topLimit = Resources.StaticResources.RootWindow.Children.Items.First(x => x is FruitMenuElement).GetSize().Y;
+                }
+
+                if (!isFullScreen)
+                {
+                    if (actualPosition.Y < topLimit)
+                    {
+                        Set<PositionTrait>(new TVVector(actualPosition.X, topLimit));
+                        maximizeAttemptCount++;
+                        if (maximizeAttemptCount > 10)
+                        {
+                            ToggleFullScreen();
+                            maximizeAttemptCount = 0;
+                        }
+                    }
+                    else
+                    {
+                        maximizeAttemptCount = 0;
+                    }
+                }
+
             }
 
             if (justSpawned)
@@ -246,21 +266,7 @@ namespace GustUI.Elements
             //    Set<PositionTrait>(new TVVector(0, 40));
             //}
 
-            if (sizeTransition)
-            {
-                var currentSize = this.ElementTrait<SizeTrait>().Value().AsXna;
-                var currentPosition = this.ElementTrait<PositionTrait>().Value().AsXna;
-
-                var newSize = Vector2.Lerp(currentSize, desired_size, 0.4f);
-                var newPosition = Vector2.Lerp(currentPosition, desired_position, 0.4f);
-                Set<SizeTrait>(new TVVector(newSize));
-                Set<PositionTrait>(new TVVector(newPosition));
-
-                if (Math.Abs(newSize.X - desired_size.X) < 1 && Math.Abs(newSize.Y - desired_size.Y) < 1)
-                {
-                    sizeTransition = false;
-                }
-            }
+           
             buttonBackgroundElement.Set<PositionTrait>(new TVVector(0, size.Y - 80));
             buttonBackgroundElement.Set<SizeTrait>(new TVVector(size.X, 80));
             float xPos = size.X - 20;
@@ -270,7 +276,8 @@ namespace GustUI.Elements
                 xPos -= button.GetSize().X + 20;
             }
 
-            content.Set<PositionTrait>(new TVVector((size.X / 2f) - (content.GetSize().X / 2f), (size.Y / 2f) - (content.GetSize().Y / 2f)));
+            //content.Set<PositionTrait>(new TVVector((size.X / 2f) - (content.GetSize().X / 2f), (size.Y / 2f) - (content.GetSize().Y / 2f)));
+            content.Set<PositionTrait>(new TVVector((size.X / 2f) - (content.GetSize().X / 2f), 40));
 
         }
 

@@ -14,7 +14,7 @@ using static System.Net.Mime.MediaTypeNames;
 
 namespace GustUI.Elements
 {
-    [ElementTraits(typeof(TextTrait), typeof(FontTrait), typeof(ForegroundColorTrait), typeof(OnClickTrait), typeof(OnEnterTrait), typeof(OnExitTrait))]
+    [ElementTraits(typeof(TextTrait), typeof(FontTrait), typeof(ForegroundColorTrait), typeof(OnMouseButtonHeldDown), typeof(OnEnterTrait), typeof(OnExitTrait))]
     public class BasicButtonElement : FilledRectangleElement
     {
         private ButtonStates buttonState;

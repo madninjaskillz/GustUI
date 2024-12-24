@@ -14,6 +14,15 @@ namespace GustUI.Managers
 {
     public class InputManager
     {
+        public InputManager()
+        {
+            Hooks.Add(new KeyboardHook(new KeyboardShortcut(Keys.Oem8), () =>
+            {
+                Resources.StaticResources.DebugMode.Next();
+            }));
+        }
+
+
         public class KeyboardShortcut
         {
             public List<KeyboardModifiers> Modifiers;
@@ -26,8 +35,22 @@ namespace GustUI.Managers
             }
         }
 
+        public class KeyboardHook
+        {
+            public KeyboardShortcut Shortcut;
+            public Action TriggerAction;
+            public KeyboardHook(KeyboardShortcut shortcut, Action triggerAction)
+            {
+                Shortcut = shortcut;
+                TriggerAction = triggerAction;
+            }
+        }
+
+        public List<KeyboardHook> Hooks = new List<KeyboardHook>();
+
         public bool HaveInteracted { get; private set; }
         private MouseState previousMouseState;
+        private KeyboardState previousKeyboardState;
         public enum KeyboardModifiers
         {
             shift,
@@ -39,6 +62,21 @@ namespace GustUI.Managers
             Normal,
             Hovered,
             Pressed
+        }
+
+        public Keys FromModifier(KeyboardModifiers modifier)
+        {
+            switch (modifier)
+            {
+                case KeyboardModifiers.shift:
+                    return Keys.LeftShift;
+                case KeyboardModifiers.ctrl:
+                    return Keys.LeftControl;
+                case KeyboardModifiers.alt:
+                    return Keys.LeftAlt;
+                default:
+                    return Keys.None;
+            }
         }
 
         public ElementState GetElementState(Element element)
@@ -57,12 +95,22 @@ namespace GustUI.Managers
         public void Update()
         {
             MouseState mouseState = Mouse.GetState();
+            KeyboardState keyboardState = Keyboard.GetState();
+
+            var triggeredHooks = Hooks.Where(x => keyboardState.IsKeyDown(x.Shortcut.Key));
+            triggeredHooks = triggeredHooks.Where(x => !previousKeyboardState.IsKeyDown(x.Shortcut.Key));
+
+            triggeredHooks = triggeredHooks.Where(x => x.Shortcut.Modifiers == null || x.Shortcut.Modifiers.Count == 0 || x.Shortcut.Modifiers.All(m => keyboardState.IsKeyDown(FromModifier(m))));
+            foreach (KeyboardHook hook in triggeredHooks)
+            {
+                hook.TriggerAction();
+            }
 
             currentlyHovered = ProcessHovers(Resources.StaticResources.RootWindow, mouseState.Position.ToVector2());
 
             if (mouseState.LeftButton == ButtonState.Pressed)
             {
-                currentlyClicked = currentlyHovered.Where(e => e.HasTrait<OnMousePress>() || e.HasTrait<OnClickTrait>()).ToList();
+                currentlyClicked = currentlyHovered.Where(e => e.HasTrait<OnMousePress>() || e.HasTrait<OnMouseButtonHeldDown>()).ToList();
             }
             else
             {
@@ -76,15 +124,18 @@ namespace GustUI.Managers
                     element.ElementTrait<OnMousePress>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
                 }
             }
-            else if (mouseState.LeftButton == ButtonState.Released && previousMouseState.LeftButton == ButtonState.Pressed)
+            else if (mouseState.LeftButton == ButtonState.Pressed)
             {
                 HaveInteracted = true;
 
-                foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnClickTrait>()))
+                foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnMouseButtonHeldDown>()))
                 {
-                    element.ElementTrait<OnClickTrait>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
+                    element.ElementTrait<OnMouseButtonHeldDown>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
                 }
-
+            }
+            else if (mouseState.LeftButton == ButtonState.Released && previousMouseState.LeftButton == ButtonState.Pressed)
+            {
+                HaveInteracted = true;
                 foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnMouseRelease>()))
                 {
                     element.ElementTrait<OnMouseRelease>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
@@ -112,6 +163,7 @@ namespace GustUI.Managers
             FloatedElementCount = currentlyHovered.Count;
             FloatedElementName = string.Join(", ", currentlyHovered.Select(e => e.ElementName));
             previousMouseState = mouseState;
+            previousKeyboardState = keyboardState;
         }
 
         private List<Element> ProcessHovers(Element element, Vector2 position, int depth = 0, int root = -1, List<(int, Element)> HoveredElementsIndexed = null)

@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace GustUI.Elements
 {
-    [ElementTraits(typeof(OnHoverTrait), typeof(OnEnterTrait), typeof(OnExitTrait), typeof(OnClickTrait))]
+    [ElementTraits(typeof(OnHoverTrait), typeof(OnEnterTrait), typeof(OnExitTrait), typeof(OnMouseButtonHeldDown))]
     public class BackdropElement : FilledRectangleElement
     {
         int timeout = 0;
@@ -28,7 +28,7 @@ namespace GustUI.Elements
                     CloseMenus();
                 }
             }));
-            Set<OnClickTrait>(new TVEvent<ClickEventArgs>((x) => CloseMenus()));
+            Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => CloseMenus()));
         }
 
         private void CloseMenus()

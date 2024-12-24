@@ -1,4 +1,5 @@
 ﻿using GustUI.Attributes;
+using GustUI.Exceptions;
 using GustUI.Extensions;
 using GustUI.Managers;
 using GustUI.Traits;
@@ -12,6 +13,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Metadata;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -22,6 +24,8 @@ namespace GustUI.Elements;
 public class Element : IDisposable
 {
     private Guid Id = Guid.NewGuid();
+
+    public bool SizeFitsChildren { get; set; } = false;
 
     [JsonIgnore]
     public Element Parent { get; set; } = null;
@@ -40,6 +44,33 @@ public class Element : IDisposable
         }
     }
 
+    private TVVector fs_prepos;
+    private TVVector fs_presize;
+    internal bool isFullScreen;
+    bool sizeTransition = false;
+
+    private Vector2 desired_position;
+    private Vector2 desired_size = Vector2.Zero;
+    internal void ToggleFullScreen()
+    {
+        isFullScreen = !isFullScreen;
+        if (isFullScreen)
+        {
+            fs_prepos = ElementTrait<PositionTrait>().Value();
+            fs_presize = ElementTrait<SizeTrait>().Value();
+            desired_position = new Vector2(0, 40);
+            desired_size = new Vector2(Resources.StaticResources.RootWindow.GetSize().X, Resources.StaticResources.RootWindow.GetSize().Y - 40);
+            sizeTransition = true;
+        }
+        else
+        {
+            desired_size = fs_presize.AsXna;
+            desired_position = fs_prepos.AsXna;
+            sizeTransition = true;
+        }
+    }
+
+
     public T AddChildElement<T>(string name = null) where T : Element
     {
         var result = Activator.CreateInstance<T>();
@@ -53,7 +84,7 @@ public class Element : IDisposable
         return result as T;
     }
 
-    public void AddChildElement(Element element, string overrideName = null)
+    public virtual void AddChildElement(Element element, string overrideName = null)
     {
         element.Parent = this;
         if (this.HasTrait<ChildrenTrait>())
@@ -198,7 +229,7 @@ public class Element : IDisposable
         }
     }
 
-    public void AddChild(Element child, string name)
+    public virtual void AddChild(Element child, string name)
     {
         child.ElementName = name;
         Children.Add(child, name);
@@ -217,8 +248,12 @@ public class Element : IDisposable
 
     public bool Set<TraitType, TraitValueType>(TraitValueType value) where TraitValueType : TraitValue where TraitType : Trait<TraitValueType> => ElementTrait<TraitType>().Set(value);
 
-    public bool Set<TraitType>(TraitValue value)
+    public bool Set<TraitType>(TraitValue value, [CallerMemberName] string callMemberName = "")
     {
+        if (!HasTrait<TraitType>())
+        {
+            throw new MissingTraitException(typeof(TraitType), this, callMemberName);
+        }
         var method = typeof(TraitType).GetMethod("Set");
         return (bool)method.Invoke(this.ElementTraitByTypeFromObject(typeof(TraitType)), new object[] { value });
     }
@@ -279,6 +314,14 @@ public class Element : IDisposable
     internal void handleStartDrag(TVEventArgs x)
     {
         MoveToFront();
+
+        if (isFullScreen)
+        {
+            ToggleFullScreen();
+            desired_position = new Vector2(fs_prepos.AsXna.X,40);
+            //this.Set<PositionTrait>(new TVVector(this.ElementTrait<PositionTrait>().Value().X, 20));
+        }
+
         BeingDragged = true;
         if (x is ClickEventArgs clickEventArgs)
         {
@@ -391,6 +434,35 @@ public class Element : IDisposable
             dragOffset = mouseState.Position.ToVector2();
             ElementTrait<PositionTrait>().Value().X += (int)delta.X;
             ElementTrait<PositionTrait>().Value().Y += (int)delta.Y;
+        }
+
+        if (sizeTransition)
+        {
+            var currentSize = this.ElementTrait<SizeTrait>().Value().AsXna;
+            var currentPosition = this.ElementTrait<PositionTrait>().Value().AsXna;
+
+            var newSize = Vector2.Lerp(currentSize, desired_size, 0.4f);
+            var newPosition = Vector2.Lerp(currentPosition, desired_position, 0.4f);
+            Set<SizeTrait>(new TVVector(newSize));
+            Set<PositionTrait>(new TVVector(newPosition));
+
+            if (Math.Abs(newSize.X - desired_size.X) < 1 && Math.Abs(newSize.Y - desired_size.Y) < 1)
+            {
+                sizeTransition = false;
+            }
+        }
+
+        if (isFullScreen)
+        {
+            float topLimit = 0;
+            if (Resources.StaticResources.RootWindow.Children.Items.Any(x => x is FruitMenuElement))
+            {
+                topLimit = Resources.StaticResources.RootWindow.Children.Items.First(x => x is FruitMenuElement).GetSize().Y;
+            }
+
+
+            Set<SizeTrait>(new TVVector(Resources.StaticResources.RootWindow.GetSize().X, Resources.StaticResources.RootWindow.GetSize().Y - topLimit));
+            Set<PositionTrait>(new TVVector(0, topLimit));
         }
 
         previousMouseState = mouseState;

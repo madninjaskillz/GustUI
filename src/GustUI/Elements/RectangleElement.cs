@@ -8,7 +8,16 @@ using System;
 
 namespace GustUI.Elements;
 
-[ElementTraits(typeof(PositionTrait), typeof(SizeTrait), typeof(ChildrenTrait), typeof(BorderFillTrait), typeof(BorderSizeTrait), typeof(OnMousePress), typeof(OnMouseRelease), typeof(OnExitTrait))]
+[ElementTraits(
+    typeof(PositionTrait),
+    typeof(SizeTrait),
+    typeof(ChildrenTrait),
+    typeof(BorderFillTrait), 
+    typeof(BorderSizeTrait),
+    typeof(OnMouseButtonHeldDown),
+    typeof(OnMousePress), 
+    typeof(OnMouseRelease), 
+    typeof(OnExitTrait))]
 public class RectangleElement : Element
 {
     public override void Draw()

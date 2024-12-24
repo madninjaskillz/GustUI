@@ -22,6 +22,7 @@ namespace GustUI
         public ContentManager Content;
         public DrawManager DrawManager;
         public RenderTarget2D RenderTarget;
+        public DebugMode DebugMode = DebugMode.None;
         public Resources(SpriteBatch spriteBatch, GraphicsDevice graphicsDevice, VirtualContent virtualContent, ContentManager content, WindowElement root)
         {
             RootWindow = root;

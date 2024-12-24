@@ -20,6 +20,9 @@ namespace GustUI.Managers
         public bool IsInBatch { get; private set; } = false;
         private FrameCounter _frameCounter = new FrameCounter();
         private SpriteFont font = null;
+        private RasterizerState rasterizerState = new RasterizerState() { MultiSampleAntiAlias = false, ScissorTestEnable = true };
+        private BlendState blendState = null;
+        private SamplerState samplerState = null;
 
         public DrawManager(SpriteBatch spriteBatch)
         {
@@ -36,31 +39,97 @@ namespace GustUI.Managers
             return renderTarget;
         }
 
+        float debugBottom = 0;
+
         public void DrawLoop(GameTime gameTime)
         {
             var deltaTime = (float)gameTime.ElapsedGameTime.TotalSeconds;
 
             _frameCounter.Update(deltaTime);
 
-            var fps = string.Format("FPS: {0}", _frameCounter.AverageFramesPerSecond);
-            fps += "\r\n" + Resources.StaticResources.RootWindow.GetSize().ToString();
-            fps += "\r\n" + Resources.StaticResources.InputManager.FloatedElementCount + " " + Resources.StaticResources.InputManager.FloatedElementName;
 
             SetRenderTarget(null);
             Clear(Color.Transparent);
             Begin();
             Resources.StaticResources.RootWindow.Draw();
-            if (font == null)
+            var lerpSpeed = 0.5f;
+            if (Resources.StaticResources.DebugMode == DebugMode.Full)
             {
-                font = Resources.StaticResources.FontManager.LoadFont(Resources.StaticResources.Theme.UiFontSmall.Family, Resources.StaticResources.Theme.UiFontSmall.Size);
+                debugBottom = MathHelper.Lerp(debugBottom, (Resources.StaticResources.RootWindow.GetSize().Y - 50), lerpSpeed);
             }
-            Vector2 ps = new Vector2(0, Resources.StaticResources.RootWindow.GetSize().Y - 70);
-            DrawString(font, fps,ps+ new Vector2(1, 1), Color.Black);
-            DrawString(font, fps,ps+ new Vector2(3, 1), Color.Black);
-            DrawString(font, fps,ps+ new Vector2(1, 3), Color.Black);
-            DrawString(font, fps,ps+ new Vector2(3, 3), Color.Black);
-            DrawString(font, fps,ps+ new Vector2(2, 2), Color.White);
-            //Resources.StaticResources.RootWindow.DebugDraw();
+            else if (Resources.StaticResources.DebugMode == DebugMode.Mini)
+            {
+                debugBottom = MathHelper.Lerp(debugBottom, 200, lerpSpeed);
+            }
+            else
+            {
+                debugBottom = MathHelper.Lerp(debugBottom, 0, lerpSpeed);
+            }
+            int bottom = (int)debugBottom;
+
+            if (Resources.StaticResources.DebugMode != DebugMode.None)
+            {
+
+                var fps = string.Format("FPS: {0}", _frameCounter.AverageFramesPerSecond);
+                if (Resources.StaticResources.DebugMode != DebugMode.FPS)
+                {
+                    fps += "\r\n" + Resources.StaticResources.RootWindow.GetSize().ToString();
+                    fps += "\r\n" + Resources.StaticResources.InputManager.FloatedElementCount + " " + Resources.StaticResources.InputManager.FloatedElementName;
+                }
+                if (font == null)
+                {
+                    font = Resources.StaticResources.FontManager.LoadFont(Resources.StaticResources.Theme.UiFontSmall.Family, Resources.StaticResources.Theme.UiFontSmall.Size);
+                }
+                Vector2 ps = new Vector2(0, Resources.StaticResources.RootWindow.GetSize().Y - 70);
+                DrawString(font, fps, ps + new Vector2(1, 1), Color.Black);
+                DrawString(font, fps, ps + new Vector2(3, 1), Color.Black);
+                DrawString(font, fps, ps + new Vector2(1, 3), Color.Black);
+                DrawString(font, fps, ps + new Vector2(3, 3), Color.Black);
+                DrawString(font, fps, ps + new Vector2(2, 2), Color.White);
+
+                
+                SpriteBatchExtensions.DrawFilledRectangle(this, new Rectangle(0, 0, (int)Resources.StaticResources.RootWindow.GetSize().X, bottom), Color.Blue * 0.8f);
+
+                string consoleText = "CMD:>";
+                var ctHeight = (int)font.MeasureString(consoleText).Y;
+                var ctBorder = 2;
+                SpriteBatchExtensions.DrawFilledRectangle(this, new Rectangle(ctBorder, bottom - ctHeight - (ctBorder * 2), (int)Resources.StaticResources.RootWindow.GetSize().X - (ctBorder * 2), ctHeight + ctBorder), Color.Black * 0.8f);
+                bottom = bottom - ctHeight - (ctBorder * 2);
+
+                DrawString(font, consoleText, new Vector2(5, 0) + new Vector2(0, bottom), Color.Black);
+                DrawString(font, consoleText, new Vector2(5, 0) + new Vector2(2, bottom), Color.Black);
+                DrawString(font, consoleText, new Vector2(5, 0) + new Vector2(0, bottom + 2), Color.Black);
+                DrawString(font, consoleText, new Vector2(5, 0) + new Vector2(2, bottom + 2), Color.Black);
+                DrawString(font, consoleText, new Vector2(5, 0) + new Vector2(1, bottom + 1), Color.Yellow);
+
+            }
+
+
+            if (debugBottom > 1)
+            {
+
+                for (int i = Log.log.Count; i > 0; i--)
+                {
+                    var height = ((int)font.MeasureString(Log.log.ToArray()[i - 1].ToString()).Y) + 4;
+                    bottom = bottom - height;
+                
+                    DrawString(font, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(0, bottom), Color.Black*0.5f);
+                    DrawString(font, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(2, bottom), Color.Black * 0.5f);
+                    DrawString(font, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(0, bottom + 2), Color.Black * 0.5f);
+                    DrawString(font, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(2, bottom + 2), Color.Black * 0.5f);
+                    DrawString(font, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(1, bottom + 1), Color.White);
+
+                    if (bottom < 0)
+                    {
+                        break;
+                    }
+                }
+            }
+            if (Resources.StaticResources.DebugMode == DebugMode.Outlines)
+            {
+                Resources.StaticResources.RootWindow.DebugDraw();
+            }
+            
             End();
         }
 
@@ -91,7 +160,7 @@ namespace GustUI.Managers
                 End();
             }
 
-            if (renderTargetClone==null || renderTargetClone.Width != renderTarget.Width || renderTargetClone.Height != renderTarget.Height)
+            if (renderTargetClone == null || renderTargetClone.Width != renderTarget.Width || renderTargetClone.Height != renderTarget.Height)
             {
                 renderTargetClone = new RenderTarget2D(Resources.StaticResources.GraphicsDevice, renderTarget.Width, renderTarget.Height);
             }
@@ -164,7 +233,7 @@ namespace GustUI.Managers
         public void Begin()
         {
             IsInBatch = true;
-            spriteBatch.Begin();    
+            spriteBatch.Begin(SpriteSortMode.Immediate, blendState, samplerState, null, rasterizerState, null, null);
         }
 
         public void End()

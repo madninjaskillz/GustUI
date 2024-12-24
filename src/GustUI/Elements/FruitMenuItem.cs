@@ -13,7 +13,7 @@ using System.Threading.Tasks;
 
 namespace GustUI.Elements
 {
-    [ElementTraits(typeof(OnClickTrait), typeof(OnHoverTrait), typeof(OnExitTrait))]
+    [ElementTraits(typeof(OnMouseButtonHeldDown), typeof(OnHoverTrait), typeof(OnExitTrait))]
     public class FruitMenuItem : FilledRectangleElement
     {
         TextElement iconElement;
@@ -40,7 +40,7 @@ namespace GustUI.Elements
             var more = menuItem.SubItems?.Count > 0;
             Set<SizeTrait>(new TVVector(width, 40));
             Set<BackgroundFillTrait>(new TVSmartFill { States = Resources.StaticResources.Theme.FruitMenuItemStates });
-            Set<OnClickTrait>(new TVEvent<ClickEventArgs>((x) =>
+            Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) =>
             {
                 Log.This("doing click");
                 action(x);
@@ -68,7 +68,7 @@ namespace GustUI.Elements
                     moreElement.Set<TextTrait>(new TVText(UIFont.Symbol.More.Icon()));
 
 
-                    Set<OnClickTrait>(new TVEvent<ClickEventArgs>((x) => clickMore(x, menuItem.SubItems)));
+                    Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => clickMore(x, menuItem.SubItems)));
                     Set<OnExitTrait>(new TVEvent<ClickEventArgs>((x) =>
                     {
                         if (popup != null)

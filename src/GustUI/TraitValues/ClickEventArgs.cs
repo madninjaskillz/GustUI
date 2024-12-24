@@ -12,4 +12,10 @@ namespace GustUI.TraitValues
         public Element Element { get; set; }
 
     }
+
+    public class ScrollEventArgs : TVEventArgs
+    {
+        public float ScrollPosition { get; set; }
+        public float ScrollPercentage { get; set; }
+    }
 }

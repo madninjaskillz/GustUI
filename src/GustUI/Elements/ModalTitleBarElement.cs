@@ -12,27 +12,42 @@ namespace GustUI.Elements
         private BasicButtonElement dragBarElement;
         private BasicButtonElement closeButton;
         private BasicButtonElement sizeButton;
-
+        private bool hasMaximimizeButton;
         public ModalTitleBarElement()
         {
             dragBarElement = AddChildElement<BasicButtonElement>("drag bar");
             closeButton = AddChildElement<BasicButtonElement>("close button");
             sizeButton = AddChildElement<BasicButtonElement>("size button");
             Sync(closeButton);
-            Sync(sizeButton);
+            Sync(closeButton);
+            if (!((ModalWindowElement)Parent).FitModalToContent)
+            {
+                sizeButton = AddChildElement<BasicButtonElement>("size button");
+                Sync(sizeButton);
+            }
             Sync(dragBarElement);
             Setup();
         }
 
-        public ModalTitleBarElement(string title, TVVector position = null, TVVector size = null)
+        public ModalTitleBarElement(string title, Element parent, TVVector position = null, TVVector size = null)
         {
+
+            this.Parent = parent;
 
             dragBarElement = AddChildElement<BasicButtonElement>("drag bar");
             closeButton = AddChildElement<BasicButtonElement>("close button");
-            sizeButton = AddChildElement<BasicButtonElement>("size button");
+            
 
             Sync(closeButton);
-            Sync(sizeButton);
+
+            hasMaximimizeButton = Parent is ModalWindowElement modalWindowElement && !modalWindowElement.FitModalToContent;
+
+            if (hasMaximimizeButton)
+            {
+                sizeButton = AddChildElement<BasicButtonElement>("size button");
+                Sync(sizeButton);
+            }
+          
             Sync(dragBarElement);
 
 
@@ -49,15 +64,18 @@ namespace GustUI.Elements
             closeButton.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Red, Color.DarkRed, Direction.Vertically));
             closeButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
             closeButton.Set<PositionTrait>(new TVVector(size.X - size.Y, 0));
-            closeButton.Set<OnClickTrait>(new TVEvent<ClickEventArgs>((x) => Parent.Kill()));
+            closeButton.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => Parent.Kill()));
 
-            sizeButton.Set<SizeTrait>(new TVVector(size.Y, size.Y));
-            
-            sizeButton.Set<FontTrait>(Resources.StaticResources.Theme.AltSymbolFont);
-            sizeButton.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Blue, Color.DarkBlue, Direction.Vertically));
-            sizeButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
-            sizeButton.Set<PositionTrait>(new TVVector(size.X - (80), 0));
-            sizeButton.Set<OnClickTrait>(new TVEvent<ClickEventArgs>((x) => ((ModalWindowElement)Parent).ToggleFullScreen()));
+            if (hasMaximimizeButton)
+            {
+                sizeButton.Set<SizeTrait>(new TVVector(size.Y, size.Y));
+
+                sizeButton.Set<FontTrait>(Resources.StaticResources.Theme.AltSymbolFont);
+                sizeButton.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Blue, Color.DarkBlue, Direction.Vertically));
+                sizeButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
+                sizeButton.Set<PositionTrait>(new TVVector(size.X - (80), 0));
+                sizeButton.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => ((ModalWindowElement)Parent).ToggleFullScreen()));
+            }
 
             dragBarElement.Set<SizeTrait>(new TVVector(size.X - size.Y, size.Y));
             dragBarElement.Set<PositionTrait>(new TVVector(0, 0));
@@ -79,12 +97,15 @@ namespace GustUI.Elements
             Set<SizeTrait>(new TVVector(size.X,40));
             closeButton.Set<PositionTrait>(new TVVector(size.X - 40, 0));
             closeButton.Set<SizeTrait>(new TVVector(40, 40));
-            sizeButton.Set<PositionTrait>(new TVVector(size.X - 80, 0));
-            sizeButton.Set<SizeTrait>(new TVVector(40, 40));
+            if (hasMaximimizeButton)
+            {
+                sizeButton.Set<PositionTrait>(new TVVector(size.X - 80, 0));
+                sizeButton.Set<SizeTrait>(new TVVector(40, 40));
+                sizeButton.Set<TextTrait>(((ModalWindowElement)Parent).isFullScreen ? Resources.StaticResources.Theme.Icons.MinimizeIcon.ToTextTrait() : Resources.StaticResources.Theme.Icons.MaximizeIcon.ToTextTrait());
+            }
+            dragBarElement.Set<SizeTrait>(new TVVector(size.X - (hasMaximimizeButton ? 80 : 40), 40));
 
-            dragBarElement.Set<SizeTrait>(new TVVector(size.X - 80, 40));
-
-            sizeButton.Set<TextTrait>(((ModalWindowElement)Parent).isFullScreen ?  Resources.StaticResources.Theme.Icons.MinimizeIcon.ToTextTrait() : Resources.StaticResources.Theme.Icons.MaximizeIcon.ToTextTrait());
+           
             
         }
 

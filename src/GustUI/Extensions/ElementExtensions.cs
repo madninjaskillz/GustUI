@@ -3,6 +3,7 @@ using GustUI.Traits;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
 using System;
+using System.Linq;
 using System.Text.Json;
 
 namespace GustUI.Extensions
@@ -17,7 +18,25 @@ namespace GustUI.Extensions
             }
             else
             {
-                return element.ElementTrait<SizeTrait>().Value();
+                if (element.SizeFitsChildren && element.HasTrait<ChildrenTrait>())
+                {
+                    return new TVVector(element.Children.Items.Max(x => x.GetRelativePosition().AsXna + x.GetSize().AsXna));
+                }
+                else
+                {
+                    return element.ElementTrait<SizeTrait>().Value();
+                }
+            }
+        }
+        public static TVVector GetRelativePosition(this Element element)
+        {
+            if (!element.HasTrait<PositionTrait>())
+            {
+                return null;
+            }
+            else
+            {
+                return element.ElementTrait<PositionTrait>().Value();
             }
         }
         public static TVVector GetActualPosition(this Element element, Vector2? thisSize = null, bool managedHorizontalJustification=false)
