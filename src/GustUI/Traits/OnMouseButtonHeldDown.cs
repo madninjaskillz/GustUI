@@ -13,4 +13,7 @@ namespace GustUI.Traits
     public class OnDoubleClickTrait : Trait<TVEvent<ClickEventArgs>> { }
 
     public class  OnScrollTrait : Trait<TVEvent<ScrollEventArgs>> { }
+
+    public class OnScrollwheelChanged : Trait<TVEvent<ScrollEventArgs>> { }
+
 }

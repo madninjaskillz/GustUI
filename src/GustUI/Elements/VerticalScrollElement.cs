@@ -3,98 +3,68 @@ using GustUI.Extensions;
 using GustUI.Traits;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
+using System;
 
 namespace GustUI.Elements
 {
-    [ElementTraits(typeof(OnScrollTrait))]
+    [ElementTraits(typeof(OnScrollTrait), typeof(OnScrollwheelChanged))]
     public class VerticalScrollElement : FilledRectangleElement
     {
         private RectangleElement container = new RectangleElement();
-        private RectangleElement scrollBar = new FilledRectangleElement();
-        private RectangleElement scrollBarInner = new FilledRectangleElement();
-        private float scrollPosition = 0;
+        private VerticalScrollbarElement scrollBar;
 
-        private float scrollPercentage = 0;
-        private float sizePercentage = 0.5f;
         public VerticalScrollElement()
         {
+            scrollBar = new VerticalScrollbarElement(getContainerHeight);
+            
             base.AddChild(container, "container");
             base.AddChild(scrollBar, "scrollBar");
             container.SizeFitsChildren = true;
-            scrollBar.Set<BorderSizeTrait>(new TVInt(0));
-            scrollBar.Set<BorderFillTrait>(new TVBorderColorFill(Color.Transparent));
-            //scrollBar.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Gray, Color.DarkGray, Direction.Vertically));
 
-            scrollBarInner.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.DarkGray, Color.DarkGray * 0.8f, Direction.Vertically));
-            scrollBar.AddChild(scrollBarInner, "scrollBarInner");
-
-            scrollBarInner.Set<OnMouseButtonHeldDown>(new TVEvent<ClickEventArgs>(handleInnerDrag));
-            scrollBarInner.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>(stopInnerDrag));
-            scrollBarInner.Set<OnExitTrait>(new TVEvent<ClickEventArgs>(stopInnerDrag));
-
+            this.Set<OnScrollTrait>(new TVEvent<ScrollEventArgs>(x => handleScroll(x)));
+            this.Set<OnScrollwheelChanged>(new TVEvent<ScrollEventArgs>(x => scrollBar.HandleScrollWheel(x)));
+            setup();
         }
 
-        private void stopInnerDrag(ClickEventArgs args)
+        private void setup()
         {
-            innerDragOffset = null;
+            scrollBar.Set<SizeTrait>(new TVVector(20, this.GetSize().Y));
+            scrollBar.Set<PositionTrait>(new TVVector(this.GetSize().X - 20, 2));
         }
 
-        private void handleInnerDrag(ClickEventArgs args)
+        private float getContainerHeight()
         {
-            if (innerDragOffset != null)
-            {
-                var offset = args.GlobalMousePosition.AsXna-innerDragOffset.Value;
-                var containerSize = container.GetSize();
-                
-                var innerHeight = scrollBar.GetSize().Y * sizePercentage;
-                var innerY = (scrollBar.GetSize().Y - innerHeight) * scrollPercentage;
-                innerY += offset.Y;
-
-                var size = this.GetSize();
-                float maxScroll = containerSize.Y - size.Y;
-
-                scrollPercentage = (innerY) / (scrollBar.GetSize().Y - innerHeight);
-                scrollPosition = scrollPercentage * maxScroll;
-
-            }
-
-            innerDragOffset = args.GlobalMousePosition.AsXna;
+            var s = container.GetSize();
+            var h = s.Y;
+            return h;
         }
 
-        private Vector2? innerDragOffset = null;
+        private void handleScroll(ScrollEventArgs x)
+        {
+            TVVector oldPosition = container.GetRelativePosition();
+            var newPosition = new TVVector(this.GetRelativePosition().X, -x.ScrollPosition);
+
+            var delta = newPosition - oldPosition;
+
+            container.Set<PositionTrait>(newPosition);
+        }
+
+        private Vector2 previousSize = Vector2.Zero;
         public override void Update(Element parent = null)
         {
-            var containerSize = container.GetSize();
-            var size = this.GetSize();
-            float maxScroll = containerSize.Y - size.Y;
-
-            if (scrollPosition > maxScroll)
+            var thisSize = this.GetSize().AsXna;
+            if (thisSize.X != previousSize.X || thisSize.Y != previousSize.Y)
             {
-                scrollPosition = (int)maxScroll;
+                previousSize = thisSize;
+                setup();
             }
-
-            if (scrollPosition < 0)
-            {
-                scrollPosition = 0;
-            }
-            scrollPercentage = scrollPosition / maxScroll;
-            sizePercentage = size.Y / containerSize.Y;
-            container.Set<PositionTrait>(new TVVector(0, -scrollPosition));
-
-
-            scrollBar.Set<PositionTrait>(new TVVector(this.GetSize().X - 20, 2));
-            scrollBar.Set<SizeTrait>(new TVVector(18, this.GetSize().Y - 4));
-
-            var innerHeight = scrollBar.GetSize().Y * sizePercentage;
-            var innerY = (scrollBar.GetSize().Y - innerHeight) * scrollPercentage;
-            scrollBarInner.Set<SizeTrait>(new TVVector(14, innerHeight));
-            scrollBarInner.Set<PositionTrait>(new TVVector(2, innerY));
-
             base.Update(parent);
         }
+
         public override void Draw()
         {
             var size = this.GetSize();
+            
             var position = this.GetActualPosition();
             var rect = new Rectangle((int)position.X, (int)position.Y, (int)size.X, (int)size.Y);
             Resources.StaticResources.GraphicsDevice.ScissorRectangle = rect;

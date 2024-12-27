@@ -1,5 +1,6 @@
 ﻿using GustUI.Elements;
 using GustUI.Traits;
+using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -14,9 +15,27 @@ namespace GustUI.Managers
 {
     public class InputManager
     {
+
+        public List<KeyboardHook> Hooks = new List<KeyboardHook>();
+
+        public bool HaveInteracted { get; private set; }
+        private MouseState previousMouseState;
+        private KeyboardState previousKeyboardState;
+        private int previousScrollWheelValue;
+        private List<Element> currentlyHovered = new List<Element>();
+        private List<Element> currentlyClicked = new List<Element>();
+        
+        internal int FloatedElementCount { get; private set; }
+        internal string FloatedElementName { get; private set; }
+
         public InputManager()
         {
             Hooks.Add(new KeyboardHook(new KeyboardShortcut(Keys.Oem8), () =>
+            {
+                Resources.StaticResources.DebugMode.Next();
+            }));
+
+            Hooks.Add(new KeyboardHook(new KeyboardShortcut(Keys.OemTilde), () =>
             {
                 Resources.StaticResources.DebugMode.Next();
             }));
@@ -46,11 +65,7 @@ namespace GustUI.Managers
             }
         }
 
-        public List<KeyboardHook> Hooks = new List<KeyboardHook>();
-
-        public bool HaveInteracted { get; private set; }
-        private MouseState previousMouseState;
-        private KeyboardState previousKeyboardState;
+      
         public enum KeyboardModifiers
         {
             shift,
@@ -86,17 +101,12 @@ namespace GustUI.Managers
             return ElementState.Normal;
         }
 
-        private List<Element> currentlyHovered = new List<Element>();
-        private List<Element> currentlyClicked = new List<Element>();
-
-        internal int FloatedElementCount { get; private set; }
-        internal string FloatedElementName { get; private set; }
 
         public void Update()
         {
             MouseState mouseState = Mouse.GetState();
             KeyboardState keyboardState = Keyboard.GetState();
-
+            int scrollWheel = mouseState.ScrollWheelValue;
             var triggeredHooks = Hooks.Where(x => keyboardState.IsKeyDown(x.Shortcut.Key));
             triggeredHooks = triggeredHooks.Where(x => !previousKeyboardState.IsKeyDown(x.Shortcut.Key));
 
@@ -105,8 +115,17 @@ namespace GustUI.Managers
             {
                 hook.TriggerAction();
             }
-
+            
             currentlyHovered = ProcessHovers(Resources.StaticResources.RootWindow, mouseState.Position.ToVector2());
+
+            if (scrollWheel != previousScrollWheelValue)
+            {
+                foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnScrollTrait>()))
+                {
+                    element.ElementTrait<OnScrollwheelChanged>().Value().TriggerAction?.Invoke(new ScrollEventArgs { ScrollWheel = scrollWheel, ScrollWheelDelta = previousScrollWheelValue-scrollWheel });
+                }
+                previousScrollWheelValue = scrollWheel;
+            }
 
             if (mouseState.LeftButton == ButtonState.Pressed)
             {
@@ -141,6 +160,8 @@ namespace GustUI.Managers
                     element.ElementTrait<OnMouseRelease>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
                 }
             }
+
+            
 
             var previouslyHovered = ProcessHovers(Resources.StaticResources.RootWindow, previousMouseState.Position.ToVector2());
             var newlyHovered = currentlyHovered.Except(previouslyHovered);

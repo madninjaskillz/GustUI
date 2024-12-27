@@ -17,5 +17,8 @@ namespace GustUI.TraitValues
     {
         public float ScrollPosition { get; set; }
         public float ScrollPercentage { get; set; }
+
+        public int ScrollWheel { get; set; }
+        public int ScrollWheelDelta { get; set; }
     }
 }
