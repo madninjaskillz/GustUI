@@ -7,7 +7,7 @@ using System;
 
 namespace GustUI.Elements
 {
-    [ElementTraits(typeof(OnScrollTrait), typeof(OnScrollwheelChanged))]
+    [ElementTraits(typeof(OnScrollTrait), typeof(OnScrollWheelChanged))]
     public class VerticalScrollElement : FilledRectangleElement
     {
         private RectangleElement container = new RectangleElement();
@@ -22,7 +22,7 @@ namespace GustUI.Elements
             container.SizeFitsChildren = true;
 
             this.Set<OnScrollTrait>(new TVEvent<ScrollEventArgs>(x => handleScroll(x)));
-            this.Set<OnScrollwheelChanged>(new TVEvent<ScrollEventArgs>(x => scrollBar.HandleScrollWheel(x)));
+            this.Set<OnScrollWheelChanged>(new TVEvent<ScrollEventArgs>(x => scrollBar.HandleScrollWheel(x)));
             setup();
         }
 
@@ -67,9 +67,11 @@ namespace GustUI.Elements
             
             var position = this.GetActualPosition();
             var rect = new Rectangle((int)position.X, (int)position.Y, (int)size.X, (int)size.Y);
-            Resources.StaticResources.GraphicsDevice.ScissorRectangle = rect;
+            Resources.StaticResources.DrawManager.SetScissor(rect);
+//            Resources.StaticResources.GraphicsDevice.ScissorRectangle = rect;
             base.Draw();
-            Resources.StaticResources.GraphicsDevice.ScissorRectangle = new Rectangle(0, 0, (int)Resources.StaticResources.RootWindow.GetSize().X, (int)Resources.StaticResources.RootWindow.GetSize().Y);
+            Resources.StaticResources.DrawManager.SetScissor(null);
+//            Resources.StaticResources.GraphicsDevice.ScissorRectangle = new Rectangle(0, 0, (int)Resources.StaticResources.RootWindow.GetSize().X, (int)Resources.StaticResources.RootWindow.GetSize().Y);
         }
 
         public override void AddChildElement(Element element, string overrideName = null)

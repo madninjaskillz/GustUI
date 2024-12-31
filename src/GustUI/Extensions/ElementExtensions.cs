@@ -14,13 +14,23 @@ namespace GustUI.Extensions
         {
             if (!element.HasTrait<SizeTrait>())
             {
-                return null;
+                return new TVVector(0,0);
             }
             else
             {
                 if (element.SizeFitsChildren && element.HasTrait<ChildrenTrait>())
                 {
-                    return new TVVector(element.Children.Items.Max(x => x.GetRelativePosition().AsXna + x.GetSize().AsXna));
+                    var items = element.Children.Items;
+                    Vector2 mx = Vector2.Zero;
+                    foreach(var item in items)
+                    {
+                        var size = (item.Parent is VerticalStackElement ? Vector2.Zero : item.GetRelativePosition().AsXna) + item.GetSize().AsXna;
+                        if (size.X > mx.X || size.Y > mx.Y)
+                        {
+                            mx = new Vector2(float.Max(size.X, mx.X), float.Max(size.Y, mx.Y));
+                        }
+                    }
+                    return new TVVector(mx);
                 }
                 else
                 {
@@ -32,7 +42,7 @@ namespace GustUI.Extensions
         {
             if (!element.HasTrait<PositionTrait>())
             {
-                return null;
+                return new TVVector(0,0);
             }
             else
             {

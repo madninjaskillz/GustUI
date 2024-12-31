@@ -10,11 +10,11 @@ using System.Threading.Tasks;
 
 namespace GustUI.Elements
 {
-    public class VerticalStackElement : RectangleElement
+    public class VerticalStackElement : FilledRectangleElement
     {
         public VerticalStackElement()
         {
-            SizeFitsChildren = true;
+            SizeFitsChildren = false;
         }
 
         public override void AddChildElement(Element element, string overrideName = null)
@@ -40,6 +40,20 @@ namespace GustUI.Elements
             {
                 child.Set<PositionTrait>(new TVVector(0, currentY));
                 currentY += (int)child.GetSize().Y;
+            }
+
+            this.Set<SizeTrait>(new TVVector(this.GetSize().X, currentY));
+        }
+
+        DateTime lastUpdate = DateTime.Now;
+        public override void Update(Element parent = null)
+        {
+            base.Update();
+            //todo - make this event based
+            if (DateTime.Now - lastUpdate > TimeSpan.FromSeconds(1))
+            {
+                RecalculatePositions();
+                lastUpdate = DateTime.Now;
             }
         }
     }

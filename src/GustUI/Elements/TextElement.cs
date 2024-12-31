@@ -34,7 +34,7 @@ namespace GustUI.Elements
             
             var font = Resources.StaticResources.FontManager.LoadFont(fontName, fontSize);
 
-            var words = text.Split(' ');
+            var words = text !=null ? text.Split(' ') : Array.Empty<string>();
             string newText = "";
             if (this.HasTrait<SizeTrait>() && words.Length > 0)
             {
@@ -81,7 +81,7 @@ namespace GustUI.Elements
                     var p = actualPosition.AsXna;
                     var pr = actualPosition.AsXna;
                     var thisGetSize = this.GetSize();
-                    
+                    var ySize = 0;
                     foreach (var line in lines)
                     {
                         var lineSize = font.MeasureString(line) * GustConstants.FontScale;
@@ -114,7 +114,9 @@ namespace GustUI.Elements
                             border);
                         p.Y += lineSize.Y;
                         p.X = pr.X;
+                        ySize = ySize+  (int)lineSize.Y;
                     }
+                    this.Set<SizeTrait>(new TVVector(this.GetSize().X, ySize));
                 }
             }            
 

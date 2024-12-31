@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace GustUI.Managers
 {
@@ -75,6 +76,8 @@ namespace GustUI.Managers
                 {
                     fps += "\r\n" + Resources.StaticResources.RootWindow.GetSize().ToString();
                     fps += "\r\n" + Resources.StaticResources.InputManager.FloatedElementCount + " " + Resources.StaticResources.InputManager.FloatedElementName;
+
+                    Resources.StaticResources.RootWindow.DebugWrite(0, 60);
                 }
                 if (font == null)
                 {
@@ -87,7 +90,7 @@ namespace GustUI.Managers
                 DrawString(font, fps, ps + new Vector2(3, 3), Color.Black);
                 DrawString(font, fps, ps + new Vector2(2, 2), Color.White);
 
-                
+
                 SpriteBatchExtensions.DrawFilledRectangle(this, new Rectangle(0, 0, (int)Resources.StaticResources.RootWindow.GetSize().X, bottom), Color.Blue * 0.8f);
 
                 string consoleText = "CMD:>";
@@ -105,6 +108,7 @@ namespace GustUI.Managers
             }
 
 
+
             if (debugBottom > 1)
             {
 
@@ -112,8 +116,8 @@ namespace GustUI.Managers
                 {
                     var height = ((int)font.MeasureString(Log.log.ToArray()[i - 1].ToString()).Y) + 4;
                     bottom = bottom - height;
-                
-                    DrawString(font, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(0, bottom), Color.Black*0.5f);
+
+                    DrawString(font, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(0, bottom), Color.Black * 0.5f);
                     DrawString(font, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(2, bottom), Color.Black * 0.5f);
                     DrawString(font, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(0, bottom + 2), Color.Black * 0.5f);
                     DrawString(font, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(2, bottom + 2), Color.Black * 0.5f);
@@ -129,14 +133,14 @@ namespace GustUI.Managers
             {
                 Resources.StaticResources.RootWindow.DebugDraw();
             }
-            
+
             End();
         }
 
-        private void DrawString(SpriteFont font, string fps, Vector2 vector2, Color white)
+        internal void DrawString(SpriteFont font, string text, Vector2 position, Color white)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
-            spriteBatch.DrawString(font, fps, vector2, white);
+            spriteBatch.DrawString(font, text, position, white);
         }
 
         private void Clear(Color color)
@@ -230,10 +234,10 @@ namespace GustUI.Managers
         }
 
 
-        public void Begin()
+        public void Begin(SpriteSortMode mode = SpriteSortMode.Deferred)
         {
             IsInBatch = true;
-            spriteBatch.Begin(SpriteSortMode.Immediate, blendState, samplerState, null, rasterizerState, null, null);
+            spriteBatch.Begin(mode, blendState, samplerState, null, rasterizerState, null, null);
         }
 
         public void End()
@@ -270,6 +274,23 @@ namespace GustUI.Managers
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
             spriteBatch.Draw(texture, rectangle, source, color);
+        }
+
+        internal void SetScissor(Rectangle? rect)
+        {
+            if (rect.HasValue)
+            {
+                End();
+                Begin();
+                Resources.StaticResources.GraphicsDevice.ScissorRectangle = rect.Value;
+            }
+            else
+            {
+                End();
+
+                Resources.StaticResources.GraphicsDevice.ScissorRectangle = new Rectangle(0, 0, (int)Resources.StaticResources.RootWindow.GetSize().X, (int)Resources.StaticResources.RootWindow.GetSize().Y);
+                Begin();
+            }
         }
     }
 }

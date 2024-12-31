@@ -17,6 +17,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace GustUI.Elements;
 
@@ -25,6 +26,7 @@ public class Element : IDisposable
 {
     private Guid Id = Guid.NewGuid();
 
+    internal virtual bool CanBeInputFocused { get; private set; } = false;
     public bool SizeFitsChildren { get; set; } = false;
 
     [JsonIgnore]
@@ -269,9 +271,31 @@ public class Element : IDisposable
         }
     }
 
-    public virtual void DebugDraw()
+    SpriteFont font;
+    public virtual void DebugDraw(Color? filled = null)
     {
+        if (font == null)
+        {
+            font = Resources.StaticResources.FontManager.LoadFont(Resources.StaticResources.Theme.UiFontSmall.Family, Resources.StaticResources.Theme.UiFontSmall.Size);
+        }
         Resources.StaticResources.DrawManager.DrawRectangle(this.GetActualPosition().Rectangle(this.ElementTrait<SizeTrait>().Value()), Color.Red, 1);
+        if (filled.HasValue)
+        {
+            var sz = this.GetSize();
+            var ap = this.GetActualPosition();
+            var r = ap.Rectangle(sz);
+            Resources.StaticResources.DrawManager.DrawFilledRectangle(r, filled.Value);
+        }
+        if (Resources.StaticResources.InputManager.GetElementState(this) == InputManager.ElementState.Hovered)
+        {
+            string ot = this.ElementName + ": " + this.GetRelativePosition() + " / " + this.GetSize();
+            Vector2 dbgpos = this.GetActualPosition().AsXna + this.GetSize().AsXna - font.MeasureString(ot);
+            Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(0, 0), Color.Black * 0.5f);
+            Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(2, 0), Color.Black * 0.5f);
+            Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(0, 0 + 2), Color.Black * 0.5f);
+            Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(2, 0 + 2), Color.Black * 0.5f);
+            Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(1, 0 + 1), Color.White);
+        }
         if (this.HasTrait<ChildrenTrait>())
         {
             foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
@@ -279,6 +303,61 @@ public class Element : IDisposable
                 child.DebugDraw();
             }
         }
+    }
+
+    int debugColorDirection = 1;
+    int debugColorAmount = 1;
+    internal int DebugWrite(int depth, int top = 60)
+    {
+        string ot = this.ElementName + ": " + this.GetRelativePosition() + " / " + this.GetSize();
+        Vector2 dbgpos = new Vector2(10+ (depth * 20), top);
+        if (font == null)
+        {
+            font = Resources.StaticResources.FontManager.LoadFont(Resources.StaticResources.Theme.UiFontSmall.Family, Resources.StaticResources.Theme.UiFontSmall.Size);
+        }
+
+        Rectangle r = new Rectangle((int)dbgpos.X, (int)dbgpos.Y, (int)font.MeasureString(ot).X, (int)font.MeasureString(ot).Y);
+        Color c = Color.White*0.8f;
+        MouseState ms = Mouse.GetState();
+        if (r.Contains(ms.Position))
+        {
+            c = Color.Red;
+            debugColorAmount = debugColorAmount + debugColorDirection;
+            if (debugColorAmount == 0 || debugColorAmount == 255)
+            {
+                debugColorDirection = -debugColorDirection;
+            }
+            DebugDraw(new Color(debugColorAmount,0,255) * 0.5f);
+        }
+
+        if (Resources.StaticResources.InputManager.GetElementState(this) == InputManager.ElementState.Hovered)
+        {
+            c = Color.Green;
+        }
+
+        if (Resources.StaticResources.InputManager.GetElementState(this) == InputManager.ElementState.Pressed)
+        {
+            c = Color.Purple;
+        }
+
+        Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(0, 0), Color.Black * 0.5f);
+        Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(2, 0), Color.Black * 0.5f);
+        Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(0, 0 + 2), Color.Black * 0.5f);
+        Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(2, 0 + 2), Color.Black * 0.5f);
+        Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(1, 0 + 1), c);
+
+        top = top + 20;
+        if (this.HasTrait<ChildrenTrait>())
+        {
+            foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
+            {
+                top = child.DebugWrite(depth+1,top);
+                top = top + 1;
+            }
+        }
+
+        return top;
+
     }
 
     public List<Action> FlattenDraws()

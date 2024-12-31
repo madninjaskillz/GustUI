@@ -15,7 +15,7 @@ namespace GustUI.Managers
 {
     public class InputManager
     {
-
+        public Element CurrentlyFocused = null;
         public List<KeyboardHook> Hooks = new List<KeyboardHook>();
 
         public bool HaveInteracted { get; private set; }
@@ -122,7 +122,7 @@ namespace GustUI.Managers
             {
                 foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnScrollTrait>()))
                 {
-                    element.ElementTrait<OnScrollwheelChanged>().Value().TriggerAction?.Invoke(new ScrollEventArgs { ScrollWheel = scrollWheel, ScrollWheelDelta = previousScrollWheelValue-scrollWheel });
+                    element.ElementTrait<OnScrollWheelChanged>().Value().TriggerAction?.Invoke(new ScrollEventArgs { ScrollWheel = scrollWheel, ScrollWheelDelta = previousScrollWheelValue-scrollWheel });
                 }
                 previousScrollWheelValue = scrollWheel;
             }
@@ -142,6 +142,21 @@ namespace GustUI.Managers
                 {
                     element.ElementTrait<OnMousePress>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
                 }
+
+
+                foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnFocused>()))
+                {
+                    if (CurrentlyFocused != element)
+                    {
+                        if (CurrentlyFocused != null)
+                        {
+                            CurrentlyFocused.ElementTrait<OnUnfocused>().Value().TriggerAction?.Invoke(new TVEventArgs());
+                        }
+                        CurrentlyFocused = element;
+                        element.ElementTrait<OnFocused>().Value().TriggerAction?.Invoke(new TVEventArgs());
+                    }
+                }
+
             }
             else if (mouseState.LeftButton == ButtonState.Pressed)
             {

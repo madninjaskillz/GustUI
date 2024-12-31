@@ -14,6 +14,10 @@ namespace GustUI.Traits
 
     public class  OnScrollTrait : Trait<TVEvent<ScrollEventArgs>> { }
 
-    public class OnScrollwheelChanged : Trait<TVEvent<ScrollEventArgs>> { }
+    public class OnScrollWheelChanged : Trait<TVEvent<ScrollEventArgs>> { }
+
+    public class OnFocused : Trait<TVEvent<TVEventArgs>> { }
+    public class OnUnfocused : Trait<TVEvent<TVEventArgs>> { }
+
 
 }
