@@ -39,6 +39,11 @@ namespace GustUI.Managers
             {
                 Resources.StaticResources.DebugMode.Next();
             }));
+
+            Hooks.Add(new KeyboardHook(new KeyboardShortcut(Keys.CapsLock), () =>
+            {
+                Resources.StaticResources.DebugMode.Next();
+            }));
         }
 
 

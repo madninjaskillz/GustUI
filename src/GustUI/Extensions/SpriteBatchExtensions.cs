@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using static GustUI.Managers.FontManager;
 
 namespace GustUI.Extensions
 {
@@ -14,7 +15,7 @@ namespace GustUI.Extensions
     {
         private const float BorderFade = 0.1f;
 
-        public static void DrawString(this DrawManager spriteBatch, SpriteFont font, string text, Vector2 position, Color color, int borderSize)
+        public static void DrawString(this DrawManager spriteBatch, KeyedSpriteFont font, string text, Vector2 position, Color color, int borderSize)
         {
             for (var x = -borderSize; x <= borderSize; x++)
             {

@@ -17,6 +17,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
+using static GustUI.Managers.FontManager;
 using static System.Net.Mime.MediaTypeNames;
 
 namespace GustUI.Elements;
@@ -271,7 +272,7 @@ public class Element : IDisposable
         }
     }
 
-    SpriteFont font;
+    KeyedSpriteFont font;
     public virtual void DebugDraw(Color? filled = null)
     {
         if (font == null)
@@ -289,7 +290,7 @@ public class Element : IDisposable
         if (Resources.StaticResources.InputManager.GetElementState(this) == InputManager.ElementState.Hovered)
         {
             string ot = this.ElementName + ": " + this.GetRelativePosition() + " / " + this.GetSize();
-            Vector2 dbgpos = this.GetActualPosition().AsXna + this.GetSize().AsXna - font.MeasureString(ot);
+            Vector2 dbgpos = this.GetActualPosition().AsXna + this.GetSize().AsXna - font.SpriteFont.MeasureString(ot);
             Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(0, 0), Color.Black * 0.5f);
             Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(2, 0), Color.Black * 0.5f);
             Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(0, 0 + 2), Color.Black * 0.5f);
@@ -316,7 +317,7 @@ public class Element : IDisposable
             font = Resources.StaticResources.FontManager.LoadFont(Resources.StaticResources.Theme.UiFontSmall.Family, Resources.StaticResources.Theme.UiFontSmall.Size);
         }
 
-        Rectangle r = new Rectangle((int)dbgpos.X, (int)dbgpos.Y, (int)font.MeasureString(ot).X, (int)font.MeasureString(ot).Y);
+        Rectangle r = new Rectangle((int)dbgpos.X, (int)dbgpos.Y, (int)font.SpriteFont.MeasureString(ot).X, (int)font.SpriteFont.MeasureString(ot).Y);
         Color c = Color.White*0.8f;
         MouseState ms = Mouse.GetState();
         if (r.Contains(ms.Position))

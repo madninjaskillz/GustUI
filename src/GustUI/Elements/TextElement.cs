@@ -40,7 +40,7 @@ namespace GustUI.Elements
             {
                 foreach (var word in words)
                 {
-                    if ((font.MeasureString(newText + word) * GustConstants.FontScale).X > this.ElementTrait<SizeTrait>().Value().X)
+                    if ((font.SpriteFont.MeasureString(newText + word) * GustConstants.FontScale).X > this.ElementTrait<SizeTrait>().Value().X)
                     {
                         newText += "\n" + word + " ";
                     }
@@ -67,7 +67,7 @@ namespace GustUI.Elements
                 string text = getText();
                 int border = this.ElementTrait<FontTrait>().Value().Border;
                 Color foreground = this.ElementTrait<ForegroundColorTrait>().Value().AsXna;
-                var font = Resources.StaticResources.FontManager.LoadFont(fontName, fontSize);
+                Managers.FontManager.KeyedSpriteFont font = Resources.StaticResources.FontManager.LoadFont(fontName, fontSize);
 
                 if (Ensure.NotNull(font, nameof(font)) &&
                 Ensure.NotNull(text, nameof(text)) &&
@@ -75,7 +75,7 @@ namespace GustUI.Elements
                 Ensure.NotNull(border, nameof(border)))
                 {
 
-                    Vector2 thisSize = font.MeasureString(text) * GustConstants.FontScale;
+                    Vector2 thisSize = font.SpriteFont.MeasureString(text) * GustConstants.FontScale;
                     TVVector actualPosition = this.GetActualPosition(thisSize, true);
                     var lines = text.Split('\n');
                     var p = actualPosition.AsXna;
@@ -84,7 +84,7 @@ namespace GustUI.Elements
                     var ySize = 0;
                     foreach (var line in lines)
                     {
-                        var lineSize = font.MeasureString(line) * GustConstants.FontScale;
+                        var lineSize = font.SpriteFont.MeasureString(line) * GustConstants.FontScale;
                         Vector2 offsetVector = Vector2.Zero;
 
                         if (HasTrait<SizeTrait>() && HasTrait<HorizontalAlignmentTrait>())
@@ -131,7 +131,7 @@ namespace GustUI.Elements
             string text = getText();
             var font = Resources.StaticResources.FontManager.LoadFont(fontName, fontSize);
 
-            return new Vector2(ElementTrait<SizeTrait>().Value().X, (font.MeasureString(text) * GustConstants.FontScale).Y);
+            return new Vector2(ElementTrait<SizeTrait>().Value().X, (font.SpriteFont.MeasureString(text) * GustConstants.FontScale).Y);
         }
     }
 }

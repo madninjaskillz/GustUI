@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using static GustUI.Managers.FontManager;
 using static System.Net.Mime.MediaTypeNames;
 
 namespace GustUI.Managers
@@ -20,7 +21,7 @@ namespace GustUI.Managers
         private RenderTarget2D renderTargetClone;
         public bool IsInBatch { get; private set; } = false;
         private FrameCounter _frameCounter = new FrameCounter();
-        private SpriteFont font = null;
+        private KeyedSpriteFont font = null;
         private RasterizerState rasterizerState = new RasterizerState() { MultiSampleAntiAlias = false, ScissorTestEnable = true };
         private BlendState blendState = null;
         private SamplerState samplerState = null;
@@ -48,6 +49,7 @@ namespace GustUI.Managers
 
             _frameCounter.Update(deltaTime);
 
+            Resources.StaticResources.FontManager.ManageCaches();
 
             SetRenderTarget(null);
             Clear(Color.Transparent);
@@ -76,14 +78,17 @@ namespace GustUI.Managers
                 {
                     fps += "\r\n" + Resources.StaticResources.RootWindow.GetSize().ToString();
                     fps += "\r\n" + Resources.StaticResources.InputManager.FloatedElementCount + " " + Resources.StaticResources.InputManager.FloatedElementName;
-
-                    Resources.StaticResources.RootWindow.DebugWrite(0, 60);
+                    fps += "\r\n" + Resources.StaticResources.FontManager.CacheInfo;
+                    if (Resources.StaticResources.DebugMode == DebugMode.Outlines)
+                    {
+                        Resources.StaticResources.RootWindow.DebugWrite(0, 160);
+                    }
                 }
                 if (font == null)
                 {
                     font = Resources.StaticResources.FontManager.LoadFont(Resources.StaticResources.Theme.UiFontSmall.Family, Resources.StaticResources.Theme.UiFontSmall.Size);
                 }
-                Vector2 ps = new Vector2(0, Resources.StaticResources.RootWindow.GetSize().Y - 70);
+                Vector2 ps = new Vector2(0, 60);
                 DrawString(font, fps, ps + new Vector2(1, 1), Color.Black);
                 DrawString(font, fps, ps + new Vector2(3, 1), Color.Black);
                 DrawString(font, fps, ps + new Vector2(1, 3), Color.Black);
@@ -135,15 +140,26 @@ namespace GustUI.Managers
             }
 
             End();
+
+            
         }
 
-        internal void DrawString(SpriteFont font, string text, Vector2 position, Color white)
+        internal void DrawString(KeyedSpriteFont font, string text, Vector2 position, Color white)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
-            spriteBatch.DrawString(font, text, position, white);
-        }
+            var cache = Resources.StaticResources.FontManager.GetCachedText(font.Key, text, white);
+            if (cache == null)
+            {
+                spriteBatch.DrawString(font.SpriteFont, text, position, white);
+            }
+            else
+            {
 
-        private void Clear(Color color)
+                spriteBatch.Draw(cache, position, white);
+
+            }
+        }
+                private void Clear(Color color)
         {
             Resources.StaticResources.GraphicsDevice.Clear(color);
         }
@@ -246,10 +262,18 @@ namespace GustUI.Managers
             IsInBatch = false;
         }
 
-        internal void DrawString(SpriteFont font, string text, Vector2 vector2, Color color, int v1, Vector2 zero, float fontScale, SpriteEffects none, float v2)
+        internal void DrawString(KeyedSpriteFont font, string text, Vector2 vector2, Color color, int v1, Vector2 zero, float fontScale, SpriteEffects none, float v2)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
-            spriteBatch.DrawString(font, text, vector2, color, v1, zero, fontScale, none, v2);
+            var cache = Resources.StaticResources.FontManager.GetCachedText(font.Key, text, color);
+            if (cache == null)
+            {
+                spriteBatch.DrawString(font.SpriteFont, text, vector2, color, v1, zero, fontScale, none, v2);
+            }
+            else
+            {
+                spriteBatch.Draw(cache, vector2,null, color, 0, Vector2.Zero, fontScale, none, 0);
+            }
         }
 
         internal void Draw(Texture2D pixel, Rectangle rectangle, object value, Color color, float angle, Vector2 vector2, SpriteEffects none, int v)
