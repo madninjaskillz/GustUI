@@ -8,6 +8,6 @@ namespace GustUI
 {
     internal static class GustConstants
     {
-        public const float FontScale = 0.55f;
+        public const float FontScale = 0.6f;
     }
 }

@@ -4,6 +4,7 @@ using GustUI.Traits;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using static GustUI.Managers.InputManager;
 
 namespace GustUI.Elements;
 
@@ -23,39 +24,69 @@ public class FilledRectangleElement : RectangleElement
             Set<BorderSizeTrait>(new TVInt(border));
             if (borderColor.HasValue)
             {
-                Set<BorderColorTrait>(new TVColor(borderColor.Value));
+                Set<BorderFillTrait>(new TVBorderColorFill(borderColor.Value));
             }
         }
     }
-    public override void Draw(SpriteBatch spriteBatch, Element parent)
+    public override void Draw()
     {
-        TVVector actualPosition = this.GetActualPosition(parent);
-
-        TVVector size = this.ElementTrait<SizeTrait>().Value();
-
-        Rectangle rect = new Rectangle(actualPosition.X.AsInt(), actualPosition.Y.AsInt(), size.X.AsInt(), size.Y.AsInt());
-        
         BackgroundFillTrait fill = ElementTrait<BackgroundFillTrait>();
+        Ensure.NotNull(fill, nameof(fill));
 
-        switch (fill.Value())
+        TVVector actualPosition = this.GetActualPosition();
+        TVVector size = this.ElementTrait<SizeTrait>().Value();
+        Rectangle rect = new Rectangle(actualPosition.X.AsInt(), actualPosition.Y.AsInt(), size.X.AsInt(), size.Y.AsInt());
+        Ensure.NotNull(rect, nameof(rect));
+
+        var fillType = fill.Value();
+
+        if (fillType is TVSmartFill smartFill)
+        {
+            switch (Resources.StaticResources.InputManager.GetElementState(this))
+            {
+                case ElementState.Hovered:
+                    fillType = smartFill.States.HoveredFill;
+                    break;
+                case ElementState.Pressed:
+                    fillType = smartFill.States.PressedFill;
+                    break;
+                default:
+                    fillType = smartFill.States.NormalFill;
+                    break;
+            }
+        }
+
+        if (fillType is TVBlurFill blurFill)
+        {
+            var rt = Resources.StaticResources.DrawManager.GetBlurredTargetClone(blurFill.Ratio);
+            if (rt != null)
+            {
+                Resources.StaticResources.DrawManager.Draw(rt, rect, rect, Color.White * blurFill.Opacity);
+            }
+            fillType = blurFill.OverlayFill;
+        }
+
+        switch (fillType)
         {
             case TVFillSolidColor solidColor:
-                {
-                    spriteBatch.DrawFilledRectangle(rect, solidColor.Color);
-                    break;
-                }
+                Resources.StaticResources.DrawManager.DrawFilledRectangle(rect, solidColor.Color * solidColor.Opacity);
+                break;
             case TVFillImage image:
-                {
-                    spriteBatch.Draw(image.Texture, rect, Color.White);
-                    break;
-                }
+                Resources.StaticResources.DrawManager.Draw(image.Texture, rect, Color.White * image.Opacity);
+                break;
             case TVFillSimpleGradient image:
+                Resources.StaticResources.DrawManager.Draw(image.Texture, rect, Color.White * image.Opacity);
+                break;
+            case TVVideoFill video:
+                var texture = video.GetTexture();
+                if (texture != null)
                 {
-                    spriteBatch.Draw(image.Texture, rect, Color.White);
-                    break;
+                    Resources.StaticResources.DrawManager.Draw(texture, rect, Color.White * video.Opacity);
                 }
+                break;
         }
-        base.Draw(spriteBatch, parent);
+
+        
+        base.Draw();
     }
 }
-

@@ -16,6 +16,8 @@ namespace GustUI.TraitValues
     public class TVBool : TraitValue
     {
         public bool Bool { get; set; }
+        public TVBool(bool value) { Bool = value; }
+        public TVBool() { }
     }
 
     public enum HorizontalAlignment { Left, Center, Right };

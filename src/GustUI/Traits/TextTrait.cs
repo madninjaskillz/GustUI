@@ -10,4 +10,9 @@ namespace GustUI.Traits
     public class TextTrait : Trait<TVText>
     {
     }
+
+    public static class TextTraitExtensions
+    {
+        public static TVText ToTextTrait(this string input) => new TVText(input);
+    }
 }

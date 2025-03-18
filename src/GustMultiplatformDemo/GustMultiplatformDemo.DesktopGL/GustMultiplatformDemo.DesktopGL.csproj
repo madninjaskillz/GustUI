@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <TargetFramework>net8.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <ProjectGuid>6c987757-b751-45fb-950f-41fa98211d41</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <PublishTrimmed>True</PublishTrimmed>
+    <PublishAot>True</PublishAot>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>GustMultiplatformDemo</RootNamespace>
+    <AssemblyName>GustMultiplatformDemo</AssemblyName>
+    <OutputPath>bin\$(Platform)\$(Configuration)\</OutputPath>
+    <DefineConstants>$(DefineConstants);DESKTOPGL</DefineConstants>
+    <KniPlatform>DesktopGL</KniPlatform>
+  </PropertyGroup>
+	
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+  </PropertyGroup>
+	
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+  </PropertyGroup>
+	
+  <PropertyGroup>
+    <ApplicationIcon>Icon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="nkast.Xna.Framework" Version="3.14.9001" />
+    <PackageReference Include="nkast.Xna.Framework.Content" Version="3.14.9001" />
+    <PackageReference Include="nkast.Xna.Framework.Graphics" Version="3.14.9001" />
+    <PackageReference Include="nkast.Xna.Framework.Audio" Version="3.14.9001" />
+    <PackageReference Include="nkast.Xna.Framework.Media" Version="3.14.9001" />
+    <PackageReference Include="nkast.Xna.Framework.Input" Version="3.14.9001" />
+    <PackageReference Include="nkast.Xna.Framework.Game" Version="3.14.9001" />
+    <PackageReference Include="MonoGame.Framework.DesktopGL.9000" Version="3.14.9001" />
+    <PackageReference Include="nkast.Xna.Framework.Content.Pipeline.Builder" Version="3.14.9001" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Icon.ico" />
+    <EmbeddedResource Include="Icon.bmp" />
+  </ItemGroup>
+  <ItemGroup>
+    <KniContentReference Include="..\GustMultiplatformDemoContent\GustMultiplatformDemoContent.mgcb">
+      <Link>Content\GustMultiplatformDemoContent.mgcb</Link>
+    </KniContentReference>
+    <None Include="app.manifest" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\GustUI\GustUI.csproj" />
+  </ItemGroup>
+  <Import Project="..\GustMultiplatformDemo.Shared\GustMultiplatformDemo.Shared.projitems" Label="Shared" />
+
+</Project>

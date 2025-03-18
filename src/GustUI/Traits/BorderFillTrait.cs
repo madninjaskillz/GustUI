@@ -2,11 +2,12 @@
 
 namespace GustUI.Traits;
 
-public class BorderColorTrait : ColourTrait { }
+public class BorderFillTrait : Trait<TVBorderFill> { }
 
 public class  BorderSizeTrait : Trait<TVInt>
 {
     
 }
+
 
 

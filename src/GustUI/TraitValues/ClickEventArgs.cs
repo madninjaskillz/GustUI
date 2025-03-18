@@ -1,4 +1,5 @@
-﻿using Microsoft.Xna.Framework.Input;
+﻿using GustUI.Elements;
+using Microsoft.Xna.Framework.Input;
 
 namespace GustUI.TraitValues
 {
@@ -8,5 +9,16 @@ namespace GustUI.TraitValues
         public TVVector RelativeMousePosition { get; set; }
         public MouseState MouseState { get; set; }
 
+        public Element Element { get; set; }
+
+    }
+
+    public class ScrollEventArgs : TVEventArgs
+    {
+        public float ScrollPosition { get; set; }
+        public float ScrollPercentage { get; set; }
+
+        public int ScrollWheel { get; set; }
+        public int ScrollWheelDelta { get; set; }
     }
 }

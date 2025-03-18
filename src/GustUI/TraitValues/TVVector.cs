@@ -19,6 +19,12 @@ public class TVVector : TraitValue
         this.Y = y;
     }
 
+    public TVVector(Vector2 vector2)
+    {
+        this.X = vector2.X;
+        this.Y = vector2.Y; 
+    }
+
     public override string ToString()
     {
         return $"x: {X}, Y:{Y}";

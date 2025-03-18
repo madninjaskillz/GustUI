@@ -1,0 +1,43 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.30517.126
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SpriteFontPlus.MonoGame", "..\src\SpriteFontPlus.MonoGame.csproj", "{4BD519DB-5A91-465F-997D-1875D45D6CE0}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Samples", "Samples", "{99076AAC-3723-4B2E-A74B-4772FAE8DD6A}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SpriteFontPlus.Samples.BMFont", "..\samples\SpriteFontPlus.Samples.BMFont\SpriteFontPlus.Samples.BMFont.csproj", "{1CCD7B6A-C1CC-4357-8874-64C5BD7E258F}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SpriteFontPlus.Samples.TtfBaking.MonoGame", "..\samples\SpriteFontPlus.Samples.TtfBaking\SpriteFontPlus.Samples.TtfBaking.MonoGame.csproj", "{A7DE35F8-45B6-46E6-82B4-DAC0CE6F5AC8}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4BD519DB-5A91-465F-997D-1875D45D6CE0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4BD519DB-5A91-465F-997D-1875D45D6CE0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4BD519DB-5A91-465F-997D-1875D45D6CE0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4BD519DB-5A91-465F-997D-1875D45D6CE0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1CCD7B6A-C1CC-4357-8874-64C5BD7E258F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1CCD7B6A-C1CC-4357-8874-64C5BD7E258F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1CCD7B6A-C1CC-4357-8874-64C5BD7E258F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1CCD7B6A-C1CC-4357-8874-64C5BD7E258F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A7DE35F8-45B6-46E6-82B4-DAC0CE6F5AC8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A7DE35F8-45B6-46E6-82B4-DAC0CE6F5AC8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A7DE35F8-45B6-46E6-82B4-DAC0CE6F5AC8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A7DE35F8-45B6-46E6-82B4-DAC0CE6F5AC8}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{1CCD7B6A-C1CC-4357-8874-64C5BD7E258F} = {99076AAC-3723-4B2E-A74B-4772FAE8DD6A}
+		{A7DE35F8-45B6-46E6-82B4-DAC0CE6F5AC8} = {99076AAC-3723-4B2E-A74B-4772FAE8DD6A}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {35ACDF4E-2CE2-46B1-A19F-35DC131069A1}
+	EndGlobalSection
+EndGlobal
