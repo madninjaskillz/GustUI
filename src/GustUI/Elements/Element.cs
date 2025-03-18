@@ -70,6 +70,8 @@ public class Element
         }
     }
 
+    public void AddChild(Element child) => Children.Add(child);
+
     public TraitTypeValue ETV<TraitType, TraitTypeValue>()
         where TraitTypeValue : TraitValue
         where TraitType : Trait<TraitTypeValue>

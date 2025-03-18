@@ -32,7 +32,7 @@ namespace GustUI.Elements
             Set<ForegroundColorTrait>(new TVColor(foreground));
             Set<BackgroundFillTrait>(background);
             Set<TextTrait>(new TVText(text));
-            Set<PositionTrait>(position ?? new TVVector(0,0));
+            Set<PositionTrait>(position ?? new TVVector(0, 0));
             Set<SizeTrait>(size ?? new TVVector(0, 0));
 
 
