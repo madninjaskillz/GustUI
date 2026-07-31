@@ -29,6 +29,13 @@ public class TVVector : TraitValue
     {
         return $"x: {X}, Y:{Y}";
     }
+
+    // Value equality makes Trait.Set a no-op (no stored-instance swap, no
+    // changed-event) when an equal vector is assigned — several per-frame
+    // callers Set a freshly allocated equal value every tick.
+    public override bool Equals(object obj) => obj is TVVector other && other.X == X && other.Y == Y;
+
+    public override int GetHashCode() => (X.GetHashCode() * 397) ^ Y.GetHashCode();
     public static TVVector operator +(TVVector a, TVVector b) => new TVVector(a.X + b.X, a.Y + b.Y);
 
     public static TVVector operator -(TVVector a, TVVector b) => new TVVector(a.X - b.X, a.Y - b.Y);

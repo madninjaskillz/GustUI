@@ -22,6 +22,10 @@ public class TVColor : TraitValue
 
     public Color AsXna { get; set; }
 
+    // Value equality: assigning an equal color through Trait.Set is a no-op.
+    public override bool Equals(object obj) => obj is TVColor other && other.AsXna == AsXna;
+
+    public override int GetHashCode() => (int)AsXna.PackedValue;
 }
 
 
