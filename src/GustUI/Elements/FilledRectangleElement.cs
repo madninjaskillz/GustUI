@@ -72,7 +72,7 @@ public class FilledRectangleElement : RectangleElement
                 Resources.StaticResources.DrawManager.DrawFilledRectangle(rect, solidColor.Color * solidColor.Opacity);
                 break;
             case TVFillImage image:
-                Resources.StaticResources.DrawManager.Draw(image.Texture, rect, Color.White * image.Opacity);
+                Resources.StaticResources.DrawManager.Draw(image.Texture, rect, image.Tint * image.Opacity);
                 break;
             case TVFillSimpleGradient image:
                 Resources.StaticResources.DrawManager.Draw(image.Texture, rect, Color.White * image.Opacity);

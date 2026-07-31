@@ -25,6 +25,12 @@ namespace GustUI.TraitValues
     {
 
         public Tiling Tiling { get; set; }
+
+        /// <summary>Draw color the texture is multiplied by (default white =
+        /// unchanged). Lets one grayscale/alpha texture serve many colored
+        /// fills — e.g. waveform block faces tinted per channel.</summary>
+        public Color Tint { get; set; } = Color.White;
+
         public TVFillImage SetOpacity(float opacity)
         {
             Opacity = opacity;
