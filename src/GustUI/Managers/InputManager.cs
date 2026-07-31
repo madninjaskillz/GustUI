@@ -1,4 +1,5 @@
 ﻿using GustUI.Elements;
+using GustUI.Extensions;
 using GustUI.Traits;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
@@ -129,15 +130,33 @@ namespace GustUI.Managers
             CurrentMouseState = mouseState;
             KeyboardState keyboardState = Keyboard.GetState();
             int scrollWheel = mouseState.ScrollWheelValue;
-            var triggeredHooks = Hooks.Where(x => keyboardState.IsKeyDown(x.Shortcut.Key));
-            triggeredHooks = triggeredHooks.Where(x => !previousKeyboardState.IsKeyDown(x.Shortcut.Key));
-
-            triggeredHooks = triggeredHooks.Where(x => x.Shortcut.Modifiers == null || x.Shortcut.Modifiers.Count == 0 || x.Shortcut.Modifiers.All(m => keyboardState.IsKeyDown(FromModifier(m))));
-            foreach (KeyboardHook hook in triggeredHooks)
+            for (int i = 0; i < Hooks.Count; i++)
             {
-                hook.TriggerAction();
+                KeyboardHook hook = Hooks[i];
+                if (!keyboardState.IsKeyDown(hook.Shortcut.Key) || previousKeyboardState.IsKeyDown(hook.Shortcut.Key))
+                {
+                    continue;
+                }
+
+                bool modifiersDown = true;
+                if (hook.Shortcut.Modifiers != null)
+                {
+                    for (int m = 0; m < hook.Shortcut.Modifiers.Count; m++)
+                    {
+                        if (!keyboardState.IsKeyDown(FromModifier(hook.Shortcut.Modifiers[m])))
+                        {
+                            modifiersDown = false;
+                            break;
+                        }
+                    }
+                }
+
+                if (modifiersDown)
+                {
+                    hook.TriggerAction();
+                }
             }
-            
+
             currentlyHovered = ProcessHovers(Resources.StaticResources.RootWindow, mouseState.Position.ToVector2());
 
             if (scrollWheel != previousScrollWheelValue)
@@ -260,75 +279,110 @@ namespace GustUI.Managers
 
         private void UpdateHoverTransitions(MouseState mouseState)
         {
-            var newlyHovered = currentlyHovered.Except(lastHoverList);
-            var noLongerHovered = lastHoverList.Except(currentlyHovered);
-
-            foreach (Element element in newlyHovered.Where(e => e.HasTrait<OnEnterTrait>()))
+            for (int i = 0; i < currentlyHovered.Count; i++)
             {
-                element.ElementTrait<OnEnterTrait>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
+                Element element = currentlyHovered[i];
+                if (!lastHoverList.Contains(element) && element.HasTrait<OnEnterTrait>())
+                {
+                    element.ElementTrait<OnEnterTrait>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
+                }
             }
 
-            foreach (Element element in noLongerHovered.Where(e => e.HasTrait<OnExitTrait>()))
+            for (int i = 0; i < lastHoverList.Count; i++)
             {
-                element.ElementTrait<OnExitTrait>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
+                Element element = lastHoverList[i];
+                if (!currentlyHovered.Contains(element) && element.HasTrait<OnExitTrait>())
+                {
+                    element.ElementTrait<OnExitTrait>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
+                }
             }
 
-            foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnHoverTrait>()))
+            for (int i = 0; i < currentlyHovered.Count; i++)
             {
-                element.ElementTrait<OnHoverTrait>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
+                Element element = currentlyHovered[i];
+                if (element.HasTrait<OnHoverTrait>())
+                {
+                    element.ElementTrait<OnHoverTrait>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
+                }
             }
 
             FloatedElementCount = currentlyHovered.Count;
-            FloatedElementName = string.Join(", ", currentlyHovered.Select(e => e.ElementName));
+            if (Resources.StaticResources.DebugMode != DebugMode.None)
+            {
+                // Debug-overlay string; skipped normally (string.Join per frame).
+                FloatedElementName = string.Join(", ", currentlyHovered.Select(e => e.ElementName));
+            }
+
             lastHoverList = currentlyHovered;
         }
 
-        private List<Element> ProcessHovers(Element element, Vector2 position, int depth = 0, int root = -1, List<(int, Element)> HoveredElementsIndexed = null)
+        // Scratch list reused across frames for per-branch hover collection.
+        private readonly List<Element> hoverScratch = new List<Element>();
+
+        /// <summary>
+        /// Hit-tests the tree top-down, accumulating absolute positions on the
+        /// way down (child abs = child rel + parent abs) so each element is
+        /// O(1) instead of walking its ancestor chain. Children are only
+        /// visited under hovered elements, and the front-most hovered
+        /// top-level branch (highest child index = drawn last) wins — the same
+        /// result the old indexed two-pass collection produced.
+        /// </summary>
+        private List<Element> ProcessHovers(Element root, Vector2 position)
         {
-            if (HoveredElementsIndexed == null)
+            List<Element> best = new List<Element>();
+            if (!root.IsMouseOver(position) || root.CachedChildrenTrait == null)
             {
-                HoveredElementsIndexed = new List<(int, Element)>();
-            }
-            if (depth == 0)
-            {
-                HoveredElementsIndexed.Clear();
+                return best;
             }
 
-            if (element.IsMouseOver(position))
-            {
-                if (depth != 0)
-                {
-                    HoveredElementsIndexed.Add((root, element));
-                }
-                int ct = depth == 0 ? 0 : root;
-                if (element.HasTrait<ChildrenTrait>())
-                {
-                    foreach (Element child in element.Children.Items)
-                    {
-                        ProcessHovers(child, position, depth + 1, ct, HoveredElementsIndexed);
+            Vector2 rootAbs = root.GetActualXnaPosition();
+            Vector2 rootContribution = root.CachedPositionTrait != null ? rootAbs : Vector2.Zero;
 
-                        if (depth == 0)
-                        {
-                            ct++;
-                        }
-                    }
+            List<Element> branches = root.CachedChildrenTrait.Value().Items;
+            for (int i = 0; i < branches.Count; i++)
+            {
+                hoverScratch.Clear();
+                CollectHovered(branches[i], position, rootContribution, hoverScratch);
+                if (hoverScratch.Count > 0)
+                {
+                    best.Clear();
+                    best.AddRange(hoverScratch);
                 }
             }
 
-            if (depth == 0)
+            return best;
+        }
+
+        private static void CollectHovered(Element element, Vector2 position, Vector2 parentContribution, List<Element> into)
+        {
+            PositionTrait positionTrait = element.CachedPositionTrait;
+            SizeTrait sizeTrait = element.CachedSizeTrait;
+            if (positionTrait == null || sizeTrait == null)
             {
-                if (HoveredElementsIndexed.Count > 0)
-                {
-                    int maxDepth = HoveredElementsIndexed.Max(e => e.Item1);
-                    return HoveredElementsIndexed.Where(e => e.Item1 == maxDepth).Select(e => e.Item2).ToList();
-                }
-                else
-                {
-                    return new List<Element>();
-                }
+                return; // mirrors IsMouseOver: both traits required to hover
             }
 
-            return null;
+            TVVector rel = positionTrait.Value();
+            float ax = rel.X + parentContribution.X;
+            float ay = rel.Y + parentContribution.Y;
+            TVVector size = sizeTrait.Value();
+
+            if (position.X < ax || position.X > ax + size.X || position.Y < ay || position.Y > ay + size.Y)
+            {
+                return;
+            }
+
+            into.Add(element);
+
+            if (element.CachedChildrenTrait != null)
+            {
+                Vector2 abs = new Vector2(ax, ay);
+                List<Element> items = element.CachedChildrenTrait.Value().Items;
+                for (int i = 0; i < items.Count; i++)
+                {
+                    CollectHovered(items[i], position, abs, into);
+                }
+            }
         }
     }
 }

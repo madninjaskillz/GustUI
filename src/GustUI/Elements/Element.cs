@@ -57,10 +57,51 @@ public class Element : IDisposable
     public Element()
     {
         traits = Reflection.GetTraitsFromAttributes(this.GetType());
+        RefreshTraitCache();
+    }
 
-        foreach (KeyValuePair<Type, object> trait in traits)
+    // ---- hot-trait cache -------------------------------------------------
+    // Children/Position/Size are consulted for nearly every element on every
+    // frame (draw, update, hover); resolving them through the
+    // Dictionary<Type, object> costs a type-keyed hash lookup per access,
+    // which dominates per-element cost under interpreted WASM. These direct
+    // references are refreshed whenever the trait set changes.
+    internal ChildrenTrait CachedChildrenTrait;
+    internal PositionTrait CachedPositionTrait;
+    internal SizeTrait CachedSizeTrait;
+
+    private void RefreshTraitCache()
+    {
+        object o;
+        CachedChildrenTrait = traits.TryGetValue(typeof(ChildrenTrait), out o) ? (ChildrenTrait)o : null;
+        CachedPositionTrait = traits.TryGetValue(typeof(PositionTrait), out o) ? (PositionTrait)o : null;
+        CachedSizeTrait = traits.TryGetValue(typeof(SizeTrait), out o) ? (SizeTrait)o : null;
+    }
+
+    // ---- draw-phase absolute-position cache ------------------------------
+    // GetActualXnaPosition walks the ancestor chain; during a single draw pass
+    // positions cannot change (no Draw override mutates PositionTrait), so
+    // each element's absolute position is memoized for the duration of the
+    // root draw. Inactive (stamp 0 / flag false) outside the draw pass.
+    internal static bool PositionCacheActive;
+    internal static int PositionCacheStamp;
+    internal int absPosStamp;
+    internal Vector2 absPosCache;
+
+    internal static void BeginPositionCache()
+    {
+        PositionCacheStamp++;
+        if (PositionCacheStamp == 0)
         {
+            PositionCacheStamp = 1;
         }
+
+        PositionCacheActive = true;
+    }
+
+    internal static void EndPositionCache()
+    {
+        PositionCacheActive = false;
     }
 
     private TVVector fs_prepos;
@@ -240,12 +281,7 @@ public class Element : IDisposable
     {
         get
         {
-            if (HasTrait<ChildrenTrait>())
-            {
-                return ETV<ChildrenTrait, TVElements>();
-            }
-
-            return null;
+            return CachedChildrenTrait?.Value();
         }
     }
 
@@ -290,6 +326,7 @@ public class Element : IDisposable
         if (!traits.ContainsKey(typeof(TraitType)))
         {
             traits.Add(typeof(TraitType), new TraitType());
+            RefreshTraitCache();
         }
 
         return (TraitType)traits[typeof(TraitType)];
@@ -303,9 +340,10 @@ public class Element : IDisposable
     public virtual void Draw()
     {
         FrameProfiler.CountElementDraw();
-        if (this.HasTrait<ChildrenTrait>())
+        ChildrenTrait childrenTrait = CachedChildrenTrait;
+        if (childrenTrait != null)
         {
-            bool clip = ClipChildren && HasTrait<PositionTrait>() && HasTrait<SizeTrait>();
+            bool clip = ClipChildren && CachedPositionTrait != null && CachedSizeTrait != null;
             if (clip)
             {
                 Vector2 clipPos = this.GetActualXnaPosition();
@@ -314,9 +352,10 @@ public class Element : IDisposable
                     new Rectangle((int)clipPos.X, (int)clipPos.Y, clipSize.X.AsInt(), clipSize.Y.AsInt()));
             }
 
-            foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
+            List<Element> items = childrenTrait.Value().Items;
+            for (int i = 0; i < items.Count; i++)
             {
-                child.Draw();
+                items[i].Draw();
             }
 
             if (clip)
@@ -529,10 +568,10 @@ public class Element : IDisposable
     }
     public bool IsMouseOver(Vector2 position)
     {
-        if (HasTrait<SizeTrait>() && HasTrait<PositionTrait>())
+        if (CachedSizeTrait != null && CachedPositionTrait != null)
         {
             Vector2 actualPosition = this.GetActualXnaPosition();
-            TVVector size = ElementTrait<SizeTrait>().Value();
+            TVVector size = CachedSizeTrait.Value();
 
             return
                 position.X >= actualPosition.X &&
@@ -556,11 +595,12 @@ public class Element : IDisposable
         }
 
 
-        if (this.HasTrait<ChildrenTrait>())
+        if (CachedChildrenTrait != null)
         {
-            foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
+            List<Element> items = CachedChildrenTrait.Value().Items;
+            for (int i = 0; i < items.Count; i++)
             {
-                child.Update(this);
+                items[i].Update(this);
             }
         }
 

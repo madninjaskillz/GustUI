@@ -20,15 +20,26 @@ namespace GustUI.Elements;
     typeof(OnExitTrait))]
 public class RectangleElement : Element
 {
+    // Hot trait references (resolved once; the trait set never shrinks).
+    private readonly BorderFillTrait borderFillTrait;
+    private readonly BorderSizeTrait borderSizeTrait;
+
+    public RectangleElement()
+    {
+        borderFillTrait = ElementTrait<BorderFillTrait>();
+        borderSizeTrait = ElementTrait<BorderSizeTrait>();
+    }
+
     public override void Draw()
     {
         Vector2 actualPosition = this.GetActualXnaPosition();
 
-        TVVector size = ElementTrait<SizeTrait>().Value();
+        TVVector size = CachedSizeTrait.Value();
 
-        int borderSize = ElementTrait<BorderSizeTrait>().Value().Int;
+        int borderSize = borderSizeTrait.Value().Int;
 
-        if (ElementTrait<BorderFillTrait>().Value() is TVBorderColorFill borderColorFill)
+        TVBorderFill borderFill = borderFillTrait.Value();
+        if (borderFill is TVBorderColorFill borderColorFill)
         {
             if (borderSize > 0)
             {
@@ -38,7 +49,7 @@ public class RectangleElement : Element
             }
         }
 
-        if (ElementTrait<BorderFillTrait>().Value() is TVBorder9Grid nineGrid)
+        if (borderFill is TVBorder9Grid nineGrid)
         {
             Color color = Color.White * nineGrid.Opacity;
             if (nineGrid.TopLeft)

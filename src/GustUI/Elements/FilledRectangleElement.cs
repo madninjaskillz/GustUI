@@ -11,8 +11,15 @@ namespace GustUI.Elements;
 [ElementTraits(typeof(BackgroundFillTrait))]
 public class FilledRectangleElement : RectangleElement
 {
-    public FilledRectangleElement() { }
+    // Hot trait reference (resolved once; the trait set never shrinks).
+    private readonly BackgroundFillTrait backgroundFillTrait;
+
+    public FilledRectangleElement()
+    {
+        backgroundFillTrait = ElementTrait<BackgroundFillTrait>();
+    }
     public FilledRectangleElement(int left, int top, int width, int height, TVFill fill, int border = 0, Color? borderColor = null)
+        : this()
     {
         Set<PositionTrait>(new TVVector(left, top));
         Set<SizeTrait>(new TVVector(width, height));
@@ -30,13 +37,12 @@ public class FilledRectangleElement : RectangleElement
     }
     public override void Draw()
     {
-        BackgroundFillTrait fill = ElementTrait<BackgroundFillTrait>();
+        BackgroundFillTrait fill = backgroundFillTrait;
         Ensure.NotNull(fill, nameof(fill));
 
         Vector2 actualPosition = this.GetActualXnaPosition();
-        TVVector size = this.ElementTrait<SizeTrait>().Value();
+        TVVector size = CachedSizeTrait.Value();
         Rectangle rect = new Rectangle(actualPosition.X.AsInt(), actualPosition.Y.AsInt(), size.X.AsInt(), size.Y.AsInt());
-        Ensure.NotNull(rect, nameof(rect));
 
         var fillType = fill.Value();
 

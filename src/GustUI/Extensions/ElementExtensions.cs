@@ -12,13 +12,13 @@ namespace GustUI.Extensions
     {
         public static TVVector GetSize(this Element element)
         {
-            if (!element.HasTrait<SizeTrait>())
+            if (element.CachedSizeTrait == null)
             {
                 return new TVVector(0,0);
             }
             else
             {
-                if (element.SizeFitsChildren && element.HasTrait<ChildrenTrait>())
+                if (element.SizeFitsChildren && element.CachedChildrenTrait != null)
                 {
                     var items = element.Children.Items;
                     Vector2 mx = Vector2.Zero;
@@ -34,19 +34,19 @@ namespace GustUI.Extensions
                 }
                 else
                 {
-                    return element.ElementTrait<SizeTrait>().Value();
+                    return element.CachedSizeTrait.Value();
                 }
             }
         }
         public static TVVector GetRelativePosition(this Element element)
         {
-            if (!element.HasTrait<PositionTrait>())
+            if (element.CachedPositionTrait == null)
             {
                 return new TVVector(0,0);
             }
             else
             {
-                return element.ElementTrait<PositionTrait>().Value();
+                return element.CachedPositionTrait.Value();
             }
         }
         public static TVVector GetActualPosition(this Element element, Vector2? thisSize = null, bool managedHorizontalJustification=false)
@@ -64,15 +64,23 @@ namespace GustUI.Extensions
         /// </summary>
         public static Vector2 GetActualXnaPosition(this Element element, Vector2? thisSize = null, bool managedHorizontalJustification = false)
         {
-            if (!element.HasTrait<PositionTrait>())
+            if (element.CachedPositionTrait == null)
             {
                 return Vector2.Zero;
             }
 
-            TVVector relativePosition = element.ElementTrait<PositionTrait>().Value();
+            // Plain (unaligned) lookups are memoized for the duration of the
+            // root draw pass — see Element.BeginPositionCache.
+            bool cacheable = thisSize == null && !managedHorizontalJustification && Element.PositionCacheActive;
+            if (cacheable && element.absPosStamp == Element.PositionCacheStamp)
+            {
+                return element.absPosCache;
+            }
+
+            TVVector relativePosition = element.CachedPositionTrait.Value();
             Vector2 actualPosition = relativePosition.AsXna;
             Element parentElement = element.Parent;
-            if (parentElement != null && parentElement.HasTrait<PositionTrait>())
+            if (parentElement != null && parentElement.CachedPositionTrait != null)
             {
                 Vector2 storePosition = actualPosition;
                 Vector2 parentPosition = parentElement.GetActualXnaPosition();
@@ -83,10 +91,10 @@ namespace GustUI.Extensions
                     VerticalAlignment? vertAlign = element.HasTrait<VerticalAlignmentTrait>() ? element.ElementTrait<VerticalAlignmentTrait>().Value().Alignment : null;
                     HorizontalAlignment? horizAlign = element.HasTrait<VerticalAlignmentTrait>() ? element.ElementTrait<HorizontalAlignmentTrait>().Value().Alignment : null;
 
-                    if (parentElement.HasTrait<SizeTrait>())
+                    if (parentElement.CachedSizeTrait != null)
                     {
                         Vector2 pos = parentPosition;
-                        Vector2 size = parentElement.ElementTrait<SizeTrait>().Value().AsXna;
+                        Vector2 size = parentElement.CachedSizeTrait.Value().AsXna;
 
                         if (horizAlign.HasValue && !managedHorizontalJustification)
                         {
@@ -118,6 +126,12 @@ namespace GustUI.Extensions
                         }
                     }
                 }
+            }
+
+            if (cacheable)
+            {
+                element.absPosCache = actualPosition;
+                element.absPosStamp = Element.PositionCacheStamp;
             }
 
             return actualPosition;

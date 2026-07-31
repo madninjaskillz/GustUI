@@ -57,7 +57,9 @@ namespace GustUI.Managers
             Clear(Color.Transparent);
             Begin();
             FrameProfiler.Begin(FrameProfiler.Bucket.DrawRoot);
+            Elements.Element.BeginPositionCache();
             Resources.StaticResources.RootWindow.Draw();
+            Elements.Element.EndPositionCache();
             FrameProfiler.End(FrameProfiler.Bucket.DrawRoot);
             FrameProfiler.Begin(FrameProfiler.Bucket.DrawDebug);
             var lerpSpeed = 0.5f;

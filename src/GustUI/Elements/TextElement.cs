@@ -25,6 +25,35 @@ namespace GustUI.Elements
         typeof(HorizontalAlignmentTrait))]
     public class TextElement : Element
     {
+        // Hot trait references (resolved once; the trait set never shrinks).
+        private readonly FontTrait fontTrait;
+        private readonly TextTrait textTrait;
+        private readonly ForegroundColorTrait foregroundTrait;
+
+        public TextElement()
+        {
+            fontTrait = ElementTrait<FontTrait>();
+            textTrait = ElementTrait<TextTrait>();
+            foregroundTrait = ElementTrait<ForegroundColorTrait>();
+        }
+
+        // FontManager.LoadFont builds an interpolated key string per call, so
+        // the resolved font is cached against (family, size) here.
+        private Managers.FontManager.KeyedSpriteFont cachedFont;
+        private string cachedFontFamily;
+        private float cachedFontSize = float.MinValue;
+
+        private Managers.FontManager.KeyedSpriteFont GetFont(string family, float size)
+        {
+            if (cachedFont == null || cachedFontFamily != family || cachedFontSize != size)
+            {
+                cachedFont = Resources.StaticResources.FontManager.LoadFont(family, size);
+                cachedFontFamily = family;
+                cachedFontSize = size;
+            }
+
+            return cachedFont;
+        }
 
         // Word-wrap result cache: wrapping calls MeasureString per word, which
         // is far too expensive to repeat every Draw for static labels. The
@@ -41,10 +70,11 @@ namespace GustUI.Elements
 
         private string getText()
         {
-            string fontName = this.ElementTrait<FontTrait>().Value().Family;
-            float fontSize = this.ElementTrait<FontTrait>().Value().Size;
-            string text = this.ElementTrait<TextTrait>().Value().Text;
-            float wrapWidth = this.HasTrait<SizeTrait>() ? this.ElementTrait<SizeTrait>().Value().X : float.MinValue;
+            TVFont fontValue = fontTrait.Value();
+            string fontName = fontValue.Family;
+            float fontSize = fontValue.Size;
+            string text = textTrait.Value().Text;
+            float wrapWidth = CachedSizeTrait != null ? CachedSizeTrait.Value().X : float.MinValue;
 
             if (wrapCacheResult != null &&
                 wrapCacheText == text &&
@@ -55,15 +85,15 @@ namespace GustUI.Elements
                 return wrapCacheResult;
             }
 
-            var font = Resources.StaticResources.FontManager.LoadFont(fontName, fontSize);
+            var font = GetFont(fontName, fontSize);
 
             var words = text !=null ? text.Split(' ') : Array.Empty<string>();
             string newText = "";
-            if (this.HasTrait<SizeTrait>() && words.Length > 0)
+            if (CachedSizeTrait != null && words.Length > 0)
             {
                 foreach (var word in words)
                 {
-                    if ((font.SpriteFont.MeasureString(newText + word) * GustConstants.FontScale).X > this.ElementTrait<SizeTrait>().Value().X)
+                    if ((font.SpriteFont.MeasureString(newText + word) * GustConstants.FontScale).X > wrapWidth)
                     {
                         newText += "\n" + word + " ";
                     }
@@ -95,20 +125,16 @@ namespace GustUI.Elements
         }
         public override void Draw()
         {
-            if (this.ElementTrait<FontTrait>().Value().Family != null)
+            TVFont fontValue = fontTrait.Value();
+            if (fontValue.Family != null)
             {
-
-                string fontName = this.ElementTrait<FontTrait>().Value().Family;
-                float fontSize = this.ElementTrait<FontTrait>().Value().Size;
                 string text = getText();
-                int border = this.ElementTrait<FontTrait>().Value().Border;
-                Color foreground = this.ElementTrait<ForegroundColorTrait>().Value().AsXna;
-                Managers.FontManager.KeyedSpriteFont font = Resources.StaticResources.FontManager.LoadFont(fontName, fontSize);
+                int border = fontValue.Border;
+                Color foreground = foregroundTrait.Value().AsXna;
+                Managers.FontManager.KeyedSpriteFont font = GetFont(fontValue.Family, fontValue.Size);
 
                 if (Ensure.NotNull(font, nameof(font)) &&
-                Ensure.NotNull(text, nameof(text)) &&
-                Ensure.NotNull(foreground, nameof(foreground)) &&
-                Ensure.NotNull(border, nameof(border)))
+                Ensure.NotNull(text, nameof(text)))
                 {
 
                     // Measured sizes and split lines come from the wrap cache
@@ -119,6 +145,10 @@ namespace GustUI.Elements
                     var p = actualPosition;
                     var pr = actualPosition;
                     var thisGetSize = this.GetSize();
+                    bool aligned = CachedSizeTrait != null && HasTrait<HorizontalAlignmentTrait>();
+                    HorizontalAlignment? horizAlign = aligned && HasTrait<VerticalAlignmentTrait>()
+                        ? ElementTrait<HorizontalAlignmentTrait>().Value().Alignment
+                        : (HorizontalAlignment?)null;
                     var ySize = 0;
                     for (int lineIndex = 0; lineIndex < lines.Length; lineIndex++)
                     {
@@ -126,25 +156,20 @@ namespace GustUI.Elements
                         var lineSize = wrapCacheLineSizes[lineIndex];
                         Vector2 offsetVector = Vector2.Zero;
 
-                        if (HasTrait<SizeTrait>() && HasTrait<HorizontalAlignmentTrait>())
+                        switch (horizAlign)
                         {
-                           
-                           
-                            HorizontalAlignment? horizAlign = HasTrait<VerticalAlignmentTrait>() ? ElementTrait<HorizontalAlignmentTrait>().Value().Alignment : null;
-                            switch (horizAlign)
-                            {
-                                case HorizontalAlignment.Center:
-                                    var cent = thisGetSize.X / 2f;
-                                    var halfLineSize = lineSize.X / 2f;
-                                    var offset = cent - halfLineSize;
-                                    offsetVector = new Vector2(offset, 0);
-                                    break;
+                            case HorizontalAlignment.Center:
+                                var cent = thisGetSize.X / 2f;
+                                var halfLineSize = lineSize.X / 2f;
+                                var offset = cent - halfLineSize;
+                                offsetVector = new Vector2(offset, 0);
+                                break;
 
-                                case HorizontalAlignment.Right:
-                                    offsetVector = new Vector2(thisGetSize.X - lineSize.X, 0);
-                                    break;
-                            }
+                            case HorizontalAlignment.Right:
+                                offsetVector = new Vector2(thisGetSize.X - lineSize.X, 0);
+                                break;
                         }
+
                         Resources.StaticResources.DrawManager.DrawString(
                         font,
                         line,
@@ -155,20 +180,27 @@ namespace GustUI.Elements
                         p.X = pr.X;
                         ySize = ySize+  (int)lineSize.Y;
                     }
-                    this.Set<SizeTrait>(new TVVector(this.GetSize().X, ySize));
-                }
-            }            
 
-            
+                    // Only rewrite the size when the measured height actually
+                    // changed: Set fires trait-changed events and invalidates
+                    // downstream consumers on every call.
+                    TVVector currentSize = CachedSizeTrait.Value();
+                    if ((int)currentSize.Y != ySize)
+                    {
+                        this.Set<SizeTrait>(new TVVector(currentSize.X, ySize));
+                    }
+                }
+            }
+
+
             base.Draw();
         }
 
         public Vector2 CalculatedSize()
         {
-            string fontName = this.ElementTrait<FontTrait>().Value().Family;
-            float fontSize = this.ElementTrait<FontTrait>().Value().Size;
+            TVFont fontValue = fontTrait.Value();
             string text = getText();
-            var font = Resources.StaticResources.FontManager.LoadFont(fontName, fontSize);
+            var font = GetFont(fontValue.Family, fontValue.Size);
 
             return new Vector2(ElementTrait<SizeTrait>().Value().X, (font.SpriteFont.MeasureString(text) * GustConstants.FontScale).Y);
         }
