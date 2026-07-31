@@ -117,6 +117,7 @@ public class Element : IDisposable
         if (Parent != null)
         {
             Parent.Children.Remove(this);
+            Parent = null;
         }
     }
     public void Sync()
@@ -306,8 +307,10 @@ public class Element : IDisposable
             bool clip = ClipChildren && HasTrait<PositionTrait>() && HasTrait<SizeTrait>();
             if (clip)
             {
+                Vector2 clipPos = this.GetActualXnaPosition();
+                TVVector clipSize = this.GetSize();
                 Resources.StaticResources.DrawManager.PushScissor(
-                    this.GetActualPosition().Rectangle(this.GetSize()));
+                    new Rectangle((int)clipPos.X, (int)clipPos.Y, clipSize.X.AsInt(), clipSize.Y.AsInt()));
             }
 
             foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
@@ -493,7 +496,7 @@ public class Element : IDisposable
             }
             if (element.HasTrait<SizeTrait>() && element.HasTrait<PositionTrait>())
             {
-                TVVector actualPosition = element.GetActualPosition();
+                Vector2 actualPosition = element.GetActualXnaPosition();
                 TVVector size = element.ElementTrait<SizeTrait>().Value();
                 if (point.X >= actualPosition.X &&
                     point.X <= actualPosition.X + size.X &&
@@ -527,7 +530,7 @@ public class Element : IDisposable
     {
         if (HasTrait<SizeTrait>() && HasTrait<PositionTrait>())
         {
-            TVVector actualPosition = this.GetActualPosition();
+            Vector2 actualPosition = this.GetActualXnaPosition();
             TVVector size = ElementTrait<SizeTrait>().Value();
 
             return
@@ -601,7 +604,7 @@ public class Element : IDisposable
 
     internal ClickEventArgs GetClickArgs(MouseState mouseState)
     {
-        TVVector actualPosition = this.GetActualPosition();
+        Vector2 actualPosition = this.GetActualXnaPosition();
         return new ClickEventArgs
         {
             GlobalMousePosition = new TVVector(mouseState.X, mouseState.Y),

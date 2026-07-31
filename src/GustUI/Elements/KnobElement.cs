@@ -63,7 +63,7 @@ public class KnobElement : Element
     public override void Draw()
     {
         var manager = Resources.StaticResources.DrawManager;
-        Vector2 pos = this.GetActualPosition().AsXna;
+        Vector2 pos = this.GetActualXnaPosition();
         Vector2 size = this.GetSize().AsXna;
 
         int diameter = (int)Math.Min(size.X, size.Y);

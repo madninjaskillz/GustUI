@@ -22,7 +22,7 @@ public class RectangleElement : Element
 {
     public override void Draw()
     {
-        TVVector actualPosition = this.GetActualPosition();
+        Vector2 actualPosition = this.GetActualXnaPosition();
 
         TVVector size = ElementTrait<SizeTrait>().Value();
 
@@ -32,7 +32,9 @@ public class RectangleElement : Element
         {
             if (borderSize > 0)
             {
-                Resources.StaticResources.DrawManager.DrawRectangle(actualPosition.Rectangle(size), borderColorFill.Color, borderSize);
+                Resources.StaticResources.DrawManager.DrawRectangle(
+                    new Rectangle(actualPosition.X.AsInt(), actualPosition.Y.AsInt(), size.X.AsInt(), size.Y.AsInt()),
+                    borderColorFill.Color, borderSize);
             }
         }
 

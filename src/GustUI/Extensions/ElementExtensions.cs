@@ -51,53 +51,69 @@ namespace GustUI.Extensions
         }
         public static TVVector GetActualPosition(this Element element, Vector2? thisSize = null, bool managedHorizontalJustification=false)
         {
-            Element parentElement = element.Parent;
-            TVVector actualPosition = new TVVector(0, 0);
-            if (element.HasTrait<PositionTrait>())
+            // Kept for compatibility; the allocation-free core below does the
+            // work, so a call allocates one TVVector instead of one per
+            // ancestor (plus operator+ temporaries).
+            return new TVVector(element.GetActualXnaPosition(thisSize, managedHorizontalJustification));
+        }
+
+        /// <summary>
+        /// Allocation-free core of <see cref="GetActualPosition"/>: identical
+        /// semantics, returns the struct <see cref="Vector2"/> directly.
+        /// Prefer this in per-frame Draw/hit-test code.
+        /// </summary>
+        public static Vector2 GetActualXnaPosition(this Element element, Vector2? thisSize = null, bool managedHorizontalJustification = false)
+        {
+            if (!element.HasTrait<PositionTrait>())
             {
-                actualPosition = element.ElementTrait<PositionTrait>().Value();
-                if (parentElement != null && parentElement.HasTrait<PositionTrait>())
+                return Vector2.Zero;
+            }
+
+            TVVector relativePosition = element.ElementTrait<PositionTrait>().Value();
+            Vector2 actualPosition = relativePosition.AsXna;
+            Element parentElement = element.Parent;
+            if (parentElement != null && parentElement.HasTrait<PositionTrait>())
+            {
+                Vector2 storePosition = actualPosition;
+                Vector2 parentPosition = parentElement.GetActualXnaPosition();
+                actualPosition += parentPosition;
+
+                if (thisSize != null)
                 {
-                    var storePosition = actualPosition.AsXna;
-                    actualPosition += parentElement.GetActualPosition();
-                    
-                    if (thisSize != null)
+                    VerticalAlignment? vertAlign = element.HasTrait<VerticalAlignmentTrait>() ? element.ElementTrait<VerticalAlignmentTrait>().Value().Alignment : null;
+                    HorizontalAlignment? horizAlign = element.HasTrait<VerticalAlignmentTrait>() ? element.ElementTrait<HorizontalAlignmentTrait>().Value().Alignment : null;
+
+                    if (parentElement.HasTrait<SizeTrait>())
                     {
-                        VerticalAlignment? vertAlign = element.HasTrait<VerticalAlignmentTrait>() ? element.ElementTrait<VerticalAlignmentTrait>().Value().Alignment : null;
-                        HorizontalAlignment? horizAlign = element.HasTrait<VerticalAlignmentTrait>() ? element.ElementTrait<HorizontalAlignmentTrait>().Value().Alignment : null;
+                        Vector2 pos = parentPosition;
+                        Vector2 size = parentElement.ElementTrait<SizeTrait>().Value().AsXna;
 
-                        if (parentElement.HasTrait<SizeTrait>())
+                        if (horizAlign.HasValue && !managedHorizontalJustification)
                         {
-                            Vector2 pos = parentElement.GetActualPosition().AsXna;
-                            Vector2 size = parentElement.ElementTrait<SizeTrait>().Value().AsXna;
-
-                            if (horizAlign.HasValue && !managedHorizontalJustification)
+                            switch (horizAlign.Value)
                             {
-                                switch (horizAlign.Value)
-                                {
-                                    case HorizontalAlignment.Left:
-                                        actualPosition.X = pos.X+ storePosition.X; break;
-                                    case HorizontalAlignment.Right:
-                                        actualPosition.X = (pos.X + (size.X - thisSize.Value.X)); break;
-                                    case HorizontalAlignment.Center:
-                                        actualPosition.X = (pos.X + size.X / 2 - (thisSize.Value.X / 2)); break;
-                                        //why doesnt this work adding store position?
-                                }
-
+                                case HorizontalAlignment.Left:
+                                    actualPosition.X = pos.X + storePosition.X; break;
+                                case HorizontalAlignment.Right:
+                                    actualPosition.X = (pos.X + (size.X - thisSize.Value.X)); break;
+                                case HorizontalAlignment.Center:
+                                    actualPosition.X = (pos.X + size.X / 2 - (thisSize.Value.X / 2)); break;
+                                    //why doesnt this work adding store position?
                             }
 
-                            if (vertAlign.HasValue)
+                        }
+
+                        if (vertAlign.HasValue)
+                        {
+                            switch (vertAlign.Value)
                             {
-                                switch (vertAlign.Value)
-                                {
-                                    case VerticalAlignment.Top:
-                                        actualPosition.Y = pos.Y+ storePosition.Y; break;
-                                    case VerticalAlignment.Bottom:
-                                        actualPosition.Y = (pos.Y + (size.Y - thisSize.Value.Y)); break;
-                                    case VerticalAlignment.Center:
-                                        actualPosition.Y = (pos.Y + size.Y / 2 - (thisSize.Value.Y / 2)); break;
-                                        //why doesnt this work adding store position?
-                                }
+                                case VerticalAlignment.Top:
+                                    actualPosition.Y = pos.Y + storePosition.Y; break;
+                                case VerticalAlignment.Bottom:
+                                    actualPosition.Y = (pos.Y + (size.Y - thisSize.Value.Y)); break;
+                                case VerticalAlignment.Center:
+                                    actualPosition.Y = (pos.Y + size.Y / 2 - (thisSize.Value.Y / 2)); break;
+                                    //why doesnt this work adding store position?
                             }
                         }
                     }

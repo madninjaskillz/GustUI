@@ -33,7 +33,7 @@ public class FilledRectangleElement : RectangleElement
         BackgroundFillTrait fill = ElementTrait<BackgroundFillTrait>();
         Ensure.NotNull(fill, nameof(fill));
 
-        TVVector actualPosition = this.GetActualPosition();
+        Vector2 actualPosition = this.GetActualXnaPosition();
         TVVector size = this.ElementTrait<SizeTrait>().Value();
         Rectangle rect = new Rectangle(actualPosition.X.AsInt(), actualPosition.Y.AsInt(), size.X.AsInt(), size.Y.AsInt());
         Ensure.NotNull(rect, nameof(rect));
