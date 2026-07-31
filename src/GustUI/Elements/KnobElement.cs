@@ -75,6 +75,7 @@ public class KnobElement : Element
                 (int)(center.X - diameter / 2f), (int)(center.Y - diameter / 2f), diameter, diameter);
 
             manager.Draw(dial, dest, FaceColor);
+            manager.Draw(GetRingTexture(diameter), dest, RingColor);
 
             // Pointer: thin rect rotated about its top-center, angle 0 = 6
             // o'clock; value sweeps 45°..315° clockwise (7:30 → 4:30).
@@ -98,7 +99,41 @@ public class KnobElement : Element
         return pixel;
     }
 
-    /// <summary>Antialiased filled disc with a 2px lighter ring, baked once per diameter.</summary>
+    private static readonly Dictionary<int, Texture2D> RingCache = new Dictionary<int, Texture2D>();
+
+    /// <summary>Antialiased 2px ring annulus, baked once per diameter, tinted by RingColor.</summary>
+    private static Texture2D GetRingTexture(int diameter)
+    {
+        if (RingCache.TryGetValue(diameter, out Texture2D cached))
+        {
+            return cached;
+        }
+
+        var data = new Color[diameter * diameter];
+        float r = diameter / 2f;
+        float ringInner = r - 2.5f;
+
+        for (int y = 0; y < diameter; y++)
+        {
+            for (int x = 0; x < diameter; x++)
+            {
+                float dx = x - r + 0.5f;
+                float dy = y - r + 0.5f;
+                float dist = (float)Math.Sqrt(dx * dx + dy * dy);
+
+                float outer = MathHelper.Clamp(r - dist, 0f, 1f);
+                float inner = MathHelper.Clamp(dist - ringInner + 1f, 0f, 1f);
+                data[y * diameter + x] = Color.White * (outer * inner);
+            }
+        }
+
+        var texture = new Texture2D(Resources.StaticResources.GraphicsDevice, diameter, diameter);
+        texture.SetData(data);
+        RingCache[diameter] = texture;
+        return texture;
+    }
+
+    /// <summary>Antialiased filled disc (face only; ring drawn separately), baked once per diameter.</summary>
     private static Texture2D GetDialTexture(int diameter)
     {
         if (DialCache.TryGetValue(diameter, out Texture2D cached))
@@ -125,9 +160,11 @@ public class KnobElement : Element
                     continue;
                 }
 
+                // Face is opaque white (tinted by FaceColor at draw time); the
+                // ring band is transparent here and drawn from RingTexture so
+                // RingColor tints it independently.
                 bool ring = dist >= ringInner;
-                var c = ring ? new Color(160, 160, 172) : Color.White;
-                data[y * diameter + x] = c * alpha;
+                data[y * diameter + x] = ring ? Color.Transparent : Color.White * alpha;
             }
         }
 
