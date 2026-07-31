@@ -14,14 +14,30 @@ public class TVElements : TraitValue
         namedItems = new List<Tuple<Element, string>>();
     }
 
+    // Depth-sorted view is cached and rebuilt only when membership or a child
+    // Depth changes (Element.Depth setter calls InvalidateSort). Rebuilds
+    // allocate a fresh list so callers holding the old one keep a valid snapshot.
+    private List<Element> sortedCache;
+
+    public void InvalidateSort() => sortedCache = null;
+
     public void Add(Element item, string name)
     {
         namedItems.Add(new(item, name));
+        sortedCache = null;
         Log.This(name + " added to children, now " + namedItems.Count + " items");
     }
-    public void Remove(Element item) => namedItems.Remove(namedItems.Find(x => x.Item1 == item));
-    public void Remove(string name) => namedItems.Remove(namedItems.Find(x => x.Item2 == name));
-    public List<Element> Items => namedItems.Select(x => x.Item1).OrderBy(x=>x.Depth).ToList();
+    public void Remove(Element item)
+    {
+        namedItems.Remove(namedItems.Find(x => x.Item1 == item));
+        sortedCache = null;
+    }
+    public void Remove(string name)
+    {
+        namedItems.Remove(namedItems.Find(x => x.Item2 == name));
+        sortedCache = null;
+    }
+    public List<Element> Items => sortedCache ??= namedItems.Select(x => x.Item1).OrderBy(x => x.Depth).ToList();
     public Element Get(string name)
     {
         var result = namedItems.FirstOrDefault(x => x.Item2 == name);

@@ -300,7 +300,27 @@ namespace GustUI.Managers
             spriteBatch.Draw(texture, rectangle, source, color);
         }
 
-        internal void SetScissor(Rectangle? rect)
+        // Public clipping API: nested scissors intersect with the enclosing one.
+        private readonly Stack<Rectangle> scissorStack = new Stack<Rectangle>();
+
+        public void PushScissor(Rectangle rect)
+        {
+            Rectangle clipped = scissorStack.Count > 0 ? Rectangle.Intersect(scissorStack.Peek(), rect) : rect;
+            scissorStack.Push(clipped);
+            SetScissor(clipped);
+        }
+
+        public void PopScissor()
+        {
+            if (scissorStack.Count > 0)
+            {
+                scissorStack.Pop();
+            }
+
+            SetScissor(scissorStack.Count > 0 ? scissorStack.Peek() : (Rectangle?)null);
+        }
+
+        public void SetScissor(Rectangle? rect)
         {
             if (rect.HasValue)
             {

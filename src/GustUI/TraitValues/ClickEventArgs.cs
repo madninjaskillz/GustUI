@@ -20,5 +20,7 @@ namespace GustUI.TraitValues
 
         public int ScrollWheel { get; set; }
         public int ScrollWheelDelta { get; set; }
+
+        public TVVector GlobalMousePosition { get; set; }
     }
 }

@@ -24,6 +24,22 @@ namespace GustUI.Managers
         private int previousScrollWheelValue;
         private List<Element> currentlyHovered = new List<Element>();
         private List<Element> currentlyClicked = new List<Element>();
+
+        /// <summary>This frame's mouse state — read this instead of calling Mouse.GetState per element.</summary>
+        public MouseState CurrentMouseState { get; private set; }
+
+        /// <summary>While set, held/release mouse events route here regardless of hover.</summary>
+        public Element CapturedPointerElement { get; private set; }
+
+        public void CapturePointer(Element element) => CapturedPointerElement = element;
+
+        public void ReleasePointer(Element element)
+        {
+            if (CapturedPointerElement == element)
+            {
+                CapturedPointerElement = null;
+            }
+        }
         
         internal int FloatedElementCount { get; private set; }
         internal string FloatedElementName { get; private set; }
@@ -110,6 +126,7 @@ namespace GustUI.Managers
         public void Update()
         {
             MouseState mouseState = Mouse.GetState();
+            CurrentMouseState = mouseState;
             KeyboardState keyboardState = Keyboard.GetState();
             int scrollWheel = mouseState.ScrollWheelValue;
             var triggeredHooks = Hooks.Where(x => keyboardState.IsKeyDown(x.Shortcut.Key));
@@ -125,11 +142,60 @@ namespace GustUI.Managers
 
             if (scrollWheel != previousScrollWheelValue)
             {
-                foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnScrollTrait>()))
+                // Either scroll trait subscribes an element; OnScrollWheelChanged
+                // wins when both exist (matches the old behavior for elements
+                // that declared the historical trait pair).
+                foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnScrollTrait>() || e.HasTrait<OnScrollWheelChanged>()))
                 {
-                    element.ElementTrait<OnScrollWheelChanged>().Value().TriggerAction?.Invoke(new ScrollEventArgs { ScrollWheel = scrollWheel, ScrollWheelDelta = previousScrollWheelValue-scrollWheel });
+                    var args = new ScrollEventArgs
+                    {
+                        ScrollWheel = scrollWheel,
+                        ScrollWheelDelta = previousScrollWheelValue - scrollWheel,
+                        GlobalMousePosition = new TVVector(mouseState.X, mouseState.Y),
+                    };
+
+                    if (element.HasTrait<OnScrollWheelChanged>())
+                    {
+                        element.ElementTrait<OnScrollWheelChanged>().Value().TriggerAction?.Invoke(args);
+                    }
+                    else
+                    {
+                        element.ElementTrait<OnScrollTrait>().Value().TriggerAction?.Invoke(args);
+                    }
                 }
                 previousScrollWheelValue = scrollWheel;
+            }
+
+            if (CapturedPointerElement != null)
+            {
+                Element captured = CapturedPointerElement;
+
+                if (mouseState.LeftButton == ButtonState.Pressed)
+                {
+                    HaveInteracted = true;
+                    if (captured.HasTrait<OnMouseButtonHeldDown>())
+                    {
+                        captured.ElementTrait<OnMouseButtonHeldDown>().Value().TriggerAction?.Invoke(captured.GetClickArgs(mouseState));
+                    }
+                }
+                else
+                {
+                    if (previousMouseState.LeftButton == ButtonState.Pressed && captured.HasTrait<OnMouseRelease>())
+                    {
+                        captured.ElementTrait<OnMouseRelease>().Value().TriggerAction?.Invoke(captured.GetClickArgs(mouseState));
+                    }
+
+                    CapturedPointerElement = null;
+                }
+
+                currentlyClicked = mouseState.LeftButton == ButtonState.Pressed
+                    ? new List<Element> { captured }
+                    : new List<Element>();
+
+                UpdateHoverTransitions(mouseState);
+                previousMouseState = mouseState;
+                previousKeyboardState = keyboardState;
+                return;
             }
 
             if (mouseState.LeftButton == ButtonState.Pressed)
@@ -183,9 +249,19 @@ namespace GustUI.Managers
 
             
 
-            var previouslyHovered = ProcessHovers(Resources.StaticResources.RootWindow, previousMouseState.Position.ToVector2());
-            var newlyHovered = currentlyHovered.Except(previouslyHovered);
-            var noLongerHovered = previouslyHovered.Except(currentlyHovered);
+            UpdateHoverTransitions(mouseState);
+            previousMouseState = mouseState;
+            previousKeyboardState = keyboardState;
+        }
+
+        // Previous frame's hover list is cached rather than recomputed with a
+        // second full ProcessHovers tree walk every frame.
+        private List<Element> lastHoverList = new List<Element>();
+
+        private void UpdateHoverTransitions(MouseState mouseState)
+        {
+            var newlyHovered = currentlyHovered.Except(lastHoverList);
+            var noLongerHovered = lastHoverList.Except(currentlyHovered);
 
             foreach (Element element in newlyHovered.Where(e => e.HasTrait<OnEnterTrait>()))
             {
@@ -201,10 +277,10 @@ namespace GustUI.Managers
             {
                 element.ElementTrait<OnHoverTrait>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
             }
+
             FloatedElementCount = currentlyHovered.Count;
             FloatedElementName = string.Join(", ", currentlyHovered.Select(e => e.ElementName));
-            previousMouseState = mouseState;
-            previousKeyboardState = keyboardState;
+            lastHoverList = currentlyHovered;
         }
 
         private List<Element> ProcessHovers(Element element, Vector2 position, int depth = 0, int root = -1, List<(int, Element)> HoveredElementsIndexed = null)

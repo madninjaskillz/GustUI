@@ -8,8 +8,16 @@ using System.Runtime.CompilerServices;
 
 namespace GustUI.Traits
 {
-    public class Trait<T> where T : TraitValue
+    /// <summary>Non-generic setter so Element.Set can avoid reflection.</summary>
+    public interface ISettableTrait
     {
+        bool SetValue(TraitValue value);
+    }
+
+    public class Trait<T> : ISettableTrait where T : TraitValue
+    {
+        bool ISettableTrait.SetValue(TraitValue value) => Set((T)value);
+
         public void Hello()
         {
             Debug.WriteLine("hello");

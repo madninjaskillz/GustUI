@@ -35,7 +35,23 @@ public class Element : IDisposable
     private string elementName = null;
     public string ElementName { get => elementName ?? this.ToString(); set => elementName = value; }
     private Dictionary<Type, object> traits = new Dictionary<Type, object>();
-    public int Depth { get; set; } = 0;
+
+    private int depth = 0;
+    public int Depth
+    {
+        get => depth;
+        set
+        {
+            if (depth != value)
+            {
+                depth = value;
+                Parent?.Children?.InvalidateSort();
+            }
+        }
+    }
+
+    /// <summary>When true, children are scissor-clipped to this element's bounds during Draw.</summary>
+    public bool ClipChildren { get; set; } = false;
 
     private Dictionary<string, Tuple<Element, string>> traitMapping = new Dictionary<string, Tuple<Element, string>>();
     public Element()
@@ -257,17 +273,51 @@ public class Element : IDisposable
         {
             throw new MissingTraitException(typeof(TraitType), this, callMemberName);
         }
+
+        if (traits[typeof(TraitType)] is ISettableTrait settable)
+        {
+            return settable.SetValue(value);
+        }
+
         var method = typeof(TraitType).GetMethod("Set");
         return (bool)method.Invoke(this.ElementTraitByTypeFromObject(typeof(TraitType)), new object[] { value });
     }
+
+    /// <summary>Attaches a trait at runtime (no-op if already present) — avoids needing a subclass + [ElementTraits] just to opt into an event.</summary>
+    public TraitType AddTrait<TraitType>() where TraitType : class, new()
+    {
+        if (!traits.ContainsKey(typeof(TraitType)))
+        {
+            traits.Add(typeof(TraitType), new TraitType());
+        }
+
+        return (TraitType)traits[typeof(TraitType)];
+    }
+
+    /// <summary>Routes held/release mouse events to this element regardless of hover until the button releases (or ReleasePointer).</summary>
+    public void CapturePointer() => Resources.StaticResources.InputManager.CapturePointer(this);
+
+    public void ReleasePointer() => Resources.StaticResources.InputManager.ReleasePointer(this);
 
     public virtual void Draw()
     {
         if (this.HasTrait<ChildrenTrait>())
         {
+            bool clip = ClipChildren && HasTrait<PositionTrait>() && HasTrait<SizeTrait>();
+            if (clip)
+            {
+                Resources.StaticResources.DrawManager.PushScissor(
+                    this.GetActualPosition().Rectangle(this.GetSize()));
+            }
+
             foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
             {
                 child.Draw();
+            }
+
+            if (clip)
+            {
+                Resources.StaticResources.DrawManager.PopScissor();
             }
         }
     }
@@ -491,7 +541,8 @@ public class Element : IDisposable
 
     public virtual void Update(Element parent = null)
     {
-        MouseState mouseState = Mouse.GetState();
+        // One Mouse.GetState per frame (InputManager), not one per element.
+        MouseState mouseState = Resources.StaticResources.InputManager.CurrentMouseState;
 
 
         if (BeingDragged && mouseState.LeftButton==ButtonState.Released)

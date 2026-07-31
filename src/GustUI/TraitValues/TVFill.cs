@@ -53,10 +53,30 @@ namespace GustUI.TraitValues
 
         }
 
+        private bool stopped;
+
+        /// <summary>Stops playback for good; GetTexture will no longer restart the video.</summary>
+        public void Stop()
+        {
+            stopped = true;
+            try
+            {
+                player.Stop();
+            }
+            catch
+            {
+            }
+        }
+
         public Texture2D GetTexture()
         {
             try
             {
+                if (stopped)
+                {
+                    return null;
+                }
+
                 player.Volume = 0.0f;
                 player.IsMuted = true;
                 if (player.State == MediaState.Stopped)
