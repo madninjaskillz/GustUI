@@ -302,6 +302,7 @@ public class Element : IDisposable
 
     public virtual void Draw()
     {
+        FrameProfiler.CountElementDraw();
         if (this.HasTrait<ChildrenTrait>())
         {
             bool clip = ClipChildren && HasTrait<PositionTrait>() && HasTrait<SizeTrait>();
@@ -544,6 +545,7 @@ public class Element : IDisposable
 
     public virtual void Update(Element parent = null)
     {
+        FrameProfiler.CountElementUpdate();
         // One Mouse.GetState per frame (InputManager), not one per element.
         MouseState mouseState = Resources.StaticResources.InputManager.CurrentMouseState;
 

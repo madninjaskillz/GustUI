@@ -49,12 +49,17 @@ namespace GustUI.Managers
 
             _frameCounter.Update(deltaTime);
 
+            FrameProfiler.Begin(FrameProfiler.Bucket.DrawFontCache);
             Resources.StaticResources.FontManager.ManageCaches();
+            FrameProfiler.End(FrameProfiler.Bucket.DrawFontCache);
 
             SetRenderTarget(null);
             Clear(Color.Transparent);
             Begin();
+            FrameProfiler.Begin(FrameProfiler.Bucket.DrawRoot);
             Resources.StaticResources.RootWindow.Draw();
+            FrameProfiler.End(FrameProfiler.Bucket.DrawRoot);
+            FrameProfiler.Begin(FrameProfiler.Bucket.DrawDebug);
             var lerpSpeed = 0.5f;
             if (Resources.StaticResources.DebugMode == DebugMode.Full)
             {
@@ -139,6 +144,7 @@ namespace GustUI.Managers
                 Resources.StaticResources.RootWindow.DebugDraw();
             }
 
+            FrameProfiler.End(FrameProfiler.Bucket.DrawDebug);
             End();
 
             
@@ -147,6 +153,7 @@ namespace GustUI.Managers
         internal void DrawString(KeyedSpriteFont font, string text, Vector2 position, Color white)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
+            FrameProfiler.CountString();
             var cache = Resources.StaticResources.FontManager.GetCachedText(font.Key, text, white);
             if (cache == null)
             {
@@ -253,6 +260,7 @@ namespace GustUI.Managers
         public void Begin(SpriteSortMode mode = SpriteSortMode.Deferred)
         {
             IsInBatch = true;
+            FrameProfiler.CountFlush();
             spriteBatch.Begin(mode, blendState, samplerState, null, rasterizerState, null, null);
         }
 
@@ -265,6 +273,7 @@ namespace GustUI.Managers
         internal void DrawString(KeyedSpriteFont font, string text, Vector2 vector2, Color color, int v1, Vector2 zero, float fontScale, SpriteEffects none, float v2)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
+            FrameProfiler.CountString();
             var cache = Resources.StaticResources.FontManager.GetCachedText(font.Key, text, color);
             if (cache == null)
             {
@@ -279,24 +288,28 @@ namespace GustUI.Managers
         internal void Draw(Texture2D pixel, Rectangle rectangle, object value, Color color, float angle, Vector2 vector2, SpriteEffects none, int v)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
+            FrameProfiler.CountSprite();
             spriteBatch.Draw(pixel, rectangle, null, color, angle, vector2, none, v);
         }
 
         internal void Draw(Texture2D pixel, Vector2 position, Color color)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
+            FrameProfiler.CountSprite();
             spriteBatch.Draw(pixel, position, color);
         }
 
         internal void Draw(Texture2D pixel, Rectangle rectangle, Color color)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
+            FrameProfiler.CountSprite();
             spriteBatch.Draw(pixel, rectangle, color);
         }
 
         internal void Draw(Texture2D texture, Rectangle rectangle, Rectangle? source, Color color)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
+            FrameProfiler.CountSprite();
             spriteBatch.Draw(texture, rectangle, source, color);
         }
 

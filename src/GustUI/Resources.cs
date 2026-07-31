@@ -41,8 +41,13 @@ namespace GustUI
 
         public void Update()
         {
+            FrameProfiler.Begin(FrameProfiler.Bucket.UpdateInput);
             InputManager.Update();
+            FrameProfiler.End(FrameProfiler.Bucket.UpdateInput);
+
+            FrameProfiler.Begin(FrameProfiler.Bucket.UpdateTree);
             RootWindow.Update();
+            FrameProfiler.End(FrameProfiler.Bucket.UpdateTree);
         }
 
         public FontManager FontManager;
