@@ -34,6 +34,22 @@ namespace GustUI.Managers
 
         public void CapturePointer(Element element) => CapturedPointerElement = element;
 
+        /// <summary>Drops keyboard focus (e.g. when a dialog holding a text
+        /// field closes — a focused element would keep suppressing shortcut
+        /// hooks forever otherwise).</summary>
+        public void ClearFocus()
+        {
+            if (CurrentlyFocused != null)
+            {
+                if (CurrentlyFocused.HasTrait<OnUnfocused>())
+                {
+                    CurrentlyFocused.ElementTrait<OnUnfocused>().Value().TriggerAction?.Invoke(new TVEventArgs());
+                }
+
+                CurrentlyFocused = null;
+            }
+        }
+
         public void ReleasePointer(Element element)
         {
             if (CapturedPointerElement == element)
@@ -130,7 +146,24 @@ namespace GustUI.Managers
             CurrentMouseState = mouseState;
             KeyboardState keyboardState = Keyboard.GetState();
             int scrollWheel = mouseState.ScrollWheelValue;
-            for (int i = 0; i < Hooks.Count; i++)
+
+            // While a text-input element is focused, newly pressed keys go to
+            // it and keyboard SHORTCUT hooks are suppressed (typing "z" must
+            // not trigger an undo hook).
+            bool typing = CurrentlyFocused != null && CurrentlyFocused.CanBeInputFocused;
+            if (typing)
+            {
+                bool shift = keyboardState.IsKeyDown(Keys.LeftShift) || keyboardState.IsKeyDown(Keys.RightShift);
+                foreach (Keys key in keyboardState.GetPressedKeys())
+                {
+                    if (!previousKeyboardState.IsKeyDown(key))
+                    {
+                        CurrentlyFocused.HandleKeyInput(key, shift);
+                    }
+                }
+            }
+
+            for (int i = 0; !typing && i < Hooks.Count; i++)
             {
                 KeyboardHook hook = Hooks[i];
                 if (!keyboardState.IsKeyDown(hook.Shortcut.Key) || previousKeyboardState.IsKeyDown(hook.Shortcut.Key))

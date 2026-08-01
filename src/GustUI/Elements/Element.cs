@@ -28,6 +28,12 @@ public class Element : IDisposable
     private Guid Id = Guid.NewGuid();
 
     internal virtual bool CanBeInputFocused { get; private set; } = false;
+
+    /// <summary>Keyboard input routed to the focused element by the
+    /// InputManager (one call per newly pressed key). Base: ignore.</summary>
+    internal virtual void HandleKeyInput(Microsoft.Xna.Framework.Input.Keys key, bool shift)
+    {
+    }
     public bool SizeFitsChildren { get; set; } = false;
 
     [JsonIgnore]
