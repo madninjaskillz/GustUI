@@ -63,6 +63,45 @@ namespace GustUI.Extensions
 
         }
 
+        /// <summary>DrawLine with a pixel thickness (rotated filled rect).</summary>
+        public static void DrawThickLine(this DrawManager spriteBatch, Vector2 start, Vector2 end, Color color, int thickness)
+        {
+            Vector2 edge = end - start;
+            float angle = (float)Math.Atan2(edge.Y, edge.X);
+
+            spriteBatch.Draw(Resources.StaticResources.Pixel,
+                new Rectangle((int)start.X, (int)start.Y, (int)edge.Length() + 1, thickness),
+                null,
+                color,
+                angle,
+                new Vector2(0, thickness / 2f),
+                SpriteEffects.None,
+                0);
+        }
+
+        /// <summary>
+        /// Cubic Bézier as a sampled polyline of thick segments — the house
+        /// "sampled geometry IS the curve" idiom (no curve primitive exists in
+        /// the sprite batch and none is needed).
+        /// </summary>
+        public static void DrawCubicBezier(this DrawManager spriteBatch, Vector2 p0, Vector2 c0, Vector2 c1, Vector2 p1,
+            Color color, int thickness = 2, int segments = 24)
+        {
+            Vector2 previous = p0;
+            for (int i = 1; i <= segments; i++)
+            {
+                float t = i / (float)segments;
+                float u = 1f - t;
+                Vector2 point =
+                    u * u * u * p0
+                    + 3f * u * u * t * c0
+                    + 3f * u * t * t * c1
+                    + t * t * t * p1;
+                spriteBatch.DrawThickLine(previous, point, color, thickness);
+                previous = point;
+            }
+        }
+
         public static void DrawRectangle(this DrawManager spriteBatch, Rectangle rectangle, Color color, int borderSize = 1)
         {
             for (int i = 0; i < borderSize; i++)

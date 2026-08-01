@@ -266,7 +266,19 @@ namespace GustUI.Managers
                 }
             }
 
-            
+            // Right-button press edge → OnRightClickTrait on hovered elements.
+            // The trait existed but was never dispatched; press-edge only (no
+            // right-drag/capture semantics — capture stays left-button).
+            if (mouseState.RightButton == ButtonState.Pressed && previousMouseState.RightButton == ButtonState.Released)
+            {
+                HaveInteracted = true;
+                foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnRightClickTrait>()))
+                {
+                    element.ElementTrait<OnRightClickTrait>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
+                }
+            }
+
+
 
             UpdateHoverTransitions(mouseState);
             previousMouseState = mouseState;

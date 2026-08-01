@@ -12,11 +12,22 @@ namespace GustUI.Elements
 {
     public class FruitPopupMenu : FilledRectangleElement
     {
+        /// <summary>
+        /// Popups draw above ordinary panels by default (panels near the root
+        /// accumulate depth as they gain children — the AddChild root-sibling
+        /// bump — so a depth-0 popup added later can still end up BEHIND a
+        /// busy panel; the tooltip/status-bar convention of an explicit high
+        /// depth fixes the class once for every consumer). Below
+        /// TooltipElement's 1000000 so hints still win.
+        /// </summary>
+        public const int PopupDepth = 500000;
+
         private List<MenuItemModel> menuItems;
         public bool WasAutoPopped { get; set; }
         public FruitPopupMenu(List<MenuItemModel> items, int width, bool autoPopped = false)
         {
             WasAutoPopped = autoPopped;
+            Depth = PopupDepth;
             menuItems = items;
             Set<SizeTrait>(new TVVector(width, 40*items.Count));
             Set<PositionTrait>(new TVVector(0, 0));
