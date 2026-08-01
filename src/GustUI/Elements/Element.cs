@@ -59,6 +59,14 @@ public class Element : IDisposable
     /// <summary>When true, children are scissor-clipped to this element's bounds during Draw.</summary>
     public bool ClipChildren { get; set; } = false;
 
+    /// <summary>
+    /// Marks this element as persistent app chrome (menu bar, status bar):
+    /// screens that clear the stage by killing the window's children should
+    /// skip chrome elements so navigation survives view switches. The flag is
+    /// advisory — <see cref="Kill"/> still works when called directly.
+    /// </summary>
+    public bool IsChrome { get; set; } = false;
+
     private Dictionary<string, Tuple<Element, string>> traitMapping = new Dictionary<string, Tuple<Element, string>>();
     public Element()
     {
@@ -297,17 +305,21 @@ public class Element : IDisposable
         Children.Add(child, name);
         child.Parent = this;
 
-        // Bring-to-front on add only makes sense for TOP-LEVEL elements
-        // (opening a menu/window pops it above its root siblings): the depth
-        // MoveToFront assigns is computed against the ROOT window's children,
-        // so applying it to a nested element silently clobbers a
-        // carefully-set sibling depth with an unrelated number (found the
-        // hard way: a Depth-900000 overlay reset to ~23 by adding its own
-        // child, sinking it under Depth-100+ siblings).
-        if (Parent != null && Parent == Resources.StaticResources.RootWindow)
-        {
-            MoveToFront();
-        }
+        // NOTE: AddChild used to MoveToFront() the RECEIVER whenever a
+        // root-level element gained a child (the "root-sibling self-bump"
+        // quirk). That never implemented its stated intent (popping a newly
+        // ADDED top-level element above its siblings — the root window's own
+        // Parent is null, so the intended case never fired) and it silently
+        // leapfrogged busy panels over carefully tiered chrome: any root
+        // panel that gained children jumped above the depth-50000 loop
+        // browser / depth-500000 popups the moment a higher-depth sibling
+        // (status bar, tooltip) existed. Depth is now authoritative:
+        // equal-depth siblings draw in insertion order (TVElements' OrderBy
+        // is stable), so "added later = on top" still holds within a tier,
+        // and explicit tiers (tooltip 1000000 > popup 500000 > status bar
+        // 100000 > loading 90000 > side panels 50000 > content 0) behave as
+        // written. Click-to-front for modal windows still calls
+        // MoveToFront() explicitly on press.
     }
 
     public TraitTypeValue ETV<TraitType, TraitTypeValue>()

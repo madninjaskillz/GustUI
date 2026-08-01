@@ -53,5 +53,34 @@ namespace GustUI.Elements
 
             Set<SizeTrait>(new TVVector(width, ps));
         }
+
+        /// <summary>
+        /// A press anywhere outside the menu system closes the popup. This
+        /// used to be the (fullscreen, dimming) BackdropElement's job; screens
+        /// that clear the stage don't keep a backdrop, so the popup now owns
+        /// its dismissal.
+        /// </summary>
+        public override void Update(Element parent = null)
+        {
+            base.Update(parent);
+
+            if (Resources.StaticResources.InputManager.LeftJustPressed && !AnyMenuUiHovered())
+            {
+                Kill();
+            }
+        }
+
+        private static bool AnyMenuUiHovered()
+        {
+            foreach (Element child in Resources.StaticResources.RootWindow.Children.Items)
+            {
+                if ((child is FruitPopupMenu || child is FruitMenuElement) && child.IsMouseOver())
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 }

@@ -29,7 +29,15 @@ namespace GustUI.Elements
             var icon = menuItem.Icon;
             var text = menuItem.Text;
             var action = actionOverride != null ? actionOverride : (x)=>{
-                menuItem.Action(x);
+                // Disabled items ignore clicks entirely (the popup stays open,
+                // matching native menus); enabled items without an Action are
+                // placeholders and must not NRE — they just close the menu.
+                if (!menuItem.Enabled)
+                {
+                    return;
+                }
+
+                menuItem.Action?.Invoke(x);
                 var autoPops = Resources.StaticResources.RootWindow.Children.Items.Where(x => x is FruitPopupMenu fpu);
                 foreach (var ap in autoPops)
                 {
