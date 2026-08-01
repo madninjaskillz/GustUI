@@ -25,6 +25,14 @@ namespace GustUI.Elements
         typeof(HorizontalAlignmentTrait))]
     public class TextElement : Element
     {
+        /// <summary>
+        /// False renders the text as a single unwrapped line (overflow is the
+        /// owner's concern — typically a ClipChildren parent). Skips the
+        /// per-word measuring pass entirely, so it is also the cheap mode for
+        /// pooled labels whose width changes every frame.
+        /// </summary>
+        public bool WordWrap { get; set; } = true;
+
         // Hot trait references (resolved once; the trait set never shrinks).
         private readonly FontTrait fontTrait;
         private readonly TextTrait textTrait;
@@ -74,7 +82,7 @@ namespace GustUI.Elements
             string fontName = fontValue.Family;
             float fontSize = fontValue.Size;
             string text = textTrait.Value().Text;
-            float wrapWidth = CachedSizeTrait != null ? CachedSizeTrait.Value().X : float.MinValue;
+            float wrapWidth = WordWrap && CachedSizeTrait != null ? CachedSizeTrait.Value().X : float.MinValue;
 
             if (wrapCacheResult != null &&
                 wrapCacheText == text &&
@@ -86,6 +94,20 @@ namespace GustUI.Elements
             }
 
             var font = GetFont(fontName, fontSize);
+
+            if (!WordWrap)
+            {
+                string single = text ?? "";
+                wrapCacheResult = single;
+                wrapCacheText = text;
+                wrapCacheFamily = fontName;
+                wrapCacheFontSize = fontSize;
+                wrapCacheWidth = wrapWidth;
+                wrapCacheTotalSize = font.SpriteFont.MeasureString(single) * GustConstants.FontScale;
+                wrapCacheLines = new[] { single };
+                wrapCacheLineSizes = new[] { wrapCacheTotalSize };
+                return single;
+            }
 
             var words = text !=null ? text.Split(' ') : Array.Empty<string>();
             string newText = "";
@@ -175,7 +197,8 @@ namespace GustUI.Elements
                         line,
                             p+offsetVector,
                             foreground,
-                            border);
+                            border,
+                            fontValue.BorderColor);
                         p.Y += lineSize.Y;
                         p.X = pr.X;
                         ySize = ySize+  (int)lineSize.Y;

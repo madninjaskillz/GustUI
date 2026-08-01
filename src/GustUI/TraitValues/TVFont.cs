@@ -11,6 +11,14 @@ namespace GustUI.TraitValues
         public string Family { get; set; }
         public float Size { get; set; }
         public int Border { get; set; }
+
+        /// <summary>
+        /// Outline color for <see cref="Border"/> &gt; 0. Null keeps the
+        /// original look (the text color faded to 10%); set an explicit color
+        /// (e.g. translucent black behind white text) for a contrast halo that
+        /// keeps labels legible over busy backgrounds.
+        /// </summary>
+        public Microsoft.Xna.Framework.Color? BorderColor { get; set; }
     }
 
     public class TVBool : TraitValue

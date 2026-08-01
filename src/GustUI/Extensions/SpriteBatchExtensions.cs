@@ -17,6 +17,12 @@ namespace GustUI.Extensions
 
         public static void DrawString(this DrawManager spriteBatch, KeyedSpriteFont font, string text, Vector2 position, Color color, int borderSize)
         {
+            DrawString(spriteBatch, font, text, position, color, borderSize, null);
+        }
+
+        public static void DrawString(this DrawManager spriteBatch, KeyedSpriteFont font, string text, Vector2 position, Color color, int borderSize, Color? borderColor)
+        {
+            Color outline = borderColor ?? color * BorderFade;
             for (var x = -borderSize; x <= borderSize; x++)
             {
                 for (var y = -borderSize; y <= borderSize; y++)
@@ -27,7 +33,7 @@ namespace GustUI.Extensions
                             font,
                             text,
                             position + new Vector2(x, y),
-                            color * BorderFade,
+                            outline,
                             0,
                             Vector2.Zero,
                             GustConstants.FontScale,

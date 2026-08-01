@@ -290,7 +290,18 @@ public class Element : IDisposable
         child.ElementName = name;
         Children.Add(child, name);
         child.Parent = this;
-        MoveToFront();
+
+        // Bring-to-front on add only makes sense for TOP-LEVEL elements
+        // (opening a menu/window pops it above its root siblings): the depth
+        // MoveToFront assigns is computed against the ROOT window's children,
+        // so applying it to a nested element silently clobbers a
+        // carefully-set sibling depth with an unrelated number (found the
+        // hard way: a Depth-900000 overlay reset to ~23 by adding its own
+        // child, sinking it under Depth-100+ siblings).
+        if (Parent != null && Parent == Resources.StaticResources.RootWindow)
+        {
+            MoveToFront();
+        }
     }
 
     public TraitTypeValue ETV<TraitType, TraitTypeValue>()

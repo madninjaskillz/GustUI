@@ -188,6 +188,22 @@ namespace GustUI.Managers
             }
             return null;
         }
+        /// <summary>
+        /// On-screen size of <paramref name="text"/> in the given font — the
+        /// same scaled measurement <see cref="Elements.TextElement"/> renders
+        /// with, for consumers that lay labels out themselves (fit/clip/align
+        /// decisions before binding a pooled element).
+        /// </summary>
+        public Vector2 MeasureText(TraitValues.TVFont font, string text)
+        {
+            if (font == null || font.Family == null || string.IsNullOrEmpty(text))
+            {
+                return Vector2.Zero;
+            }
+
+            return LoadFont(font.Family, font.Size).SpriteFont.MeasureString(text) * GustConstants.FontScale;
+        }
+
         public KeyedSpriteFont LoadFont(string path, float size)
         {
             var key = $"{path}_{size}";
