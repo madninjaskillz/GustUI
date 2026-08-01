@@ -29,6 +29,11 @@ namespace GustUI.Managers
         /// <summary>This frame's mouse state — read this instead of calling Mouse.GetState per element.</summary>
         public MouseState CurrentMouseState { get; private set; }
 
+        /// <summary>True only during the frame that observed the left button's
+        /// press edge (elements can react to "a click started somewhere",
+        /// e.g. popups closing on an outside press).</summary>
+        public bool LeftJustPressed { get; private set; }
+
         /// <summary>While set, held/release mouse events route here regardless of hover.</summary>
         public Element CapturedPointerElement { get; private set; }
 
@@ -140,12 +145,51 @@ namespace GustUI.Managers
         }
 
 
+        /// <summary>
+        /// A pointer button transition pushed by the host platform (see
+        /// <see cref="PushPointerEdge"/>): the position and the button states
+        /// that resulted from the transition.
+        /// </summary>
+        private readonly struct PointerEdge
+        {
+            public readonly int X;
+            public readonly int Y;
+            public readonly bool Left;
+            public readonly bool Right;
+
+            public PointerEdge(int x, int y, bool left, bool right)
+            {
+                X = x;
+                Y = y;
+                Left = left;
+                Right = right;
+            }
+        }
+
+        private readonly List<PointerEdge> pointerEdges = new List<PointerEdge>();
+
+        /// <summary>
+        /// Feeds a pointer button transition from the platform's event layer.
+        ///
+        /// GustUI samples the mouse once per frame, and some backends (e.g.
+        /// KNI's Blazor mouse) keep only the CURRENT button state fed from DOM
+        /// events — so a click whose press AND release both happen inside one
+        /// frame (a fast click, or any click during a long frame) is invisible
+        /// to the poll and used to be dropped entirely. Hosts that can observe
+        /// the underlying events push each down/up transition here; Update
+        /// replays every pushed edge through the full dispatch path before the
+        /// polled state, so no click is ever lost. Optional: platforms that
+        /// push nothing behave exactly as before.
+        /// </summary>
+        public void PushPointerEdge(int x, int y, bool leftDown, bool rightDown)
+        {
+            pointerEdges.Add(new PointerEdge(x, y, leftDown, rightDown));
+        }
+
         public void Update()
         {
-            MouseState mouseState = Mouse.GetState();
-            CurrentMouseState = mouseState;
+            MouseState polledState = Mouse.GetState();
             KeyboardState keyboardState = Keyboard.GetState();
-            int scrollWheel = mouseState.ScrollWheelValue;
 
             // While a text-input element is focused, newly pressed keys go to
             // it and keyboard SHORTCUT hooks are suppressed (typing "z" must
@@ -190,9 +234,50 @@ namespace GustUI.Managers
                 }
             }
 
+            previousKeyboardState = keyboardState;
+
+            // Mouse: replay host-pushed pointer edges first (each is a full
+            // dispatch pass at the position the transition happened), then the
+            // polled state as the final pass. With no pushed edges this is the
+            // single-pass behavior GustUI always had. The edge replay is what
+            // makes sub-frame clicks land: [down, up] between two polls fires
+            // press then release even though the poll never saw Pressed.
+            LeftJustPressed = false;
+            if (pointerEdges.Count > 0)
+            {
+                for (int i = 0; i < pointerEdges.Count; i++)
+                {
+                    PointerEdge edge = pointerEdges[i];
+                    MouseState edgeState = new MouseState(
+                        edge.X, edge.Y, polledState.ScrollWheelValue,
+                        edge.Left ? ButtonState.Pressed : ButtonState.Released,
+                        ButtonState.Released,
+                        edge.Right ? ButtonState.Pressed : ButtonState.Released,
+                        ButtonState.Released, ButtonState.Released);
+                    ProcessMouseState(edgeState, isFinal: false);
+                }
+
+                pointerEdges.Clear();
+            }
+
+            ProcessMouseState(polledState, isFinal: true);
+        }
+
+        /// <summary>One full mouse dispatch pass (hover, capture, press/held/
+        /// release, right-click; scroll only on the final pass per frame).</summary>
+        private void ProcessMouseState(MouseState mouseState, bool isFinal)
+        {
+            CurrentMouseState = mouseState;
+            int scrollWheel = mouseState.ScrollWheelValue;
+
+            if (mouseState.LeftButton == ButtonState.Pressed && previousMouseState.LeftButton == ButtonState.Released)
+            {
+                LeftJustPressed = true;
+            }
+
             currentlyHovered = ProcessHovers(Resources.StaticResources.RootWindow, mouseState.Position.ToVector2());
 
-            if (scrollWheel != previousScrollWheelValue)
+            if (isFinal && scrollWheel != previousScrollWheelValue)
             {
                 // Either scroll trait subscribes an element; OnScrollWheelChanged
                 // wins when both exist (matches the old behavior for elements
@@ -246,7 +331,6 @@ namespace GustUI.Managers
 
                 UpdateHoverTransitions(mouseState);
                 previousMouseState = mouseState;
-                previousKeyboardState = keyboardState;
                 return;
             }
 
@@ -315,7 +399,6 @@ namespace GustUI.Managers
 
             UpdateHoverTransitions(mouseState);
             previousMouseState = mouseState;
-            previousKeyboardState = keyboardState;
         }
 
         // Previous frame's hover list is cached rather than recomputed with a
