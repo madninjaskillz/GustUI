@@ -37,12 +37,16 @@ namespace GustUI.Elements
                     return;
                 }
 
-                menuItem.Action?.Invoke(x);
-                var autoPops = Resources.StaticResources.RootWindow.Children.Items.Where(x => x is FruitPopupMenu fpu);
+                // Close the menu BEFORE running the action (native menu
+                // order) — an action that opens its own popup (e.g. an "add
+                // component" picker) must not have it swept by the close.
+                var autoPops = Resources.StaticResources.RootWindow.Children.Items.Where(x => x is FruitPopupMenu fpu).ToList();
                 foreach (var ap in autoPops)
                 {
                     ap.Kill();
                 }
+
+                menuItem.Action?.Invoke(x);
 
             };
             var more = menuItem.SubItems?.Count > 0;

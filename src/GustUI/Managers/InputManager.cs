@@ -19,6 +19,35 @@ namespace GustUI.Managers
         public Element CurrentlyFocused = null;
         public List<KeyboardHook> Hooks = new List<KeyboardHook>();
 
+        // ---- keyboard hook scopes -----------------------------------------
+        // A modal surface (FullScreenModalElement) must suppress the keyboard
+        // shortcuts of whatever lies beneath it: the sequencer's Delete hook
+        // firing while a piano roll modal is open would delete clips the user
+        // cannot even see. Scopes solve this at the framework level: pushing a
+        // scope makes it the ACTIVE scope; every KeyboardHook records the
+        // active scope at construction; Update only fires hooks whose scope is
+        // the active one. Popping (by token, order-independent) reactivates
+        // the scope beneath. Scope 0 is the base scope (no modal open).
+        private readonly List<int> hookScopeStack = new List<int>();
+        private int nextHookScopeId = 1;
+
+        /// <summary>The scope newly created hooks join and the only scope
+        /// whose hooks fire. 0 = base (no modal scope pushed).</summary>
+        public int ActiveHookScope => hookScopeStack.Count > 0 ? hookScopeStack[hookScopeStack.Count - 1] : 0;
+
+        /// <summary>Pushes a new hook scope (see field notes) and returns its
+        /// token for <see cref="PopHookScope"/>.</summary>
+        public int PushHookScope()
+        {
+            int id = nextHookScopeId++;
+            hookScopeStack.Add(id);
+            return id;
+        }
+
+        /// <summary>Removes a pushed scope by token (safe out of order — an
+        /// inner modal closing after its parent still resolves correctly).</summary>
+        public void PopHookScope(int token) => hookScopeStack.Remove(token);
+
         public bool HaveInteracted { get; private set; }
         private MouseState previousMouseState;
         private KeyboardState previousKeyboardState;
@@ -101,10 +130,20 @@ namespace GustUI.Managers
         {
             public KeyboardShortcut Shortcut;
             public Action TriggerAction;
+
+            /// <summary>The hook scope this hook belongs to (recorded at
+            /// construction = the scope that was active when the owning view
+            /// registered it). Only hooks of the ACTIVE scope fire.</summary>
+            public int Scope;
+
             public KeyboardHook(KeyboardShortcut shortcut, Action triggerAction)
             {
                 Shortcut = shortcut;
                 TriggerAction = triggerAction;
+                // Null-safe: the InputManager's own ctor hooks run before
+                // StaticResources.InputManager is assigned — they land in the
+                // base scope.
+                Scope = Resources.StaticResources?.InputManager?.ActiveHookScope ?? 0;
             }
         }
 
@@ -207,9 +246,15 @@ namespace GustUI.Managers
                 }
             }
 
+            int activeScope = ActiveHookScope;
             for (int i = 0; !typing && i < Hooks.Count; i++)
             {
                 KeyboardHook hook = Hooks[i];
+                if (hook.Scope != activeScope)
+                {
+                    continue; // belongs to a view beneath (or above) the active modal scope
+                }
+
                 if (!keyboardState.IsKeyDown(hook.Shortcut.Key) || previousKeyboardState.IsKeyDown(hook.Shortcut.Key))
                 {
                     continue;

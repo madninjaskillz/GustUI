@@ -16,7 +16,9 @@ namespace GustUI.Elements
     /// by default: it is persistent navigation, so stage-clearing screens
     /// should leave it alive and lay out below <see cref="MenuHeight"/> (the
     /// same top limit fullscreen modals already respect). Tracks the root
-    /// window's width on resize.
+    /// window's width on resize. The bar's CONTENT is replaceable at runtime
+    /// via <see cref="SetItems"/> — the seam for context-sensitive menus
+    /// (apps rebuild the model when the active view changes).
     /// </summary>
     public class FruitMenuElement : FilledRectangleElement
     {
@@ -27,6 +29,7 @@ namespace GustUI.Elements
 
         private FilledRectangleElement logoElement;
         private FilledRectangleElement shadowElement;
+        private readonly List<FruitMenuItem> itemElements = new List<FruitMenuItem>();
         public FruitMenuElement(List<MenuItemModel> items)
         {
             menuItems = items;
@@ -43,6 +46,45 @@ namespace GustUI.Elements
                 logoElement.Set<SizeTrait>(new TVVector(24, 24));
                 logoElement.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.MenuLogo);
             }
+
+            BuildItems();
+
+
+            shadowElement = AddChildElement<FilledRectangleElement>();
+            shadowElement.Set<SizeTrait>(new TVVector(Resources.StaticResources.RootWindow.GetSize().X, 10));
+            shadowElement.Set<PositionTrait>(new TVVector(0, MenuHeight));
+            shadowElement.Set<BackgroundFillTrait>(new TVFillSimpleGradient(new Microsoft.Xna.Framework.Color(0, 0, 0, 128), new Microsoft.Xna.Framework.Color(0, 0, 0, 0),  Direction.Vertically));
+
+        }
+
+        /// <summary>
+        /// Replaces the bar's menu model and rebuilds the item strip in place
+        /// (logo and shadow are kept). Any open dropdown popups are closed —
+        /// their items belong to the outgoing model. This is the
+        /// context-sensitive-menu seam: call it whenever the active view (and
+        /// therefore the menu's meaning) changes.
+        /// </summary>
+        public void SetItems(List<MenuItemModel> items)
+        {
+            menuItems = items;
+
+            foreach (var open in Resources.StaticResources.RootWindow.Children.Items.Where(c => c is FruitPopupMenu).ToList())
+            {
+                open.Kill();
+            }
+
+            BuildItems();
+        }
+
+        /// <summary>(Re)builds one FruitMenuItem per top-level model entry.</summary>
+        private void BuildItems()
+        {
+            foreach (FruitMenuItem stale in itemElements)
+            {
+                stale.Kill();
+            }
+
+            itemElements.Clear();
 
             float ps = 32;
             foreach (MenuItemModel item in menuItems)
@@ -72,6 +114,7 @@ namespace GustUI.Elements
                 }, 100, true);
 
                 this.AddChild(i, "fruit item");
+                itemElements.Add(i);
 
 
                 i.Set<PositionTrait>(new TVVector(ps, 0));
@@ -79,13 +122,6 @@ namespace GustUI.Elements
                 ps = ps + 20 + i.GetSize().X;
 
             }
-
-
-            shadowElement = AddChildElement<FilledRectangleElement>();
-            shadowElement.Set<SizeTrait>(new TVVector(Resources.StaticResources.RootWindow.GetSize().X, 10));
-            shadowElement.Set<PositionTrait>(new TVVector(0, MenuHeight));
-            shadowElement.Set<BackgroundFillTrait>(new TVFillSimpleGradient(new Microsoft.Xna.Framework.Color(0, 0, 0, 128), new Microsoft.Xna.Framework.Color(0, 0, 0, 0),  Direction.Vertically));
-
         }
 
         public override void Update(Element parent = null)
