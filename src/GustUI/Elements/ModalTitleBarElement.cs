@@ -6,9 +6,27 @@ using Microsoft.Xna.Framework;
 
 namespace GustUI.Elements
 {
+    /// <summary>
+    /// The SHARED window-chrome title bar: green gradient bar carrying the
+    /// title text plus the red X close button (and, for resizable
+    /// <see cref="ModalWindowElement"/> hosts, the blue maximize button).
+    /// Historically welded to ModalWindowElement; now any element can host it
+    /// (e.g. <see cref="FullScreenModalElement"/>) — drag/maximize behaviors
+    /// only attach when the parent actually is a ModalWindowElement, and the
+    /// X routes through <see cref="OnCloseRequested"/> (default: kill the
+    /// parent, the classic modal-window behavior).
+    /// </summary>
     [ElementTraits(typeof(FontTrait), typeof(OnExitTrait))]
     public class ModalTitleBarElement : FilledRectangleElement
     {
+        /// <summary>The chrome's fixed height (Update re-asserts it).</summary>
+        public const int BarHeight = 40;
+
+        /// <summary>What the red X does. Hosts with richer teardown than a
+        /// bare Kill (hook scopes, view state) set their own close path here
+        /// — the same path their Esc/Back uses. Null = Parent.Kill().</summary>
+        public System.Action OnCloseRequested;
+
         private BasicButtonElement dragBarElement;
         private BasicButtonElement closeButton;
         private BasicButtonElement sizeButton;
@@ -64,7 +82,7 @@ namespace GustUI.Elements
             closeButton.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Red, Color.DarkRed, Direction.Vertically));
             closeButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
             closeButton.Set<PositionTrait>(new TVVector(size.X - size.Y, 0));
-            closeButton.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => Parent.Kill()));
+            closeButton.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => RequestClose()));
 
             if (hasMaximimizeButton)
             {
@@ -83,30 +101,50 @@ namespace GustUI.Elements
             dragBarElement.Set<TextTrait>(new TVText(title));
             dragBarElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
             dragBarElement.Set<ForegroundColorTrait>(new TVColor(Color.White));
-            dragBarElement.Set<OnMousePress>(new TVEvent<ClickEventArgs>((x) => ((ModalWindowElement)Parent).handleStartDrag(x)));
-            dragBarElement.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => ((ModalWindowElement)Parent).handleStopDrag(x)));
 
+            // Drag-to-move is a ModalWindowElement behavior; other hosts
+            // (full-screen modals) get a static title strip.
+            if (Parent is ModalWindowElement dragHost)
+            {
+                dragBarElement.Set<OnMousePress>(new TVEvent<ClickEventArgs>((x) => dragHost.handleStartDrag(x)));
+                dragBarElement.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => dragHost.handleStopDrag(x)));
+            }
 
             Setup();
+        }
+
+        /// <summary>Updates the title text (renames, save-as, etc.).</summary>
+        public void SetTitle(string title)
+        {
+            dragBarElement.Set<TextTrait>(new TVText(title));
+        }
+
+        private void RequestClose()
+        {
+            if (OnCloseRequested != null)
+            {
+                OnCloseRequested();
+            }
+            else
+            {
+                Parent.Kill();
+            }
         }
 
         public override void Update(Element parent = null)
         {
             base.Update(parent);
             var size = parent.GetSize();
-            Set<SizeTrait>(new TVVector(size.X,40));
-            closeButton.Set<PositionTrait>(new TVVector(size.X - 40, 0));
-            closeButton.Set<SizeTrait>(new TVVector(40, 40));
+            Set<SizeTrait>(new TVVector(size.X, BarHeight));
+            closeButton.Set<PositionTrait>(new TVVector(size.X - BarHeight, 0));
+            closeButton.Set<SizeTrait>(new TVVector(BarHeight, BarHeight));
             if (hasMaximimizeButton)
             {
                 sizeButton.Set<PositionTrait>(new TVVector(size.X - 80, 0));
-                sizeButton.Set<SizeTrait>(new TVVector(40, 40));
+                sizeButton.Set<SizeTrait>(new TVVector(BarHeight, BarHeight));
                 sizeButton.Set<TextTrait>(((ModalWindowElement)Parent).isFullScreen ? Resources.StaticResources.Theme.Icons.MinimizeIcon.ToTextTrait() : Resources.StaticResources.Theme.Icons.MaximizeIcon.ToTextTrait());
             }
-            dragBarElement.Set<SizeTrait>(new TVVector(size.X - (hasMaximimizeButton ? 80 : 40), 40));
-
-           
-            
+            dragBarElement.Set<SizeTrait>(new TVVector(size.X - (hasMaximimizeButton ? 80 : BarHeight), BarHeight));
         }
 
 

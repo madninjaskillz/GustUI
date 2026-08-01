@@ -29,6 +29,11 @@ namespace GustUI.Elements
     /// The element is marked <see cref="Element.IsChrome"/>: an app that
     /// rebuilds the view beneath the modal (stage-clearing the window's
     /// non-chrome children) must not tear down the modal above it.
+    ///
+    /// Setting <see cref="Title"/> composes the shared window chrome — the
+    /// same <see cref="ModalTitleBarElement"/> the ModalWindowElement wears
+    /// (green title bar, red X) — with the X routed through
+    /// <see cref="OnCloseRequested"/>; content starts at <see cref="ContentTop"/>.
     /// </summary>
     public class FullScreenModalElement : FilledRectangleElement
     {
@@ -56,6 +61,70 @@ namespace GustUI.Elements
         private readonly int hookScopeToken;
         private Vector2 lastWindowSize = Vector2.Zero;
         private bool closed;
+        private ModalTitleBarElement titleBar;
+        private string title;
+        private System.Action onCloseRequested;
+
+        /// <summary>
+        /// The modal's window-chrome title (the welcome/About-modal look:
+        /// the shared <see cref="ModalTitleBarElement"/> — green bar, white
+        /// title text, red X). Setting a non-empty title creates the chrome;
+        /// hosted content should start at <see cref="ContentTop"/>. Set again
+        /// to retitle live (e.g. after a rename/save-as).
+        /// </summary>
+        public string Title
+        {
+            get => title;
+            set
+            {
+                title = value;
+                if (string.IsNullOrEmpty(value))
+                {
+                    return;
+                }
+
+                EnsureTitleBar();
+                titleBar.SetTitle(value);
+            }
+        }
+
+        /// <summary>What the title bar's X does — the hosting view's close
+        /// path (the same path as its Esc/Back). Defaults to <see cref="Close"/>.</summary>
+        public System.Action OnCloseRequested
+        {
+            get => onCloseRequested;
+            set
+            {
+                onCloseRequested = value;
+                if (titleBar != null)
+                {
+                    titleBar.OnCloseRequested = value ?? Close;
+                }
+            }
+        }
+
+        /// <summary>Y (modal-relative) where hosted content starts: below the
+        /// title-bar chrome when one exists, else 0.</summary>
+        public int ContentTop => titleBar != null ? ModalTitleBarElement.BarHeight : 0;
+
+        /// <summary>The composed chrome (null until a <see cref="Title"/> is set).</summary>
+        public ModalTitleBarElement TitleBar => titleBar;
+
+        private void EnsureTitleBar()
+        {
+            if (titleBar != null)
+            {
+                return;
+            }
+
+            titleBar = new ModalTitleBarElement(
+                title ?? "",
+                this,
+                new TVVector(0, 0),
+                new TVVector(System.Math.Max(ModalTitleBarElement.BarHeight, this.GetSize().X), ModalTitleBarElement.BarHeight));
+            titleBar.OnCloseRequested = onCloseRequested ?? Close;
+            AddChild(titleBar, "modal-title-bar");
+        }
 
         public FullScreenModalElement()
         {
