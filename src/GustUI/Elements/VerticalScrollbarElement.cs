@@ -1,134 +1,227 @@
-﻿using GustUI.Attributes;
+using System;
+using GustUI.Attributes;
 using GustUI.Extensions;
 using GustUI.Traits;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace GustUI.Elements
+namespace GustUI.Elements;
+
+/// <summary>
+/// A vertical scrollbar for panning a viewport over taller content — the
+/// vertical twin of <see cref="HorizontalScrollbarElement"/>, sharing its
+/// model exactly: a pure view of <see cref="ContentSize"/>,
+/// <see cref="ViewportSize"/> and <see cref="ScrollPosition"/> (all in content
+/// units), thumb drag via pointer capture, track press pages one viewport
+/// toward the pointer (repeating while held), programmatic
+/// <see cref="ScrollPosition"/> sets never echo <see cref="OnUserScroll"/>,
+/// and <see cref="IsDragging"/> lets owners with their own scroll agenda
+/// yield while the user holds the thumb.
+///
+/// (Rewritten 2026-08: the previous version was a Func-injected prototype
+/// only <see cref="VerticalScrollElement"/> consumed; both now share the
+/// scrollbar API introduced with the horizontal bar.)
+/// </summary>
+[ElementTraits(typeof(PositionTrait), typeof(SizeTrait), typeof(OnMousePress), typeof(OnMouseButtonHeldDown), typeof(OnMouseRelease))]
+public class VerticalScrollbarElement : Element
 {
-    public class VerticalScrollbarElement : FilledRectangleElement
+    private const double PageRepeatFirstMs = 350.0;
+    private const double PageRepeatMs = 120.0;
+
+    public Color TrackColor { get; set; } = new Color(24, 24, 30);
+    public Color ThumbColor { get; set; } = new Color(64, 64, 78);
+    public Color ThumbHoverColor { get; set; } = new Color(84, 84, 100);
+    public Color ThumbDragColor { get; set; } = new Color(110, 145, 235);
+
+    /// <summary>Shortest the thumb may get, in bar pixels (stays grabbable however tall the content).</summary>
+    public int MinThumbLength { get; set; } = 24;
+
+    /// <summary>Horizontal inset of the thumb inside the track.</summary>
+    public int ThumbMargin { get; set; } = 2;
+
+    /// <summary>Fraction of the viewport a track-click pages by.</summary>
+    public float PageFraction { get; set; } = 0.9f;
+
+    /// <summary>Raised only for user gestures (thumb drag / track paging), with the new ScrollPosition.</summary>
+    public Action<float> OnUserScroll;
+
+    /// <summary>True while the user is holding the thumb (owners running their own scrolling should yield).</summary>
+    public bool IsDragging { get; private set; }
+
+    private float contentSize = 1f;
+    private float viewportSize = 1f;
+    private float scrollPosition;
+
+    public float ContentSize
     {
-        private float scrollPosition = 0;
+        get => contentSize;
+        set { contentSize = Math.Max(0f, value); ClampScroll(); }
+    }
 
-        private float scrollPercentage = 0;
-        private float sizePercentage = 0.5f;
-        private float _scrollPercentage = 0;
-        private float _scrollPosition = 0;
-        private Func<float> getContainerHeight;
-        private RectangleElement scrollBarInner = new FilledRectangleElement();
-        public VerticalScrollbarElement(Func<float> getContainerHeight)
+    public float ViewportSize
+    {
+        get => viewportSize;
+        set { viewportSize = Math.Max(1f, value); ClampScroll(); }
+    }
+
+    /// <summary>Scroll offset in content units, clamped to [0, MaxScroll]. Programmatic sets do NOT raise OnUserScroll.</summary>
+    public float ScrollPosition
+    {
+        get => scrollPosition;
+        set => scrollPosition = MathHelper.Clamp(value, 0f, MaxScroll);
+    }
+
+    public float MaxScroll => Math.Max(0f, contentSize - viewportSize);
+
+    private float dragGrabOffset;      // pointer y - thumb top at grab time
+    private bool paging;
+    private int pageDirection;
+    private DateTime nextPageAt = DateTime.MinValue;
+    private float pagePointerY;
+
+    public VerticalScrollbarElement()
+    {
+        ElementTrait<OnMousePress>().Set(new TVEvent<ClickEventArgs>(HandlePress));
+        ElementTrait<OnMouseButtonHeldDown>().Set(new TVEvent<ClickEventArgs>(HandleHeld));
+        ElementTrait<OnMouseRelease>().Set(new TVEvent<ClickEventArgs>(HandleRelease));
+    }
+
+    private void HandlePress(ClickEventArgs args)
+    {
+        if (MaxScroll <= 0f)
         {
-            this.Set<OnMouseButtonHeldDown>(new TVEvent<ClickEventArgs>(handleInnerDrag));
-            this.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>(stopInnerDrag));
-            this.Set<OnExitTrait>(new TVEvent<ClickEventArgs>(stopInnerDrag));
-
-            Set<BorderSizeTrait>(new TVInt(0));
-            Set<BorderFillTrait>(new TVBorderColorFill(Color.Transparent));
-
-            scrollBarInner.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.DarkGray, Color.DarkGray * 0.8f, Direction.Vertically));
-            AddChild(scrollBarInner, "scrollBarInner");
-
-            scrollBarInner.Set<OnMouseButtonHeldDown>(new TVEvent<ClickEventArgs>(handleInnerDrag));
-            scrollBarInner.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>(stopInnerDrag));
-          
-            this.getContainerHeight = getContainerHeight;
+            return; // nothing to scroll: inert
         }
 
+        float trackTop = this.GetActualXnaPosition().Y;
+        float mouseY = args.MouseState.Y;
+        GetThumbMetrics(out float thumbY, out float thumbLength);
 
-        private void stopInnerDrag(ClickEventArgs args)
+        CapturePointer();
+
+        if (mouseY >= trackTop + thumbY && mouseY <= trackTop + thumbY + thumbLength)
         {
-            innerDragOffset = null;
+            IsDragging = true;
+            dragGrabOffset = mouseY - (trackTop + thumbY);
         }
-
-        private void handleInnerDrag(ClickEventArgs args)
+        else
         {
-            if (innerDragOffset != null)
+            paging = true;
+            pagePointerY = mouseY;
+            pageDirection = mouseY < trackTop + thumbY ? -1 : 1;
+            Page();
+            nextPageAt = DateTime.UtcNow.AddMilliseconds(PageRepeatFirstMs);
+        }
+    }
+
+    private void HandleHeld(ClickEventArgs args)
+    {
+        if (IsDragging)
+        {
+            float trackTop = this.GetActualXnaPosition().Y;
+            GetThumbMetrics(out _, out float thumbLength);
+            float span = this.GetSize().Y - thumbLength;
+            if (span <= 0f)
             {
-                var offset = args.GlobalMousePosition.AsXna - innerDragOffset.Value;
-                var containerSizeY = getContainerHeight();
-                var thisHeight = this.GetSize().Y;
-
-                var innerHeight = thisHeight * sizePercentage;
-                var innerY = (thisHeight - innerHeight) * scrollPercentage;
-                innerY += offset.Y;
-
-
-                float maxScroll = containerSizeY - thisHeight;
-
-                scrollPercentage = (innerY) / (thisHeight - innerHeight);
-                scrollPosition = scrollPercentage * maxScroll;
-
-                PrivateUpdate();
+                return;
             }
 
-            innerDragOffset = args.GlobalMousePosition.AsXna;
+            float thumbY = MathHelper.Clamp(args.MouseState.Y - dragGrabOffset - trackTop, 0f, span);
+            float target = thumbY / span * MaxScroll;
+            if (target != scrollPosition)
+            {
+                scrollPosition = target;
+                OnUserScroll?.Invoke(scrollPosition);
+            }
         }
-
-        internal void HandleScrollWheel(ScrollEventArgs x)
+        else if (paging)
         {
-            float scrollAmount = x.ScrollWheelDelta / 10f;
-            scrollPosition = scrollPosition + scrollAmount;
-
-            PrivateUpdate();
+            pagePointerY = args.MouseState.Y;
+            if (DateTime.UtcNow >= nextPageAt)
+            {
+                Page();
+                nextPageAt = DateTime.UtcNow.AddMilliseconds(PageRepeatMs);
+            }
         }
+    }
 
-        private Vector2? innerDragOffset = null;
-        public void PrivateUpdate(Element parent = null)
+    private void HandleRelease(ClickEventArgs args)
+    {
+        IsDragging = false;
+        paging = false;
+    }
+
+    /// <summary>One page toward the held pointer; stops when the thumb reaches it (no oscillation).</summary>
+    private void Page()
+    {
+        float trackTop = this.GetActualXnaPosition().Y;
+        GetThumbMetrics(out float thumbY, out float thumbLength);
+        if (pageDirection < 0 && pagePointerY >= trackTop + thumbY)
         {
-            var containerSizeY = getContainerHeight();
-            var size = this.GetSize();
-            float maxScroll = containerSizeY - size.Y;
-
-            if (scrollPosition > maxScroll)
-            {
-                scrollPosition = (int)maxScroll;
-            }
-
-            if (scrollPosition < 0)
-            {
-                scrollPosition = 0;
-            }
-            scrollPercentage = scrollPosition / maxScroll;
-            sizePercentage = size.Y / containerSizeY;
-
-            if (_scrollPercentage != scrollPercentage || _scrollPosition != scrollPosition)
-            {
-                Parent.ElementTrait<OnScrollTrait>().Value().TriggerAction?.Invoke(new ScrollEventArgs() { ScrollPercentage = scrollPercentage, ScrollPosition = scrollPosition });
-                _scrollPosition = scrollPosition;
-                _scrollPercentage = scrollPercentage;
-            }
-
-            var parentSize = Parent.GetSize();
-            Set<PositionTrait>(new TVVector(parentSize.X - 20, 2));
-            Set<SizeTrait>(new TVVector(18, parentSize.Y - 4));
-
-            var innerHeight = this.GetSize().Y * sizePercentage;
-            var innerY = (this.GetSize().Y - innerHeight) * scrollPercentage;
-            scrollBarInner.Set<SizeTrait>(new TVVector(14, innerHeight));
-            scrollBarInner.Set<PositionTrait>(new TVVector(2, innerY));
-
-            base.Update(parent);
+            return;
         }
-        bool initial = false;
-        public override void Draw()
+
+        if (pageDirection > 0 && pagePointerY <= trackTop + thumbY + thumbLength)
         {
-            if (!initial)
-            {
-                PrivateUpdate();
-                initial = true;
-            }
-            var size = this.GetSize();
-            var position = this.GetActualPosition();
-            var rect = new Rectangle((int)position.X, (int)position.Y, (int)size.X, (int)size.Y);
-            Resources.StaticResources.GraphicsDevice.ScissorRectangle = rect;
-            base.Draw();
-            Resources.StaticResources.GraphicsDevice.ScissorRectangle = new Rectangle(0, 0, (int)Resources.StaticResources.RootWindow.GetSize().X, (int)Resources.StaticResources.RootWindow.GetSize().Y);
+            return;
         }
+
+        float target = MathHelper.Clamp(
+            scrollPosition + pageDirection * viewportSize * PageFraction, 0f, MaxScroll);
+        if (target != scrollPosition)
+        {
+            scrollPosition = target;
+            OnUserScroll?.Invoke(scrollPosition);
+        }
+    }
+
+    private void ClampScroll()
+    {
+        scrollPosition = MathHelper.Clamp(scrollPosition, 0f, MaxScroll);
+    }
+
+    /// <summary>Thumb geometry in element-local pixels.</summary>
+    private void GetThumbMetrics(out float thumbY, out float thumbLength)
+    {
+        float trackLength = this.GetSize().Y;
+        if (contentSize <= viewportSize || trackLength <= 0f)
+        {
+            thumbY = 0f;
+            thumbLength = trackLength;
+            return;
+        }
+
+        thumbLength = MathHelper.Clamp(trackLength * (viewportSize / contentSize), Math.Min(MinThumbLength, trackLength), trackLength);
+        float span = trackLength - thumbLength;
+        thumbY = MaxScroll > 0f ? span * (scrollPosition / MaxScroll) : 0f;
+    }
+
+    public override void Draw()
+    {
+        var manager = Resources.StaticResources.DrawManager;
+        Vector2 pos = this.GetActualXnaPosition();
+        Vector2 size = this.GetSize().AsXna;
+        if (size.Y >= 1f && size.X >= 2f)
+        {
+            manager.DrawFilledRectangle(new Rectangle((int)pos.X, (int)pos.Y, (int)size.X, (int)size.Y), TrackColor);
+
+            GetThumbMetrics(out float thumbY, out float thumbLength);
+            Color thumb = ThumbColor;
+            if (IsDragging)
+            {
+                thumb = ThumbDragColor;
+            }
+            else if (Resources.StaticResources.InputManager.GetElementState(this) == Managers.InputManager.ElementState.Hovered)
+            {
+                thumb = ThumbHoverColor;
+            }
+
+            int inset = (int)MathHelper.Clamp(ThumbMargin, 0f, size.X / 2f - 1f);
+            manager.DrawFilledRectangle(
+                new Rectangle((int)pos.X + inset, (int)(pos.Y + thumbY), (int)size.X - inset * 2, (int)thumbLength),
+                thumb);
+        }
+
+        base.Draw();
     }
 }

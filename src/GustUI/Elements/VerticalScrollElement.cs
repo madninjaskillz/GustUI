@@ -1,4 +1,4 @@
-﻿using GustUI.Attributes;
+using GustUI.Attributes;
 using GustUI.Extensions;
 using GustUI.Traits;
 using GustUI.TraitValues;
@@ -7,71 +7,72 @@ using System;
 
 namespace GustUI.Elements
 {
+    /// <summary>
+    /// A scissored viewport over a taller content container, scrolled by the
+    /// rewritten <see cref="VerticalScrollbarElement"/> (thumb drag / track
+    /// paging) and the mouse wheel. Children added to this element land in the
+    /// inner container, whose height follows its children
+    /// (<see cref="Element.SizeFitsChildren"/>).
+    /// </summary>
     [ElementTraits(typeof(OnScrollTrait), typeof(OnScrollWheelChanged))]
     public class VerticalScrollElement : FilledRectangleElement
     {
-        private RectangleElement container = new RectangleElement();
-        private VerticalScrollbarElement scrollBar;
+        /// <summary>Content pixels scrolled per wheel notch (120 raw delta).</summary>
+        public float WheelStep { get; set; } = 48f;
+
+        private readonly RectangleElement container = new RectangleElement();
+        private readonly VerticalScrollbarElement scrollBar;
 
         public VerticalScrollElement()
         {
-            scrollBar = new VerticalScrollbarElement(getContainerHeight);
-            
+            scrollBar = new VerticalScrollbarElement();
+            scrollBar.OnUserScroll = ApplyScroll;
+
             base.AddChild(container, "container");
             base.AddChild(scrollBar, "scrollBar");
             container.SizeFitsChildren = true;
 
-            this.Set<OnScrollTrait>(new TVEvent<ScrollEventArgs>(x => handleScroll(x)));
-            this.Set<OnScrollWheelChanged>(new TVEvent<ScrollEventArgs>(x => scrollBar.HandleScrollWheel(x)));
-            setup();
+            this.Set<OnScrollWheelChanged>(new TVEvent<ScrollEventArgs>(HandleWheel));
         }
 
-        private void setup()
+        private void HandleWheel(ScrollEventArgs args)
         {
-            scrollBar.Set<SizeTrait>(new TVVector(20, this.GetSize().Y));
-            scrollBar.Set<PositionTrait>(new TVVector(this.GetSize().X - 20, 2));
+            // ScrollWheelDelta = previous - current, so wheel-up is negative.
+            scrollBar.ScrollPosition += args.ScrollWheelDelta / 120f * WheelStep;
+            ApplyScroll(scrollBar.ScrollPosition);
         }
 
-        private float getContainerHeight()
+        private void ApplyScroll(float position)
         {
-            var s = container.GetSize();
-            var h = s.Y;
-            return h;
+            container.Set<PositionTrait>(new TVVector(0, -position));
+
+            // Compat: consumers listening on OnScrollTrait keep receiving
+            // scroll notifications like they did with the old scrollbar.
+            ElementTrait<OnScrollTrait>().Value()?.TriggerAction?.Invoke(new ScrollEventArgs
+            {
+                ScrollPosition = position,
+                ScrollPercentage = scrollBar.MaxScroll > 0f ? position / scrollBar.MaxScroll : 0f,
+            });
         }
 
-        private void handleScroll(ScrollEventArgs x)
-        {
-            TVVector oldPosition = container.GetRelativePosition();
-            var newPosition = new TVVector(this.GetRelativePosition().X, -x.ScrollPosition);
-
-            var delta = newPosition - oldPosition;
-
-            container.Set<PositionTrait>(newPosition);
-        }
-
-        private Vector2 previousSize = Vector2.Zero;
         public override void Update(Element parent = null)
         {
             var thisSize = this.GetSize().AsXna;
-            if (thisSize.X != previousSize.X || thisSize.Y != previousSize.Y)
-            {
-                previousSize = thisSize;
-                setup();
-            }
+            scrollBar.Set<PositionTrait>(new TVVector(thisSize.X - 12, 0));
+            scrollBar.Set<SizeTrait>(new TVVector(12, thisSize.Y));
+            scrollBar.ContentSize = container.GetSize().Y;
+            scrollBar.ViewportSize = thisSize.Y;
             base.Update(parent);
         }
 
         public override void Draw()
         {
             var size = this.GetSize();
-            
             var position = this.GetActualPosition();
             var rect = new Rectangle((int)position.X, (int)position.Y, (int)size.X, (int)size.Y);
             Resources.StaticResources.DrawManager.SetScissor(rect);
-//            Resources.StaticResources.GraphicsDevice.ScissorRectangle = rect;
             base.Draw();
             Resources.StaticResources.DrawManager.SetScissor(null);
-//            Resources.StaticResources.GraphicsDevice.ScissorRectangle = new Rectangle(0, 0, (int)Resources.StaticResources.RootWindow.GetSize().X, (int)Resources.StaticResources.RootWindow.GetSize().Y);
         }
 
         public override void AddChildElement(Element element, string overrideName = null)

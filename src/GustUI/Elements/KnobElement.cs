@@ -27,6 +27,11 @@ public class KnobElement : Element
 
     public Action<float> OnValueChanged;
 
+    /// <summary>Raised when a drag gesture ends (mouse release), with the final
+    /// value — the hook for "commit" semantics like closing an undo-coalescing
+    /// stream, which per-tick <see cref="OnValueChanged"/> cannot signal.</summary>
+    public Action<float> OnDragCompleted;
+
     private float value;
     public float Value
     {
@@ -57,6 +62,11 @@ public class KnobElement : Element
         ElementTrait<OnMouseButtonHeldDown>().Set(new TVEvent<ClickEventArgs>(args =>
         {
             Value = dragStartValue + (dragStartY - args.MouseState.Y) / DragRangePixels;
+        }));
+
+        ElementTrait<OnMouseRelease>().Set(new TVEvent<ClickEventArgs>(args =>
+        {
+            OnDragCompleted?.Invoke(value);
         }));
     }
 

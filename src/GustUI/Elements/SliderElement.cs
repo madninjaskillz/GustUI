@@ -29,6 +29,10 @@ public class SliderElement : Element
 
     public Action<float> OnValueChanged;
 
+    /// <summary>Raised when a drag gesture ends (mouse release), with the final
+    /// value — the "commit" hook (see <see cref="KnobElement.OnDragCompleted"/>).</summary>
+    public Action<float> OnDragCompleted;
+
     private float value;
     public float Value
     {
@@ -55,6 +59,11 @@ public class SliderElement : Element
         ElementTrait<OnMouseButtonHeldDown>().Set(new TVEvent<ClickEventArgs>(args =>
         {
             Value = ValueAt(args.MouseState.X);
+        }));
+
+        ElementTrait<OnMouseRelease>().Set(new TVEvent<ClickEventArgs>(args =>
+        {
+            OnDragCompleted?.Invoke(value);
         }));
     }
 
