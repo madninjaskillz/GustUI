@@ -58,6 +58,15 @@ namespace GustUI.Managers
         /// <summary>This frame's mouse state — read this instead of calling Mouse.GetState per element.</summary>
         public MouseState CurrentMouseState { get; private set; }
 
+        /// <summary>True while a text-input element (e.g. a rename/save-as
+        /// field) holds keyboard focus — the same gate <see cref="Update"/>
+        /// uses internally to suppress shortcut hooks while typing. Exposed
+        /// for callers that poll raw key state directly every frame (e.g. a
+        /// QWERTY note-audition keyboard) instead of registering a
+        /// <see cref="KeyboardHook"/>, so they can skip note keys the same
+        /// way "z" doesn't trigger undo while renaming something.</summary>
+        public bool IsTyping => CurrentlyFocused != null && CurrentlyFocused.CanBeInputFocused;
+
         /// <summary>True only during the frame that observed the left button's
         /// press edge (elements can react to "a click started somewhere",
         /// e.g. popups closing on an outside press).</summary>
