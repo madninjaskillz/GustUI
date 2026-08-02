@@ -27,6 +27,15 @@ public class SliderElement : Element
     public int TrackThickness { get; set; } = 4;
     public int ThumbDiameter { get; set; } = 14;
 
+    /// <summary>Normalized 0..1 LIVE automated position (see
+    /// <see cref="KnobElement.LiveValue"/> for the full rationale) — null draws
+    /// nothing extra. Rendered as a small marker riding ABOVE the track at the
+    /// live position, independent of the draggable <see cref="Value"/> thumb.</summary>
+    public float? LiveValue { get; set; }
+
+    /// <summary>Accent color for the <see cref="LiveValue"/> marker.</summary>
+    public Color LiveColor { get; set; } = new Color(255, 196, 64);
+
     public Action<float> OnValueChanged;
 
     /// <summary>Raised when a drag gesture ends (mouse release), with the final
@@ -105,6 +114,18 @@ public class SliderElement : Element
             {
                 var dest = new Rectangle((int)(thumbCenterX - d / 2f), (int)(centerY - d / 2f), d, d);
                 manager.Draw(GetThumbTexture(d), dest, ThumbColor);
+            }
+
+            if (LiveValue.HasValue)
+            {
+                // Live marker rides ABOVE the track (never the draggable
+                // thumb itself) so base position and live automated position
+                // read as two independent marks.
+                float liveX = pos.X + ThumbDiameter / 2f + MathHelper.Clamp(LiveValue.Value, 0f, 1f) * (size.X - ThumbDiameter);
+                int ld = Math.Max(4, (int)(d * 0.7f));
+                float liveY = trackTop - ld * 0.5f - 1f;
+                var liveDest = new Rectangle((int)(liveX - ld / 2f), (int)liveY, ld, ld);
+                manager.Draw(GetThumbTexture(ld), liveDest, LiveColor);
             }
         }
 

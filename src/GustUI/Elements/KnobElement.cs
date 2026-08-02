@@ -25,6 +25,21 @@ public class KnobElement : Element
     public Color FaceColor { get; set; } = new Color(38, 38, 47);
     public Color PointerColor { get; set; } = new Color(232, 232, 232);
 
+    /// <summary>
+    /// Normalized 0..1 LIVE automated position, distinct from <see cref="Value"/>
+    /// (the editable base) — null draws nothing extra. A consumer with a running
+    /// automation lane polls the engine every frame and sets this; dragging the
+    /// knob always edits <see cref="Value"/> regardless of what this shows (the
+    /// documented "drag edits the base" rule), so the two never fight. Rendered
+    /// as a small bright dot riding the rim at the live angle plus a warmed ring
+    /// tint, kept visually separate from the base pointer so a viewer can tell
+    /// "this is moving because automation" from "this is my droppable knob".
+    /// </summary>
+    public float? LiveValue { get; set; }
+
+    /// <summary>Accent color for the <see cref="LiveValue"/> rim marker / ring tint.</summary>
+    public Color LiveColor { get; set; } = new Color(255, 196, 64);
+
     public Action<float> OnValueChanged;
 
     /// <summary>Raised when a drag gesture ends (mouse release), with the final
@@ -85,14 +100,39 @@ public class KnobElement : Element
                 (int)(center.X - diameter / 2f), (int)(center.Y - diameter / 2f), diameter, diameter);
 
             manager.Draw(dial, dest, FaceColor);
-            manager.Draw(GetRingTexture(diameter), dest, RingColor);
+            // A running lane warms the ring toward LiveColor — a passive,
+            // always-visible cue that this control is automated right now,
+            // ahead of the eye even catching the moving rim dot.
+            Color ringColor = LiveValue.HasValue ? Color.Lerp(RingColor, LiveColor, 0.35f) : RingColor;
+            manager.Draw(GetRingTexture(diameter), dest, ringColor);
 
             // Pointer: thin rect rotated about its top-center, angle 0 = 6
-            // o'clock; value sweeps 45°..315° clockwise (7:30 → 4:30).
+            // o'clock; value sweeps 45°..315° clockwise (7:30 → 4:30). This
+            // ALWAYS tracks Value (the editable base) — never the live
+            // automated position — so dragging stays predictable while a
+            // lane runs on top of it.
             float angle = MathHelper.ToRadians(45f + value * 270f);
             int length = (int)(diameter * 0.38f);
             var pointerRect = new Rectangle((int)center.X, (int)center.Y, 3, length);
             manager.Draw(Pixel(), pointerRect, null, PointerColor, angle, new Vector2(0.5f, 0f), SpriteEffects.None, 0);
+
+            if (LiveValue.HasValue)
+            {
+                // Live marker: a small bright dot riding the OUTER rim at the
+                // live angle (same 45°..315° mapping as the pointer) — a
+                // second, independent mark so base position and live
+                // automated position read as two distinct things on the same
+                // face rather than one pointer fighting itself.
+                float liveAngle = MathHelper.ToRadians(45f + MathHelper.Clamp(LiveValue.Value, 0f, 1f) * 270f);
+                var dir = new Vector2(-(float)Math.Sin(liveAngle), (float)Math.Cos(liveAngle));
+                float dotDiameterF = Math.Max(4f, diameter * 0.16f);
+                float rim = diameter / 2f - dotDiameterF / 2f - 1f;
+                Vector2 dotCenter = center + dir * rim;
+                int dotDiameter = (int)dotDiameterF;
+                var dotRect = new Rectangle(
+                    (int)(dotCenter.X - dotDiameter / 2f), (int)(dotCenter.Y - dotDiameter / 2f), dotDiameter, dotDiameter);
+                manager.Draw(GetLiveDotTexture(dotDiameter), dotRect, LiveColor);
+            }
         }
 
         base.Draw();
@@ -140,6 +180,36 @@ public class KnobElement : Element
         var texture = new Texture2D(Resources.StaticResources.GraphicsDevice, diameter, diameter);
         texture.SetData(data);
         RingCache[diameter] = texture;
+        return texture;
+    }
+
+    private static readonly Dictionary<int, Texture2D> LiveDotCache = new Dictionary<int, Texture2D>();
+
+    /// <summary>Antialiased filled disc — the <see cref="LiveValue"/> rim marker — baked once per diameter.</summary>
+    private static Texture2D GetLiveDotTexture(int diameter)
+    {
+        if (LiveDotCache.TryGetValue(diameter, out Texture2D cached))
+        {
+            return cached;
+        }
+
+        var data = new Color[diameter * diameter];
+        float r = diameter / 2f;
+        for (int y = 0; y < diameter; y++)
+        {
+            for (int x = 0; x < diameter; x++)
+            {
+                float dx = x - r + 0.5f;
+                float dy = y - r + 0.5f;
+                float dist = (float)Math.Sqrt(dx * dx + dy * dy);
+                float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
+                data[y * diameter + x] = alpha <= 0f ? Color.Transparent : Color.White * alpha;
+            }
+        }
+
+        var texture = new Texture2D(Resources.StaticResources.GraphicsDevice, diameter, diameter);
+        texture.SetData(data);
+        LiveDotCache[diameter] = texture;
         return texture;
     }
 
