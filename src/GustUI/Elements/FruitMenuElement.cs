@@ -76,6 +76,33 @@ namespace GustUI.Elements
             BuildItems();
         }
 
+        /// <summary>Minimum top-level item width — the old fixed size, kept
+        /// as a floor so short labels ("Edit", "Help") don't shrink and lose
+        /// their padding.</summary>
+        private const int MinItemWidth = 100;
+
+        /// <summary>Left inset before the label (matches FruitMenuItem's own
+        /// text-position convention: icon slot + gap) and the padding left
+        /// after the label so the hover highlight never hugs the glyphs.</summary>
+        private const int ItemTextLeftInset = 50;
+        private const int ItemTextRightPadding = 20;
+
+        /// <summary>
+        /// The item's own width used to be a flat 100px for every top-level
+        /// entry, regardless of label length — fine for "File"/"Edit" but too
+        /// narrow for longer titles like "Pattern" (a view-contributed
+        /// section, docs/view-menu-context.md), whose text then overflowed
+        /// past the FilledRectangleElement the hover highlight is drawn from.
+        /// Measuring the label with the same font FruitMenuItem renders it in
+        /// (Theme.UiFont) and sizing the item to fit makes the highlight
+        /// match the text for every label, long or short.
+        /// </summary>
+        private static int MeasureTopLevelItemWidth(string text)
+        {
+            float textWidth = Resources.StaticResources.FontManager.MeasureText(Resources.StaticResources.Theme.UiFont, text).X;
+            return Math.Max(MinItemWidth, ItemTextLeftInset + (int)Math.Ceiling(textWidth) + ItemTextRightPadding);
+        }
+
         /// <summary>(Re)builds one FruitMenuItem per top-level model entry.</summary>
         private void BuildItems()
         {
@@ -89,6 +116,7 @@ namespace GustUI.Elements
             float ps = 32;
             foreach (MenuItemModel item in menuItems)
             {
+                int itemWidth = MeasureTopLevelItemWidth(item.Text);
                 FruitMenuItem i = new FruitMenuItem(item, (item.SubItems == null || item.SubItems.Count==0) ? null : (ClickEventArgs x) =>
                 {
                     // One dropdown at a time: opening a menu closes any other
@@ -111,7 +139,7 @@ namespace GustUI.Elements
                         TopRight = false,
                     });
 
-                }, 100, true);
+                }, itemWidth, true);
 
                 this.AddChild(i, "fruit item");
                 itemElements.Add(i);
