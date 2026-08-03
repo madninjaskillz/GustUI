@@ -600,7 +600,9 @@ public class Element : IDisposable
         if (CachedSizeTrait != null && CachedPositionTrait != null)
         {
             Vector2 actualPosition = this.GetActualXnaPosition();
-            TVVector size = CachedSizeTrait.Value();
+            // Fit-to-children containers never write their SizeTrait (see the
+            // matching note in InputManager.CollectHovered).
+            TVVector size = SizeFitsChildren ? this.GetSize() : CachedSizeTrait.Value();
 
             return
                 position.X >= actualPosition.X &&

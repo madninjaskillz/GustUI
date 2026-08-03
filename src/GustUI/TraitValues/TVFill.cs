@@ -48,6 +48,43 @@ namespace GustUI.TraitValues
         }
     }
 
+    /// <summary>
+    /// A solid fill with ROUNDED corners — the same one-line swap as
+    /// <see cref="TVFillSolidColor"/>, drawn through
+    /// <c>DrawManager.DrawRoundedRectangle</c> (radius-cached corner atlas,
+    /// so a resizing element bakes nothing per frame). Optional
+    /// <see cref="BorderColor"/> paints a rounded outline in the same pass,
+    /// because a square <see cref="Traits.BorderSizeTrait"/> border around a
+    /// rounded fill reads as a mistake.
+    /// </summary>
+    public class TVFillRoundedColor : TVFill
+    {
+        public Color Color { get; set; }
+
+        public int Radius { get; set; } = 6;
+
+        /// <summary>Null = no outline.</summary>
+        public Color? BorderColor { get; set; }
+
+        public int BorderSize { get; set; } = 1;
+
+        public TVFillRoundedColor() { }
+
+        public TVFillRoundedColor(Color color, int radius = 6)
+        {
+            Color = color;
+            Radius = radius;
+        }
+
+        public TVFillRoundedColor(Color color, int radius, Color borderColor, int borderSize = 1)
+        {
+            Color = color;
+            Radius = radius;
+            BorderColor = borderColor;
+            BorderSize = borderSize;
+        }
+    }
+
     public class TVVideoFill : TVFill
     {
         private Video video;

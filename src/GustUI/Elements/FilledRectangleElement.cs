@@ -77,6 +77,21 @@ public class FilledRectangleElement : RectangleElement
             case TVFillSolidColor solidColor:
                 Resources.StaticResources.DrawManager.DrawFilledRectangle(rect, solidColor.Color * solidColor.Opacity);
                 break;
+            case TVFillRoundedColor rounded:
+                if (rounded.BorderColor.HasValue && rounded.BorderSize > 0)
+                {
+                    Resources.StaticResources.DrawManager.DrawRoundedBorder(rect,
+                        rounded.BorderColor.Value * rounded.Opacity,
+                        rounded.Color * rounded.Opacity,
+                        rounded.Radius, rounded.BorderSize);
+                }
+                else
+                {
+                    Resources.StaticResources.DrawManager.DrawRoundedRectangle(rect,
+                        rounded.Color * rounded.Opacity, rounded.Radius);
+                }
+
+                break;
             case TVFillImage image:
                 Resources.StaticResources.DrawManager.Draw(image.Texture, rect, image.Tint * image.Opacity);
                 break;

@@ -119,6 +119,101 @@ namespace GustUI.Extensions
             spriteBatch.Draw(Resources.StaticResources.Pixel, rectangle, color);
         }
 
+        /// <summary>
+        /// A ROUNDED filled rectangle — the missing primitive between
+        /// <see cref="DrawFilledRectangle"/> (sharp) and the per-element
+        /// baked SDF masks (KnobElement's disc, ToggleSwitchElement's pill,
+        /// each hard-wired to one shape at one size).
+        ///
+        /// Baked per RADIUS only, never per rect size: one antialiased
+        /// quarter-disc atlas of side 2r is cached and blitted into the four
+        /// corners, and the interior is five plain pixel-stretch rects. So a
+        /// resizing panel — a UI-editor element being dragged by its handle,
+        /// a panel tracking a window resize — costs no new textures per
+        /// frame, which a naive "bake the whole rounded rect" cache does.
+        /// </summary>
+        public static void DrawRoundedRectangle(this DrawManager spriteBatch, Rectangle rectangle, Color color, int radius)
+        {
+            if (rectangle.Width <= 0 || rectangle.Height <= 0)
+            {
+                return;
+            }
+
+            radius = Math.Min(radius, Math.Min(rectangle.Width, rectangle.Height) / 2);
+            if (radius <= 0)
+            {
+                spriteBatch.DrawFilledRectangle(rectangle, color);
+                return;
+            }
+
+            Texture2D corners = GetCornerDisc(radius);
+            int d = radius * 2;
+
+            // Four corner quadrants, sampled out of the one baked disc.
+            spriteBatch.Draw(corners, new Rectangle(rectangle.Left, rectangle.Top, radius, radius),
+                new Rectangle(0, 0, radius, radius), color);
+            spriteBatch.Draw(corners, new Rectangle(rectangle.Right - radius, rectangle.Top, radius, radius),
+                new Rectangle(radius, 0, radius, radius), color);
+            spriteBatch.Draw(corners, new Rectangle(rectangle.Left, rectangle.Bottom - radius, radius, radius),
+                new Rectangle(0, radius, radius, radius), color);
+            spriteBatch.Draw(corners, new Rectangle(rectangle.Right - radius, rectangle.Bottom - radius, radius, radius),
+                new Rectangle(radius, radius, radius, radius), color);
+
+            // Interior: top strip, bottom strip, and the full-width middle.
+            spriteBatch.DrawFilledRectangle(
+                new Rectangle(rectangle.Left + radius, rectangle.Top, rectangle.Width - d, radius), color);
+            spriteBatch.DrawFilledRectangle(
+                new Rectangle(rectangle.Left + radius, rectangle.Bottom - radius, rectangle.Width - d, radius), color);
+            spriteBatch.DrawFilledRectangle(
+                new Rectangle(rectangle.Left, rectangle.Top + radius, rectangle.Width, rectangle.Height - d), color);
+        }
+
+        /// <summary>Rounded-rect OUTLINE, drawn as a rounded fill with a
+        /// smaller rounded fill punched out of it — needs the caller's
+        /// backing colour, since the sprite batch has no stencil.</summary>
+        public static void DrawRoundedBorder(this DrawManager spriteBatch, Rectangle rectangle, Color borderColor,
+            Color interiorColor, int radius, int thickness = 1)
+        {
+            spriteBatch.DrawRoundedRectangle(rectangle, borderColor, radius);
+            var inner = new Rectangle(
+                rectangle.X + thickness, rectangle.Y + thickness,
+                Math.Max(0, rectangle.Width - thickness * 2), Math.Max(0, rectangle.Height - thickness * 2));
+            spriteBatch.DrawRoundedRectangle(inner, interiorColor, Math.Max(0, radius - thickness));
+        }
+
+        private static readonly Dictionary<int, Texture2D> CornerDiscCache = new Dictionary<int, Texture2D>();
+
+        /// <summary>Antialiased filled disc of diameter 2r — the corner atlas
+        /// for <see cref="DrawRoundedRectangle"/>. Same alpha-mask/SetData
+        /// idiom KnobElement and ToggleSwitchElement bake their shapes with.</summary>
+        private static Texture2D GetCornerDisc(int radius)
+        {
+            if (CornerDiscCache.TryGetValue(radius, out Texture2D cached))
+            {
+                return cached;
+            }
+
+            int d = radius * 2;
+            var data = new Color[d * d];
+            float r = radius;
+            for (int y = 0; y < d; y++)
+            {
+                for (int x = 0; x < d; x++)
+                {
+                    float dx = x - r + 0.5f;
+                    float dy = y - r + 0.5f;
+                    float dist = (float)Math.Sqrt(dx * dx + dy * dy);
+                    float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
+                    data[y * d + x] = alpha <= 0f ? Color.Transparent : Color.White * alpha;
+                }
+            }
+
+            var texture = new Texture2D(Resources.StaticResources.GraphicsDevice, d, d);
+            texture.SetData(data);
+            CornerDiscCache[radius] = texture;
+            return texture;
+        }
+
 
 
         public static void SaveTextureData(this RenderTarget2D texture, string filename)

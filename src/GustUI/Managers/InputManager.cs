@@ -547,7 +547,16 @@ namespace GustUI.Managers
             TVVector rel = positionTrait.Value();
             float ax = rel.X + parentContribution.X;
             float ay = rel.Y + parentContribution.Y;
-            TVVector size = sizeTrait.Value();
+
+            // A SizeFitsChildren container never WRITES its SizeTrait — its
+            // extent is computed on demand by GetSize() — so reading the raw
+            // trait here made every such container test as 0x0 and, because
+            // children are only visited under a hovered parent, silently made
+            // its whole subtree unclickable. That hit anything inside a
+            // VerticalScrollElement, whose content container is exactly this
+            // shape. The GetSize() path is O(children), so it is taken only
+            // for the (rare) fit-to-children containers.
+            TVVector size = element.SizeFitsChildren ? element.GetSize() : sizeTrait.Value();
 
             if (position.X < ax || position.X > ax + size.X || position.Y < ay || position.Y > ay + size.Y)
             {

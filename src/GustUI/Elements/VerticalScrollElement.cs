@@ -88,5 +88,34 @@ namespace GustUI.Elements
         {
             container.AddChild(child, name);
         }
+
+        /// <summary>
+        /// Removes every child and scrolls back to the top — what a rebuilt
+        /// list (a palette, a property inspector, any panel repopulated on
+        /// selection) needs.
+        ///
+        /// It exists because <see cref="AddChild"/> redirects into the inner
+        /// container while <see cref="Element.Children"/> still reports THIS
+        /// element's own children (the container and the scrollbar). A caller
+        /// clearing what looks like "the list" therefore empties the wrong
+        /// collection and blanks the whole control — so the safe operation has
+        /// to live here, next to the redirect that causes the asymmetry.
+        /// </summary>
+        public void ClearChildren()
+        {
+            var items = new System.Collections.Generic.List<Element>(container.Children.Items);
+            foreach (Element child in items)
+            {
+                child.Kill();
+            }
+
+            container.Children.InvalidateSort();
+            scrollBar.ScrollPosition = 0f;
+            ApplyScroll(0f);
+        }
+
+        /// <summary>The content children (the inner container's), as opposed
+        /// to <see cref="Element.Children"/>'s container + scrollbar.</summary>
+        public TVElements ContentChildren => container.Children;
     }
 }

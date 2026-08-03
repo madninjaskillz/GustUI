@@ -109,26 +109,7 @@ namespace GustUI.Elements
                 return single;
             }
 
-            var words = text !=null ? text.Split(' ') : Array.Empty<string>();
-            string newText = "";
-            if (CachedSizeTrait != null && words.Length > 0)
-            {
-                foreach (var word in words)
-                {
-                    if ((font.SpriteFont.MeasureString(newText + word) * GustConstants.FontScale).X > wrapWidth)
-                    {
-                        newText += "\n" + word + " ";
-                    }
-                    else
-                    {
-                        newText += word;
-                        if (word != words.Last())
-                        {
-                            newText += " ";
-                        }
-                    }
-                }
-            }
+            string newText = WrapText(text, font, wrapWidth);
 
             wrapCacheResult = newText;
             wrapCacheText = text;
@@ -140,10 +121,81 @@ namespace GustUI.Elements
             wrapCacheLineSizes = new Vector2[wrapCacheLines.Length];
             for (int i = 0; i < wrapCacheLines.Length; i++)
             {
-                wrapCacheLineSizes[i] = font.SpriteFont.MeasureString(wrapCacheLines[i]) * GustConstants.FontScale;
+                // An EMPTY line (a deliberate blank line between paragraphs)
+                // measures (0,0), which would collapse the gap it exists to
+                // create — measure a space instead so it advances one line.
+                string line = wrapCacheLines[i];
+                wrapCacheLineSizes[i] =
+                    font.SpriteFont.MeasureString(line.Length == 0 ? " " : line) * GustConstants.FontScale;
             }
 
             return newText;
+        }
+
+        /// <summary>
+        /// Greedy word wrap: breaks a paragraph onto as many words as fit
+        /// <paramref name="wrapWidth"/>, and honours explicit newlines in the
+        /// source as HARD breaks (so multi-paragraph body text lays out the
+        /// way it was written).
+        ///
+        /// The measurement is per CURRENT LINE, not per accumulated string.
+        /// That distinction is the whole fix: the previous implementation
+        /// measured <c>everythingSoFar + word</c> every iteration and compared
+        /// it against the wrap width, so as soon as the text contained a
+        /// newline — inserted by an earlier break, or written by the caller —
+        /// the comparison was against a string spanning several lines and
+        /// every subsequent word "overflowed", collapsing the rest of the
+        /// paragraph into one word per line. It also depended on
+        /// <c>MeasureString</c> reporting a multi-line string's width as its
+        /// widest line, which is not something this wrap should rely on either
+        /// way.
+        /// </summary>
+        private static string WrapText(string text, Managers.FontManager.KeyedSpriteFont font, float wrapWidth)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return text ?? "";
+            }
+
+            if (wrapWidth <= 0f)
+            {
+                return text;
+            }
+
+            var wrapped = new StringBuilder(text.Length + 16);
+            string[] paragraphs = text.Replace("\r", "").Split('\n');
+            for (int p = 0; p < paragraphs.Length; p++)
+            {
+                if (p > 0)
+                {
+                    wrapped.Append('\n');
+                }
+
+                string line = "";
+                foreach (string word in paragraphs[p].Split(' '))
+                {
+                    if (word.Length == 0)
+                    {
+                        continue; // collapse runs of spaces rather than wrapping on them
+                    }
+
+                    string candidate = line.Length == 0 ? word : line + " " + word;
+                    if (line.Length > 0
+                        && (font.SpriteFont.MeasureString(candidate) * GustConstants.FontScale).X > wrapWidth)
+                    {
+                        wrapped.Append(line).Append('\n');
+                        line = word; // a single word wider than the box still gets its own line
+                    }
+                    else
+                    {
+                        line = candidate;
+                    }
+                }
+
+                wrapped.Append(line);
+            }
+
+            return wrapped.ToString();
         }
         public override void Draw()
         {

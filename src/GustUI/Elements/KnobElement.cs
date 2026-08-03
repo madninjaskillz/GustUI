@@ -40,6 +40,35 @@ public class KnobElement : Element
     /// <summary>Accent color for the <see cref="LiveValue"/> rim marker / ring tint.</summary>
     public Color LiveColor { get; set; } = new Color(255, 196, 64);
 
+    /// <summary>
+    /// CUSTOM SKIN: an author-supplied bitmap drawn in place of the baked
+    /// vector face, square, centred, at the knob's diameter (so a round PNG
+    /// with alpha reads as a real knob cap). The pointer and the
+    /// <see cref="LiveValue"/> rim dot still draw ON TOP, so a skinned knob
+    /// keeps every affordance an unskinned one has and stays readable even
+    /// with plain artwork behind it.
+    ///
+    /// Deliberately a STILL image rather than a rotating filmstrip: a
+    /// filmstrip would need a frame-count convention, per-frame source-rect
+    /// slicing and art authored for it, and the vector pointer already
+    /// communicates position perfectly well over a static cap. Null = the
+    /// baked <see cref="FaceColor"/> disc, i.e. exactly today's look.
+    /// </summary>
+    public Texture2D FaceTexture { get; set; }
+
+    /// <summary>Draws the rim ring. Skins usually bring their own bezel, so a
+    /// custom <see cref="FaceTexture"/> defaults this off via
+    /// <see cref="ShowRingWithSkin"/> rather than double-drawing one.</summary>
+    public bool ShowRing { get; set; } = true;
+
+    /// <summary>Whether the rim ring still draws when a
+    /// <see cref="FaceTexture"/> is set.</summary>
+    public bool ShowRingWithSkin { get; set; }
+
+    /// <summary>Pointer length as a fraction of the diameter (a skin with a
+    /// small dished cap wants a shorter pointer than the default disc).</summary>
+    public float PointerLength { get; set; } = 0.38f;
+
     public Action<float> OnValueChanged;
 
     /// <summary>Raised when a drag gesture ends (mouse release), with the final
@@ -99,12 +128,25 @@ public class KnobElement : Element
             var dest = new Rectangle(
                 (int)(center.X - diameter / 2f), (int)(center.Y - diameter / 2f), diameter, diameter);
 
-            manager.Draw(dial, dest, FaceColor);
+            if (FaceTexture != null)
+            {
+                // Custom skin: the author's bitmap IS the face (drawn
+                // untinted so its own colours survive).
+                manager.Draw(FaceTexture, dest, Color.White);
+            }
+            else
+            {
+                manager.Draw(dial, dest, FaceColor);
+            }
+
             // A running lane warms the ring toward LiveColor — a passive,
             // always-visible cue that this control is automated right now,
             // ahead of the eye even catching the moving rim dot.
-            Color ringColor = LiveValue.HasValue ? Color.Lerp(RingColor, LiveColor, 0.35f) : RingColor;
-            manager.Draw(GetRingTexture(diameter), dest, ringColor);
+            if (ShowRing && (FaceTexture == null || ShowRingWithSkin))
+            {
+                Color ringColor = LiveValue.HasValue ? Color.Lerp(RingColor, LiveColor, 0.35f) : RingColor;
+                manager.Draw(GetRingTexture(diameter), dest, ringColor);
+            }
 
             // Pointer: thin rect rotated about its top-center, angle 0 = 6
             // o'clock; value sweeps 45°..315° clockwise (7:30 → 4:30). This
@@ -112,7 +154,7 @@ public class KnobElement : Element
             // automated position — so dragging stays predictable while a
             // lane runs on top of it.
             float angle = MathHelper.ToRadians(45f + value * 270f);
-            int length = (int)(diameter * 0.38f);
+            int length = (int)(diameter * PointerLength);
             var pointerRect = new Rectangle((int)center.X, (int)center.Y, 3, length);
             manager.Draw(Pixel(), pointerRect, null, PointerColor, angle, new Vector2(0.5f, 0f), SpriteEffects.None, 0);
 
