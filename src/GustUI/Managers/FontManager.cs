@@ -170,7 +170,18 @@ namespace GustUI.Managers
                     graphicsDevice.SetRenderTarget(rt);
                     graphicsDevice.Clear(Color.Transparent);
                     spriteBatch.Begin(SpriteSortMode.Deferred);
-                    spriteBatch.DrawString(font, r.Text, Vector2.Zero, r.color);
+                    // Baked in WHITE, never r.color: DrawString's cache-hit path
+                    // (below, and DrawManager.DrawString) draws this texture
+                    // TINTED by the caller's color every frame. Baking the
+                    // color in here as well meant a promoted label's color got
+                    // squared per channel the instant it crossed the 50-draw
+                    // threshold (e.g. a 0.78 gray channel -> 0.78^2 ~= 0.61) -
+                    // visibly dimmer, and fast enough at a high frame rate to
+                    // read as "text loads, then dims a fraction of a second
+                    // later". The texture is a colorless alpha mask; color is
+                    // applied exactly once, at draw time, same as the
+                    // un-cached SpriteFont.DrawString path above it.
+                    spriteBatch.DrawString(font, r.Text, Vector2.Zero, Color.White);
                     spriteBatch.End();
                     FontWriteCache.Add(r, new FontCacheValue
                     {
