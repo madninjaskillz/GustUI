@@ -26,6 +26,17 @@ namespace GustUI.Managers
         private BlendState blendState = null;
         private SamplerState samplerState = null;
 
+        /// <summary>
+        /// Uniform scale applied to every draw via <see cref="Begin"/>'s
+        /// SpriteBatch transform matrix (1 = off, the default). Pairs with
+        /// WindowElement.DevicePixelRatio: that keeps GustUI's own layout/
+        /// hit-testing in the ORIGINAL logical space (unaware anything HiDPI
+        /// is happening); this magnifies the composited output to fill
+        /// whatever larger physical backbuffer the host set up for crisp
+        /// rendering on a scaled display. Set both to the SAME value.
+        /// </summary>
+        public float RenderScale { get; set; } = 1f;
+
         public DrawManager(SpriteBatch spriteBatch)
         {
             this.spriteBatch = spriteBatch;
@@ -263,7 +274,8 @@ namespace GustUI.Managers
         {
             IsInBatch = true;
             FrameProfiler.CountFlush();
-            spriteBatch.Begin(mode, blendState, samplerState, null, rasterizerState, null, null);
+            Matrix? transform = RenderScale != 1f ? Matrix.CreateScale(RenderScale) : null;
+            spriteBatch.Begin(mode, blendState, samplerState, null, rasterizerState, null, transform);
         }
 
         public void End()
@@ -320,7 +332,22 @@ namespace GustUI.Managers
 
         public void PushScissor(Rectangle rect)
         {
-            Rectangle clipped = scissorStack.Count > 0 ? Rectangle.Intersect(scissorStack.Peek(), rect) : rect;
+            // Callers (Element.Draw's ClipChildren path) build this rect from
+            // an element's own logical position/size — the SAME space
+            // RenderScale's Begin() transform already magnifies draws FROM.
+            // Scissor rects are raw physical-pixel device coordinates and
+            // are NOT affected by that transform (scissor testing happens
+            // post-transform, at the rasterizer), so without this scale here
+            // too, a magnified element's own content routinely exceeds its
+            // un-magnified clip rect and gets scissored away entirely —
+            // text is especially prone to this since it's almost always
+            // inside a tightly-fit clipped label/panel.
+            Rectangle scaled = RenderScale != 1f
+                ? new Rectangle(
+                    (int)(rect.X * RenderScale), (int)(rect.Y * RenderScale),
+                    (int)(rect.Width * RenderScale), (int)(rect.Height * RenderScale))
+                : rect;
+            Rectangle clipped = scissorStack.Count > 0 ? Rectangle.Intersect(scissorStack.Peek(), scaled) : scaled;
             scissorStack.Push(clipped);
             SetScissor(clipped);
         }
@@ -347,7 +374,10 @@ namespace GustUI.Managers
             {
                 End();
 
-                Resources.StaticResources.GraphicsDevice.ScissorRectangle = new Rectangle(0, 0, (int)Resources.StaticResources.RootWindow.GetSize().X, (int)Resources.StaticResources.RootWindow.GetSize().Y);
+                Resources.StaticResources.GraphicsDevice.ScissorRectangle = new Rectangle(
+                    0, 0,
+                    (int)(Resources.StaticResources.RootWindow.GetSize().X * RenderScale),
+                    (int)(Resources.StaticResources.RootWindow.GetSize().Y * RenderScale));
                 Begin();
             }
         }
