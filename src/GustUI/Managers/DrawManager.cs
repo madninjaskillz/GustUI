@@ -274,7 +274,20 @@ namespace GustUI.Managers
         {
             IsInBatch = true;
             FrameProfiler.CountFlush();
-            Matrix? transform = RenderScale != 1f ? Matrix.CreateScale(RenderScale) : null;
+            // Z MUST stay 1. Matrix.CreateScale(float) scales all THREE axes,
+            // and SpriteBatch's transform is a real 3D matrix applied to real
+            // 3D vertices: a sprite's layerDepth is its vertex Z, and the
+            // orthographic projection SpriteEffect folds in leaves Z alone
+            // (M33=1, M43=0, M44=1), so clip-space z == layerDepth * M33 with
+            // w == 1. Clipping keeps only -w <= z <= w, i.e. layerDepth 1.0 —
+            // which SpriteBatchExtensions.DrawString passes for EVERY string —
+            // sits exactly ON the far plane. Scaling Z by 1.5 pushed it to 1.5,
+            // outside the frustum, and the GPU discarded every glyph quad:
+            // all text vanished from the first frame, silently, with no GL
+            // error, while rectangles (drawn at the default layerDepth 0)
+            // were untouched. Scaling only X/Y is what "scale the 2D output"
+            // actually means here.
+            Matrix? transform = RenderScale != 1f ? Matrix.CreateScale(RenderScale, RenderScale, 1f) : null;
             spriteBatch.Begin(mode, blendState, samplerState, null, rasterizerState, null, transform);
         }
 
