@@ -63,6 +63,12 @@ namespace GustUI.Elements
 
         public ToggleSwitchElement()
         {
+            // Default on/off colors track the live theme (design-guide.md §1)
+            // — call sites that want a specific accent (e.g. Stack's
+            // ControlAccent) still override these after construction.
+            OnColor = Resources.StaticResources.Theme.AccentSelection;
+            OffColor = Resources.StaticResources.Theme.SurfaceBorder;
+
             ElementTrait<OnMousePress>().Set(new TVEvent<ClickEventArgs>(args =>
             {
                 pressActive = true;

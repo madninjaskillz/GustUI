@@ -130,7 +130,7 @@ namespace GustUI.Elements
         {
             IsChrome = true;
             Depth = ModalDepth;
-            Set<BackgroundFillTrait>(new TVFillSolidColor(new Color(16, 16, 20)));
+            Set<BackgroundFillTrait>(new TVFillSolidColor(Resources.StaticResources.Theme.SurfaceBackdrop));
             hookScopeToken = Resources.StaticResources.InputManager.PushHookScope();
             Layout();
         }

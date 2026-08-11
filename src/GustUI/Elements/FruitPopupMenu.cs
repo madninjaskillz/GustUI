@@ -31,7 +31,13 @@ namespace GustUI.Elements
             menuItems = items;
             Set<SizeTrait>(new TVVector(width, 40*items.Count));
             Set<PositionTrait>(new TVVector(0, 0));
-            Set<BackgroundFillTrait>(new TVFillSolidColor(Microsoft.Xna.Framework.Color.White*0.8f));
+            // Same translucent chrome family as the fruit menu bar it extends
+            // from (design-guide.md §1.5) — was a flat, harsher near-white
+            // independent of that bar's own (already-retinted) look.
+            Set<BackgroundFillTrait>(new TVFillSimpleGradient(
+                Resources.StaticResources.Theme.MenuBarFillTop,
+                Resources.StaticResources.Theme.MenuBarFillBottom,
+                Direction.Vertically));
 
             float ps = 0;
             foreach (MenuItemModel item in menuItems)

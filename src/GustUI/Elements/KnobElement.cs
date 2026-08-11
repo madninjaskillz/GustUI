@@ -149,6 +149,15 @@ public class KnobElement : Element
 
     public KnobElement()
     {
+        // The three "shared deliberately app-wide" accents (design-guide.md
+        // §1.2/§7) — read live Theme at construction so a knob built after a
+        // light/dark switch picks up the current palette. RingColor/FaceColor/
+        // PointerColor stay pure per-instance defaults (no ambient theme
+        // concept, by design — every call site hand-picks those).
+        LiveColor = Resources.StaticResources.Theme.AccentLiveAutomation;
+        ModColor = Resources.StaticResources.Theme.AccentModPositive;
+        ModNegativeColor = Resources.StaticResources.Theme.AccentModNegative;
+
         ElementTrait<OnMousePress>().Set(new TVEvent<ClickEventArgs>(args =>
         {
             // A press out on the rim of a MODULATED knob grabs the arc; a

@@ -51,11 +51,24 @@ public class VuMeterElement : Element
     /// <summary>Height of the peak-hold tick, px.</summary>
     public int HoldTickHeight { get; set; } = 2;
 
+    /// <summary>Level (0..1 full-scale) at/above which a side is considered
+    /// clipped — design-guide.md §7.2.</summary>
+    public float ClipThreshold { get; set; } = 0.999f;
+
+    /// <summary>How long the clip indicator stays lit after the last clip,
+    /// seconds — auto-resets rather than latching until clicked (locked
+    /// design-guide.md §7.2 decision).</summary>
+    public float ClipHoldSeconds { get; set; } = 2.5f;
+
+    /// <summary>Height of the clip indicator segment at the top of a bar, px.</summary>
+    public int ClipTickHeight { get; set; } = 3;
+
     private readonly Stopwatch clock = Stopwatch.StartNew();
     private double lastDrawSeconds;
 
     private float shownL, shownR;   // displayed bar levels (with fall applied)
     private float holdL, holdR;     // peak-hold tick levels
+    private double clipLitUntilL, clipLitUntilR; // clock seconds the clip indicator stays lit until
 
     /// <summary>
     /// Reports the current input levels (0..1 per side). Call at any rate —
@@ -113,6 +126,11 @@ public class VuMeterElement : Element
             holdR = shownR;
         }
 
+        // Clip-latch (design-guide.md §7.2): a hit re-arms the hold window;
+        // auto-resets ClipHoldSeconds after the LAST clip, not the first.
+        if (targetL >= ClipThreshold) { clipLitUntilL = now + ClipHoldSeconds; }
+        if (targetR >= ClipThreshold) { clipLitUntilR = now + ClipHoldSeconds; }
+
         Vector2 pos = this.GetActualXnaPosition();
         Vector2 size = this.GetSize().AsXna;
         int w = (int)size.X;
@@ -128,14 +146,14 @@ public class VuMeterElement : Element
             int barW = (w - gap) / 2;
             int rightX = (int)pos.X + barW + gap;
 
-            DrawBar(manager, px, (int)pos.X, (int)pos.Y, barW, h, shownL, holdL);
-            DrawBar(manager, px, rightX, (int)pos.Y, barW, h, shownR, holdR);
+            DrawBar(manager, px, (int)pos.X, (int)pos.Y, barW, h, shownL, holdL, now < clipLitUntilL);
+            DrawBar(manager, px, rightX, (int)pos.Y, barW, h, shownR, holdR, now < clipLitUntilR);
         }
 
         base.Draw();
     }
 
-    private void DrawBar(Managers.DrawManager manager, Texture2D px, int x, int top, int barW, int h, float level, float hold)
+    private void DrawBar(Managers.DrawManager manager, Texture2D px, int x, int top, int barW, int h, float level, float hold, bool clipped)
     {
         int barH = (int)(h * level);
         if (barH > 0)
@@ -148,6 +166,12 @@ public class VuMeterElement : Element
         if (hold > 0.004f)
         {
             manager.Draw(px, new Rectangle(x, Math.Max(top, tickY), barW, tickH), LevelColor(hold));
+        }
+
+        if (clipped)
+        {
+            int clipH = Math.Min(ClipTickHeight, h);
+            manager.Draw(px, new Rectangle(x, top, barW, clipH), Resources.StaticResources.Theme.AccentMuteOn);
         }
     }
 

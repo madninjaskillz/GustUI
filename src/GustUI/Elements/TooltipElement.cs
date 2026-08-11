@@ -16,8 +16,9 @@ namespace GustUI.Elements;
 /// </summary>
 public class TooltipElement : Element
 {
-    /// <summary>Delay before the label appears, in milliseconds.</summary>
-    public static int HoverDelayMs { get; set; } = 350;
+    /// <summary>Delay before the label appears, in milliseconds — design-guide.md
+    /// §9 standardizes this at ~450ms everywhere a tooltip appears.</summary>
+    public static int HoverDelayMs { get; set; } = 450;
 
     private const int PadX = 8;
     private const int PadY = 5;
@@ -97,16 +98,18 @@ public class TooltipElement : Element
         float y = MathHelper.Clamp(anchor.Y, 0, Math.Max(0, windowSize.Y - h));
         var rect = new Rectangle((int)x, (int)y, w, h);
 
+        // design-guide.md §9: one standard tooltip style everywhere —
+        // SurfaceHeader-family background, SurfaceBorder outline, BodyText.
         var manager = Resources.StaticResources.DrawManager;
-        manager.DrawFilledRectangle(rect, new Color(24, 24, 30) * 0.95f);
-        manager.DrawRectangle(rect, new Color(82, 82, 98), 1);
+        manager.DrawFilledRectangle(rect, theme.SurfaceHeader * 0.97f);
+        manager.DrawRectangle(rect, theme.SurfaceBorder, 1);
         if (useSdf)
         {
-            manager.DrawSdfString(sdfFont, text, new Vector2(x + PadX, y + PadY), theme.UiFontSmall.Size, new Color(232, 232, 236));
+            manager.DrawSdfString(sdfFont, text, new Vector2(x + PadX, y + PadY), theme.UiFontSmall.Size, theme.BodyText);
         }
         else
         {
-            manager.DrawString(font, text, new Vector2(x + PadX, y + PadY), new Color(232, 232, 236), 0);
+            manager.DrawString(font, text, new Vector2(x + PadX, y + PadY), theme.BodyText, 0);
         }
 
         base.Draw();

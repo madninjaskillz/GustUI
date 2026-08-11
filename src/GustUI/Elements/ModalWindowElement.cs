@@ -116,15 +116,17 @@ namespace GustUI.Elements
             Setup();
         }
 
-        // Dark-theme body fill (was a near-white gradient — a bright dialog
-        // box floating in an otherwise all-dark app, like an unstyled
-        // browser confirm() box). Matches the app's own panel language
-        // rather than the framework's old light-mode default.
-        private static readonly Color BodyFillTop = new Color(40, 40, 51);
-        private static readonly Color BodyFillBottom = new Color(27, 27, 35);
-        private static readonly Color FooterFillTop = new Color(22, 22, 29);
-        private static readonly Color FooterFillBottom = new Color(18, 18, 24);
-        private static readonly Color BodyForeground = new Color(224, 224, 230);
+        // Themed body/footer fill (was a near-white gradient — a bright
+        // dialog box floating in an otherwise all-dark app, like an
+        // unstyled browser confirm() box). Matches the app's own panel
+        // language rather than the framework's old light-mode default.
+        // Reads Theme LIVE (not cached) so a modal built after a theme
+        // switch picks up the current palette — design-guide.md §1.
+        private static Color BodyFillTop => Resources.StaticResources.Theme.SurfaceRaised;
+        private static Color BodyFillBottom => Resources.StaticResources.Theme.SurfacePanel;
+        private static Color FooterFillTop => Resources.StaticResources.Theme.SurfaceHeader;
+        private static Color FooterFillBottom => Resources.StaticResources.Theme.SurfaceBackdrop;
+        private static Color BodyForeground => Resources.StaticResources.Theme.BodyText;
 
         private void Setup()
         {

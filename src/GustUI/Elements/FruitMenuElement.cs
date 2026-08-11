@@ -36,7 +36,15 @@ namespace GustUI.Elements
             IsChrome = true;
             Set<SizeTrait>(new TVVector(Resources.StaticResources.RootWindow.GetSize().X, MenuHeight));
             Set<PositionTrait>(new TVVector(0, 0));
-            Set<BackgroundFillTrait>(new TVFillSolidColor(Microsoft.Xna.Framework.Color.White*0.8f));
+            // Translucent cool-blue-gray gradient — a deliberate raised/
+            // distinct strip in BOTH themes (design-guide.md §1.5), not a
+            // flat near-white bar. This is a static approximation, not real
+            // backdrop blur: nothing currently renders behind the bar (content
+            // starts below MenuHeight, not underneath it).
+            Set<BackgroundFillTrait>(new TVFillSimpleGradient(
+                Resources.StaticResources.Theme.MenuBarFillTop,
+                Resources.StaticResources.Theme.MenuBarFillBottom,
+                Direction.Vertically));
 
 
             if (Resources.StaticResources.Theme.MenuLogo != null)

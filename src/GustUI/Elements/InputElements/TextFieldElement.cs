@@ -46,16 +46,21 @@ namespace GustUI.Elements.InputElements
 
         public TextFieldElement()
         {
+            var theme = Resources.StaticResources.Theme;
+
             textElement = new TextElement { WordWrap = false };
-            textElement.Set<ForegroundColorTrait>(new TVColor(Color.Black));
+            textElement.Set<ForegroundColorTrait>(new TVColor(theme.BodyText));
             textElement.Set<PositionTrait>(new TVVector(6, 4));
-            textElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
+            textElement.Set<FontTrait>(theme.UiFont);
             textElement.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment() { Alignment = HorizontalAlignment.Left });
             textElement.Set<TextTrait>(new TVText(""));
 
-            this.Set<BorderFillTrait>(new TVBorderColorFill(Color.Black * 0.5f));
+            // Themed idle state (design-guide.md §1) — was hardcoded
+            // Color.Gray/Color.Black regardless of app theme, which read as a
+            // stray light-mode control inside an otherwise dark app.
+            this.Set<BorderFillTrait>(new TVBorderColorFill(theme.SurfaceBorder));
             this.Set<BorderSizeTrait>(new TVInt(1));
-            this.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Gray * 0.35f));
+            this.Set<BackgroundFillTrait>(new TVFillSolidColor(theme.SurfaceRaised));
 
             this.Set<OnFocused>(new TVEvent<TVEventArgs>(x => OnFocusedHandler(x)));
             this.Set<OnUnfocused>(new TVEvent<TVEventArgs>(x => OnUnfocusedHandler(x)));
@@ -123,15 +128,23 @@ namespace GustUI.Elements.InputElements
             };
         }
 
+        // design-guide.md §6: a focused element gets a distinct visible
+        // indicator (2px AccentSelection outline) separate from hover/press —
+        // the field's background also lifts to SurfaceHeader so focus reads
+        // even for someone not sensitive to the border color alone.
         private void OnFocusedHandler(TVEventArgs x)
         {
-            this.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.White));
-            this.Set<BorderFillTrait>(new TVBorderColorFill(Color.Gray));
+            var theme = Resources.StaticResources.Theme;
+            this.Set<BackgroundFillTrait>(new TVFillSolidColor(theme.SurfaceHeader));
+            this.Set<BorderFillTrait>(new TVBorderColorFill(theme.AccentSelection));
+            this.Set<BorderSizeTrait>(new TVInt(2));
         }
         private void OnUnfocusedHandler(TVEventArgs x)
         {
-            this.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Gray * 0.35f));
-            this.Set<BorderFillTrait>(new TVBorderColorFill(Color.Black * 0.5f));
+            var theme = Resources.StaticResources.Theme;
+            this.Set<BackgroundFillTrait>(new TVFillSolidColor(theme.SurfaceRaised));
+            this.Set<BorderFillTrait>(new TVBorderColorFill(theme.SurfaceBorder));
+            this.Set<BorderSizeTrait>(new TVInt(1));
         }
     }
 }

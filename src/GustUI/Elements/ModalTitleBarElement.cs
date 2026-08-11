@@ -30,13 +30,15 @@ namespace GustUI.Elements
         // somewhat invisible" regression) — a subtle top-lit gradient plus
         // an accent underline gives the bar its own presence without going
         // back to the old saturated-primary-color look.
-        private static readonly Color BarFillTop = new Color(48, 48, 60);
-        private static readonly Color BarFillBottom = new Color(34, 34, 44);
-        private static readonly Color AccentUnderline = new Color(108, 132, 196);
-        private static readonly Color TitleText = new Color(236, 236, 242);
-        private static readonly Color CloseHoverFill = new Color(196, 68, 68);
-        private static readonly Color CloseIdleForeground = new Color(196, 196, 204);
-        private static readonly Color SizeHoverFill = new Color(58, 58, 68);
+        // Live Theme reads (not cached), so a title bar built after a theme
+        // switch (design-guide.md §1) picks up the current palette.
+        private static Color BarFillTop => Resources.StaticResources.Theme.SurfaceRaised;
+        private static Color BarFillBottom => Resources.StaticResources.Theme.SurfaceHeader;
+        private static Color AccentUnderline => Resources.StaticResources.Theme.AccentSelection;
+        private static Color TitleText => Resources.StaticResources.Theme.BodyText;
+        private static Color CloseHoverFill => Resources.StaticResources.Theme.AccentMuteOn;
+        private static Color CloseIdleForeground => Color.Lerp(Resources.StaticResources.Theme.BodyText, Resources.StaticResources.Theme.SurfaceBorder, 0.4f);
+        private static Color SizeHoverFill => Resources.StaticResources.Theme.SurfaceRaised;
 
         private FilledRectangleElement accentUnderline;
 

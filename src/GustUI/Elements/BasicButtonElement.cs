@@ -17,6 +17,16 @@ namespace GustUI.Elements
     [ElementTraits(typeof(TextTrait), typeof(FontTrait), typeof(ForegroundColorTrait), typeof(OnMouseButtonHeldDown), typeof(OnEnterTrait), typeof(OnExitTrait))]
     public class BasicButtonElement : FilledRectangleElement
     {
+        /// <summary>Disabled controls stop responding to hover/press/click and
+        /// render desaturated (design-guide.md §6: a gray wash over whatever
+        /// fill is currently set, rather than a per-fill-type grayscale
+        /// conversion — robust regardless of which TVFill subtype a button
+        /// uses). Default true (unchanged behavior for every existing
+        /// button).</summary>
+        public bool Enabled { get; set; } = true;
+
+        private static readonly Color DisabledWash = new Color(128, 128, 128, 140);
+
         private ButtonStates buttonState;
         private TextElement textElement;
         public BasicButtonElement()
@@ -38,14 +48,16 @@ namespace GustUI.Elements
             Set<TextTrait>(new TVText(text));
             Set<PositionTrait>(position ?? new TVVector(0, 0));
             Set<SizeTrait>(size ?? new TVVector(0, 0));
-            Set<OnMouseRelease>(onClick);
 
             this.buttonState = buttonStates;
-            Set<OnEnterTrait>(new TVEvent<ClickEventArgs>((x) => Set<BackgroundFillTrait>(buttonState.HoveredFill)));
+            Set<OnEnterTrait>(new TVEvent<ClickEventArgs>((x) => { if (Enabled) Set<BackgroundFillTrait>(buttonState.HoveredFill); }));
             Set<OnExitTrait>(new TVEvent<ClickEventArgs>((x) => Set<BackgroundFillTrait>(buttonState.NormalFill)));
-            Set<OnMousePress>(new TVEvent<ClickEventArgs>((x) => Set<BackgroundFillTrait>(buttonState.PressedFill)));
-            Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => Set<BackgroundFillTrait>(buttonState.NormalFill)));
-
+            Set<OnMousePress>(new TVEvent<ClickEventArgs>((x) => { if (Enabled) Set<BackgroundFillTrait>(buttonState.PressedFill); }));
+            Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) =>
+            {
+                Set<BackgroundFillTrait>(buttonState.NormalFill);
+                if (Enabled) { onClick?.TriggerAction?.Invoke(x); }
+            }));
 
             Setup();
         }
@@ -85,6 +97,22 @@ namespace GustUI.Elements
 
             Set<BorderSizeTrait, TVInt>(new TVInt(2));
             this.AddChild(textElement, $"button Text: " + this.ElementTrait<TextTrait>().Value().Text);
+        }
+
+        public override void Draw()
+        {
+            base.Draw();
+
+            // Disabled = desaturate-toward-gray (design-guide.md §6): a
+            // translucent gray wash over whatever's already drawn, robust
+            // regardless of the concrete TVFill type in use.
+            if (!Enabled)
+            {
+                Vector2 pos = this.GetActualXnaPosition();
+                Vector2 size = this.GetSize().AsXna;
+                Resources.StaticResources.DrawManager.DrawFilledRectangle(
+                    new Rectangle((int)pos.X, (int)pos.Y, (int)size.X, (int)size.Y), DisabledWash);
+            }
         }
 
 

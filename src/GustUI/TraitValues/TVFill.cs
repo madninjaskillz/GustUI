@@ -61,7 +61,7 @@ namespace GustUI.TraitValues
     {
         public Color Color { get; set; }
 
-        public int Radius { get; set; } = 6;
+        public int Radius { get; set; } = 0;
 
         /// <summary>Null = no outline.</summary>
         public Color? BorderColor { get; set; }
@@ -70,7 +70,7 @@ namespace GustUI.TraitValues
 
         public TVFillRoundedColor() { }
 
-        public TVFillRoundedColor(Color color, int radius = 6)
+        public TVFillRoundedColor(Color color, int radius = 0)
         {
             Color = color;
             Radius = radius;
