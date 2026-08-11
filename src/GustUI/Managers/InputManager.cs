@@ -58,6 +58,26 @@ namespace GustUI.Managers
         /// <summary>This frame's mouse state — read this instead of calling Mouse.GetState per element.</summary>
         public MouseState CurrentMouseState { get; private set; }
 
+        /// <summary>
+        /// Divides polled mouse coordinates before hit-testing — the general
+        /// counterpart to <c>WindowElement.DevicePixelRatio</c> shrinking
+        /// <c>SizeTrait</c> from <c>GameWindow.ClientBounds</c>: hit-testing
+        /// compares raw mouse position against element bounds that live in
+        /// that divided space, so whenever a platform's raw pointer
+        /// coordinates are NOT already pre-divided to match, the host must
+        /// set this to the same ratio or roughly half the UI becomes
+        /// unclickable/misaligned. Two backends land on opposite sides of
+        /// this by construction: KNI's Blazor mouse tracking reports the
+        /// browser's own already-CSS-pixel (i.e. already-divided) DOM event
+        /// coordinates, so that host leaves this at the default 1 and gets
+        /// correct hit-testing "for free"; KNI's DesktopGL/SDL2 backend
+        /// reports raw physical window-client pixels 1:1 with
+        /// <c>ClientBounds</c> with no such adjustment, so a host applying a
+        /// DevicePixelRatio != 1 there must set this to match. Default 1 =
+        /// no-op, matching GustUI's original single-pass behavior.
+        /// </summary>
+        public float MouseScale { get; set; } = 1f;
+
         /// <summary>True while a text-input element (e.g. a rename/save-as
         /// field) holds keyboard focus — the same gate <see cref="Update"/>
         /// uses internally to suppress shortcut hooks while typing. Exposed
@@ -237,6 +257,18 @@ namespace GustUI.Managers
         public void Update()
         {
             MouseState polledState = Mouse.GetState();
+            if (MouseScale != 1f && MouseScale > 0f)
+            {
+                polledState = new MouseState(
+                    (int)(polledState.X / MouseScale),
+                    (int)(polledState.Y / MouseScale),
+                    polledState.ScrollWheelValue,
+                    polledState.HorizontalScrollWheelValue,
+                    polledState.RawX, polledState.RawY,
+                    polledState.LeftButton, polledState.MiddleButton, polledState.RightButton,
+                    polledState.XButton1, polledState.XButton2);
+            }
+
             KeyboardState keyboardState = Keyboard.GetState();
 
             // While a text-input element is focused, newly pressed keys go to

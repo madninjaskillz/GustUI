@@ -81,8 +81,12 @@ public class TooltipElement : Element
         }
 
         var theme = Resources.StaticResources.Theme;
-        var font = Resources.StaticResources.FontManager.LoadFont(theme.UiFontSmall.Family, theme.UiFontSmall.Size);
-        Vector2 textSize = font.SpriteFont.MeasureString(text) * GustConstants.FontScale;
+        bool useSdf = Managers.FontManager.UseSdf;
+        var font = useSdf ? null : Resources.StaticResources.FontManager.LoadFont(theme.UiFontSmall.Family, theme.UiFontSmall.Size);
+        var sdfFont = useSdf ? Resources.StaticResources.FontManager.LoadSdfFont(theme.UiFontSmall.Family) : null;
+        Vector2 textSize = useSdf
+            ? sdfFont.MeasureString(text, theme.UiFontSmall.Size)
+            : font.SpriteFont.MeasureString(text) * font.DrawScale;
 
         int w = (int)textSize.X + PadX * 2;
         int h = (int)textSize.Y + PadY * 2;
@@ -96,7 +100,14 @@ public class TooltipElement : Element
         var manager = Resources.StaticResources.DrawManager;
         manager.DrawFilledRectangle(rect, new Color(24, 24, 30) * 0.95f);
         manager.DrawRectangle(rect, new Color(82, 82, 98), 1);
-        manager.DrawString(font, text, new Vector2(x + PadX, y + PadY), new Color(232, 232, 236), 0);
+        if (useSdf)
+        {
+            manager.DrawSdfString(sdfFont, text, new Vector2(x + PadX, y + PadY), theme.UiFontSmall.Size, new Color(232, 232, 236));
+        }
+        else
+        {
+            manager.DrawString(font, text, new Vector2(x + PadX, y + PadY), new Color(232, 232, 236), 0);
+        }
 
         base.Draw();
     }

@@ -18,6 +18,16 @@ namespace GustUI.Managers
 {
     public class FontManager
     {
+        /// <summary>Global text-rendering strategy toggle (app Preferences >
+        /// Waveform's sibling — a future "Text" section): off (default) is
+        /// the classic per-(family,size,RenderScale) bitmap atlas path; on
+        /// switches TextElement/TooltipElement to the SDF path (DrawManager.
+        /// DrawSdfString) — crisp at any size/zoom from a single per-family
+        /// bake. Same "GustUI exposes a plain static toggle, the app's
+        /// UserPreferences owns persistence and pushes into it" convention
+        /// as WaveformData.PronouncedPeaks/PeakBrightWaveform.</summary>
+        public static bool UseSdf { get; set; }
+
         GraphicsDevice graphicsDevice;
         SpriteBatch spriteBatch;
         IContentManager content;
@@ -212,25 +222,52 @@ namespace GustUI.Managers
                 return Vector2.Zero;
             }
 
-            return LoadFont(font.Family, font.Size).SpriteFont.MeasureString(text) * GustConstants.FontScale;
+            if (UseSdf)
+            {
+                return LoadSdfFont(font.Family).MeasureString(text, font.Size);
+            }
+
+            var keyedFont = LoadFont(font.Family, font.Size);
+            return keyedFont.SpriteFont.MeasureString(text) * keyedFont.DrawScale;
+        }
+
+        /// <summary>Current DrawManager.RenderScale, rounded to 2 decimals so
+        /// float jitter can't spawn a fresh bake+cache-entry every frame —
+        /// real DPI values are discrete steps (1, 1.25, 1.5, 2, ...), never
+        /// a continuously drifting number. Defaults to 1 if DrawManager
+        /// isn't up yet (defensive only: LoadFont is never actually called
+        /// that early in practice, since it's driven by Draw()).</summary>
+        private static float CurrentBakeRenderScale()
+        {
+            float scale = Resources.StaticResources?.DrawManager != null
+                ? Math.Max(1f, Resources.StaticResources.DrawManager.RenderScale)
+                : 1f;
+            return (float)Math.Round(scale, 2);
         }
 
         public KeyedSpriteFont LoadFont(string path, float size)
         {
-            var key = $"{path}_{size}";
+            float renderScale = CurrentBakeRenderScale();
+            var key = $"{path}_{size}_{renderScale}";
 
             if (FontCache.TryGetValue(key, out var cachedFont))
             {
                 return cachedFont;
             }
 
-            var bake = TtfFontBaker.Bake(content.ReadAllBytes(path), size / GustConstants.FontScale, 1024, 1024, new[] { CharacterRange.BasicLatin, new CharacterRange((char)Enum.GetValues(typeof(UIFont.Symbol)).Cast<UIFont.Symbol>().Min(), (char)Enum.GetValues(typeof(UIFont.Symbol)).Cast<UIFont.Symbol>().Max()) });
+            // Supersample scales with RenderScale (see GustConstants.
+            // FontBakeSupersample's doc) so the oversampling margin that
+            // keeps text crisp doesn't shrink away on HiDPI displays.
+            float supersample = GustConstants.FontBakeSupersample * renderScale;
+            float drawScale = GustConstants.FontScale / supersample;
+            var bake = TtfFontBaker.Bake(content.ReadAllBytes(path), size / GustConstants.FontScale * supersample, 2048, 2048, new[] { CharacterRange.BasicLatin, new CharacterRange((char)Enum.GetValues(typeof(UIFont.Symbol)).Cast<UIFont.Symbol>().Min(), (char)Enum.GetValues(typeof(UIFont.Symbol)).Cast<UIFont.Symbol>().Max()) });
 
             var font = bake.CreateSpriteFont(graphicsDevice);
 
-            FontCache.Add(key, new KeyedSpriteFont { SpriteFont = font, Key = key });
+            var keyed = new KeyedSpriteFont { SpriteFont = font, Key = key, DrawScale = drawScale };
+            FontCache.Add(key, keyed);
 
-            return new KeyedSpriteFont { SpriteFont = font, Key = key };
+            return keyed;
         }
 
         public class KeyedSpriteFont
@@ -238,10 +275,122 @@ namespace GustUI.Managers
             public SpriteFont SpriteFont { get; set; }
             public string Key { get; set; }
 
+            /// <summary>Sprite draw-time scale that cancels this specific
+            /// bake's supersample back out to the intended on-screen size
+            /// (RenderScale-dependent — see LoadFont — so it varies per
+            /// bake, unlike the old fixed GustConstants.EffectiveFontScale
+            /// constant it replaces).</summary>
+            public float DrawScale { get; set; }
+
             internal Vector2 MeasureString(string consoleText)
             {
                 return SpriteFont.MeasureString(consoleText);
             }
+        }
+
+        private readonly Dictionary<string, SdfFont> SdfFontCache = new();
+
+        /// <summary>Reference EM size the SDF atlas is baked at — unlike the
+        /// bitmap path this has NO relationship to any on-screen text size or
+        /// RenderScale: the distance field is resolution-independent, so one
+        /// bake per FAMILY (not per family+size+RenderScale) serves every
+        /// caller at every size and every DPI. Large enough that even the
+        /// thinnest strokes still rasterize as a clean, well-separated
+        /// distance field before the SdfFontBaker.Padding border clips it.</summary>
+        private const float SdfBakeEmSize = 64f;
+
+        /// <summary>SDF counterpart to <see cref="LoadFont(string, float)"/> —
+        /// see <see cref="SdfBakeEmSize"/> for why this takes no size
+        /// parameter at all.
+        ///
+        /// DELIBERATELY BasicLatin only, NOT the bitmap path's added icon
+        /// codepoint range: baking the app's icon fonts (segmdl2.ttf/
+        /// SegoeIcons.ttf) through stbtt_GetGlyphSDF reliably hit a genuine
+        /// STACK OVERFLOW inside StbTrueTypeSharp's bezier-flattening ray-
+        /// intersection code on at least one glyph somewhere in that ~2200-
+        /// codepoint span — a fatal, uncatchable CLR failure (stack overflow
+        /// terminates the process; try/catch cannot intervene), not
+        /// something this method can defend against per-glyph. Text-mode
+        /// TextElements that also embed an icon codepoint (rare — most icon
+        /// buttons render icons through a separate path, not inlined into a
+        /// prose TextElement) will simply skip that character in SDF mode
+        /// (TryGetGlyph returns false, same as any other missing glyph) —
+        /// icons stay on the bitmap path either way, so this only affects
+        /// the SDF/bitmap CHOICE for prose text, not icon rendering itself.
+        /// Revisiting icon-range SDF baking needs isolating the actual
+        /// pathological glyph(s) first, likely by bisecting the codepoint
+        /// range in a standalone repro outside the running app.</summary>
+        public SdfFont LoadSdfFont(string path)
+        {
+            if (SdfFontCache.TryGetValue(path, out var cached))
+            {
+                return cached;
+            }
+
+            var bake = SdfFontBaker.Bake(content.ReadAllBytes(path), SdfBakeEmSize, 2048, 2048,
+                new[] { CharacterRange.BasicLatin });
+
+            var texture = bake.CreateTexture(graphicsDevice);
+            var font = new SdfFont(texture, bake.Glyphs, bake.EmSize, path);
+            SdfFontCache.Add(path, font);
+            return font;
+        }
+
+        /// <summary>SDF counterpart to <see cref="MeasureText"/>.</summary>
+        public Vector2 MeasureSdfText(TraitValues.TVFont font, string text)
+        {
+            if (font == null || font.Family == null || string.IsNullOrEmpty(text))
+            {
+                return Vector2.Zero;
+            }
+
+            return LoadSdfFont(font.Family).MeasureString(text, font.Size);
+        }
+    }
+
+    /// <summary>Draw-ready wrapper around an <see cref="SdfFontBakerResult"/>'s
+    /// atlas + glyph table — the SDF counterpart to
+    /// <see cref="FontManager.KeyedSpriteFont"/>. Holds no notion of a target
+    /// pixel size (unlike KeyedSpriteFont, which IS baked at one) since every
+    /// glyph rect/metric here is resolution-independent until a caller scales
+    /// it by (targetPixelSize / EmSize) — see <see cref="MeasureString"/> and
+    /// DrawManager.DrawSdfString.</summary>
+    public class SdfFont
+    {
+        public Texture2D Atlas { get; }
+        public Dictionary<int, SpriteFontPlus.SdfGlyphInfo> Glyphs { get; }
+        public float EmSize { get; }
+        public string Key { get; }
+
+        public SdfFont(Texture2D atlas, Dictionary<int, SpriteFontPlus.SdfGlyphInfo> glyphs, float emSize, string key)
+        {
+            Atlas = atlas;
+            Glyphs = glyphs;
+            EmSize = emSize;
+            Key = key;
+        }
+
+        public bool TryGetGlyph(char c, out SpriteFontPlus.SdfGlyphInfo glyph) => Glyphs.TryGetValue(c, out glyph);
+
+        /// <summary>Same "line height == the requested pixel size" convention
+        /// TtfFontBakerResult.CreateSpriteFont's LineSpacing constructor arg
+        /// already uses (not a real ascent+descent+lineGap metric) — kept
+        /// for drop-in parity with the bitmap path's MeasureString callers.</summary>
+        public Vector2 MeasureString(string text, float targetPixelSize)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return new Vector2(0, targetPixelSize);
+            }
+
+            float scale = targetPixelSize / EmSize;
+            float width = 0f;
+            foreach (char c in text)
+            {
+                width += TryGetGlyph(c, out var g) ? g.XAdvance * scale : 0f;
+            }
+
+            return new Vector2(width, targetPixelSize);
         }
     }
 }

@@ -32,7 +32,7 @@ namespace GustUI.Elements
         public ModalWindowElement(string title, string body, List<BasicButtonElement> buttons = null, TVVector position = null, TVVector size = null)
         {
             Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
-            Set<ForegroundColorTrait>(new TVColor(Color.Black));
+            Set<ForegroundColorTrait>(new TVColor(BodyForeground));
             
             Set<BodyTextTrait>(new TVText(body));
             Set<PositionTrait>(position ?? new TVVector(0, 0));
@@ -61,7 +61,7 @@ namespace GustUI.Elements
             content.Set<PositionTrait>(new TVVector(10, 50));
             content.Set<TextTrait>(new TVText(body));
             content.Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
-            content.Set<ForegroundColorTrait>(new TVColor(Color.Black));
+            content.Set<ForegroundColorTrait>(new TVColor(BodyForeground));
             content.Set<SizeTrait>(new TVVector(size.X - 20, 0));
             content.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment() { Alignment = HorizontalAlignment.Left });
 
@@ -77,7 +77,7 @@ namespace GustUI.Elements
         {
 
             Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
-            Set<ForegroundColorTrait>(new TVColor(Color.Black));
+            Set<ForegroundColorTrait>(new TVColor(BodyForeground));
             
             Set<PositionTrait>(position ?? new TVVector(0, 0));
             Set<SizeTrait>(new TVVector(content != null ? content.GetSize().X + 20 : size.X, size.Y) ?? new TVVector(0, 0));
@@ -116,10 +116,19 @@ namespace GustUI.Elements
             Setup();
         }
 
+        // Dark-theme body fill (was a near-white gradient — a bright dialog
+        // box floating in an otherwise all-dark app, like an unstyled
+        // browser confirm() box). Matches the app's own panel language
+        // rather than the framework's old light-mode default.
+        private static readonly Color BodyFillTop = new Color(40, 40, 51);
+        private static readonly Color BodyFillBottom = new Color(27, 27, 35);
+        private static readonly Color FooterFillTop = new Color(22, 22, 29);
+        private static readonly Color FooterFillBottom = new Color(18, 18, 24);
+        private static readonly Color BodyForeground = new Color(224, 224, 230);
+
         private void Setup()
         {
-            //Set<BackgroundFillTrait>(new TVBlurFill(0.125f, new TVFillSimpleGradient(Color.White * 0.8f, new Color(200, 200, 200), Direction.Vertically) { Opacity = 0.25f }));
-            Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.White * 0.95f, new Color(200, 200, 200), Direction.Vertically) { Opacity = 0.998f });
+            Set<BackgroundFillTrait>(new TVFillSimpleGradient(BodyFillTop, BodyFillBottom, Direction.Vertically));
             var size = this.GetSize();
             Set<BorderFillTrait>(new TVBorder9Grid());
 
@@ -139,7 +148,7 @@ namespace GustUI.Elements
             {
                 buttonBackgroundElement.Set<PositionTrait>(new TVVector(0, size.Y - 80));
                 buttonBackgroundElement.Set<SizeTrait>(new TVVector(size.X, 80));
-                buttonBackgroundElement.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Black * 0.75f, Color.Black * 0.80f, Direction.Vertically));
+                buttonBackgroundElement.Set<BackgroundFillTrait>(new TVFillSimpleGradient(FooterFillTop, FooterFillBottom, Direction.Vertically));
                 float xPos = size.X - 20;
                 int i = 0;
                 foreach (var button in this.buttons)

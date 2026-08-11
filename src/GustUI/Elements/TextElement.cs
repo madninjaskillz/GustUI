@@ -76,6 +76,26 @@ namespace GustUI.Elements
         private Vector2[] wrapCacheLineSizes; // pre-multiplied by FontScale
         private Vector2 wrapCacheTotalSize;   // pre-multiplied by FontScale
 
+        /// <summary>Resolves the per-line measurement function for the
+        /// CURRENT render mode/font — SDF (Managers.FontManager.UseSdf,
+        /// unless this element has an outline border, which the SDF path
+        /// doesn't support yet and silently falls back to bitmap for) or the
+        /// classic per-size bitmap atlas. Centralizing this dispatch here
+        /// keeps getText/WrapText/CalculatedSize ignorant of which font
+        /// representation is actually behind it.</summary>
+        private Func<string, Vector2> MakeMeasure(TVFont fontValue)
+        {
+            if (Managers.FontManager.UseSdf && fontValue.Border <= 0)
+            {
+                var sdfFont = Resources.StaticResources.FontManager.LoadSdfFont(fontValue.Family);
+                float size = fontValue.Size;
+                return s => sdfFont.MeasureString(s, size);
+            }
+
+            var font = GetFont(fontValue.Family, fontValue.Size);
+            return s => font.SpriteFont.MeasureString(s) * font.DrawScale;
+        }
+
         private string getText()
         {
             TVFont fontValue = fontTrait.Value();
@@ -93,7 +113,7 @@ namespace GustUI.Elements
                 return wrapCacheResult;
             }
 
-            var font = GetFont(fontName, fontSize);
+            Func<string, Vector2> measure = MakeMeasure(fontValue);
 
             if (!WordWrap)
             {
@@ -103,20 +123,20 @@ namespace GustUI.Elements
                 wrapCacheFamily = fontName;
                 wrapCacheFontSize = fontSize;
                 wrapCacheWidth = wrapWidth;
-                wrapCacheTotalSize = font.SpriteFont.MeasureString(single) * GustConstants.FontScale;
+                wrapCacheTotalSize = measure(single);
                 wrapCacheLines = new[] { single };
                 wrapCacheLineSizes = new[] { wrapCacheTotalSize };
                 return single;
             }
 
-            string newText = WrapText(text, font, wrapWidth);
+            string newText = WrapText(text, s => measure(s).X, wrapWidth);
 
             wrapCacheResult = newText;
             wrapCacheText = text;
             wrapCacheFamily = fontName;
             wrapCacheFontSize = fontSize;
             wrapCacheWidth = wrapWidth;
-            wrapCacheTotalSize = font.SpriteFont.MeasureString(newText) * GustConstants.FontScale;
+            wrapCacheTotalSize = measure(newText);
             wrapCacheLines = newText.Split('\n');
             wrapCacheLineSizes = new Vector2[wrapCacheLines.Length];
             for (int i = 0; i < wrapCacheLines.Length; i++)
@@ -125,8 +145,7 @@ namespace GustUI.Elements
                 // measures (0,0), which would collapse the gap it exists to
                 // create — measure a space instead so it advances one line.
                 string line = wrapCacheLines[i];
-                wrapCacheLineSizes[i] =
-                    font.SpriteFont.MeasureString(line.Length == 0 ? " " : line) * GustConstants.FontScale;
+                wrapCacheLineSizes[i] = measure(line.Length == 0 ? " " : line);
             }
 
             return newText;
@@ -150,7 +169,7 @@ namespace GustUI.Elements
         /// widest line, which is not something this wrap should rely on either
         /// way.
         /// </summary>
-        private static string WrapText(string text, Managers.FontManager.KeyedSpriteFont font, float wrapWidth)
+        private static string WrapText(string text, Func<string, float> measureWidth, float wrapWidth)
         {
             if (string.IsNullOrEmpty(text))
             {
@@ -181,7 +200,7 @@ namespace GustUI.Elements
 
                     string candidate = line.Length == 0 ? word : line + " " + word;
                     if (line.Length > 0
-                        && (font.SpriteFont.MeasureString(candidate) * GustConstants.FontScale).X > wrapWidth)
+                        && measureWidth(candidate) > wrapWidth)
                     {
                         wrapped.Append(line).Append('\n');
                         line = word; // a single word wider than the box still gets its own line
@@ -205,9 +224,17 @@ namespace GustUI.Elements
                 string text = getText();
                 int border = fontValue.Border;
                 Color foreground = foregroundTrait.Value().AsXna;
-                Managers.FontManager.KeyedSpriteFont font = GetFont(fontValue.Family, fontValue.Size);
 
-                if (Ensure.NotNull(font, nameof(font)) &&
+                // Border/outline text (SequencerView's legacy block-label
+                // style) stays on the bitmap path — SpriteBatchExtensions.
+                // DrawString's border is N offset copies of the glyph atlas,
+                // a technique the SDF path doesn't implement yet.
+                bool useSdf = Managers.FontManager.UseSdf && border <= 0;
+                Managers.FontManager.KeyedSpriteFont font = useSdf ? null : GetFont(fontValue.Family, fontValue.Size);
+                Managers.SdfFont sdfFont = useSdf ? Resources.StaticResources.FontManager.LoadSdfFont(fontValue.Family) : null;
+                bool fontReady = useSdf ? Ensure.NotNull(sdfFont, nameof(sdfFont)) : Ensure.NotNull(font, nameof(font));
+
+                if (fontReady &&
                 Ensure.NotNull(text, nameof(text)))
                 {
 
@@ -244,13 +271,21 @@ namespace GustUI.Elements
                                 break;
                         }
 
-                        Resources.StaticResources.DrawManager.DrawString(
-                        font,
-                        line,
-                            p+offsetVector,
-                            foreground,
-                            border,
-                            fontValue.BorderColor);
+                        if (useSdf)
+                        {
+                            Resources.StaticResources.DrawManager.DrawSdfString(
+                                sdfFont, line, p + offsetVector, fontValue.Size, foreground);
+                        }
+                        else
+                        {
+                            Resources.StaticResources.DrawManager.DrawString(
+                            font,
+                            line,
+                                p+offsetVector,
+                                foreground,
+                                border,
+                                fontValue.BorderColor);
+                        }
                         p.Y += lineSize.Y;
                         p.X = pr.X;
                         ySize = ySize+  (int)lineSize.Y;
@@ -275,9 +310,9 @@ namespace GustUI.Elements
         {
             TVFont fontValue = fontTrait.Value();
             string text = getText();
-            var font = GetFont(fontValue.Family, fontValue.Size);
+            Vector2 size = MakeMeasure(fontValue)(text);
 
-            return new Vector2(ElementTrait<SizeTrait>().Value().X, (font.SpriteFont.MeasureString(text) * GustConstants.FontScale).Y);
+            return new Vector2(ElementTrait<SizeTrait>().Value().X, size.Y);
         }
     }
 }

@@ -7,20 +7,38 @@ using Microsoft.Xna.Framework;
 namespace GustUI.Elements
 {
     /// <summary>
-    /// The SHARED window-chrome title bar: green gradient bar carrying the
-    /// title text plus the red X close button (and, for resizable
-    /// <see cref="ModalWindowElement"/> hosts, the blue maximize button).
-    /// Historically welded to ModalWindowElement; now any element can host it
-    /// (e.g. <see cref="FullScreenModalElement"/>) — drag/maximize behaviors
-    /// only attach when the parent actually is a ModalWindowElement, and the
-    /// X routes through <see cref="OnCloseRequested"/> (default: kill the
-    /// parent, the classic modal-window behavior).
+    /// The SHARED window-chrome title bar: a flat, neutral-dark bar carrying
+    /// the title text plus a close button (and, for resizable
+    /// <see cref="ModalWindowElement"/> hosts, a maximize button) that blend
+    /// into the bar until hovered — the modern-app idiom (VS Code, Windows
+    /// 11) in place of the permanently-lit primary-color buttons this used
+    /// to have. Historically welded to ModalWindowElement; now any element
+    /// can host it (e.g. <see cref="FullScreenModalElement"/>) — drag/
+    /// maximize behaviors only attach when the parent actually is a
+    /// ModalWindowElement, and the X routes through
+    /// <see cref="OnCloseRequested"/> (default: kill the parent, the
+    /// classic modal-window behavior).
     /// </summary>
     [ElementTraits(typeof(FontTrait), typeof(OnExitTrait))]
     public class ModalTitleBarElement : FilledRectangleElement
     {
         /// <summary>The chrome's fixed height (Update re-asserts it).</summary>
         public const int BarHeight = 40;
+
+        // A flat single-shade bar at the same brightness as the content
+        // below it reads as "not there" (the "modal title bars have become
+        // somewhat invisible" regression) — a subtle top-lit gradient plus
+        // an accent underline gives the bar its own presence without going
+        // back to the old saturated-primary-color look.
+        private static readonly Color BarFillTop = new Color(48, 48, 60);
+        private static readonly Color BarFillBottom = new Color(34, 34, 44);
+        private static readonly Color AccentUnderline = new Color(108, 132, 196);
+        private static readonly Color TitleText = new Color(236, 236, 242);
+        private static readonly Color CloseHoverFill = new Color(196, 68, 68);
+        private static readonly Color CloseIdleForeground = new Color(196, 196, 204);
+        private static readonly Color SizeHoverFill = new Color(58, 58, 68);
+
+        private FilledRectangleElement accentUnderline;
 
         /// <summary>What the red X does. Hosts with richer teardown than a
         /// bare Kill (hook scopes, view state) set their own close path here
@@ -69,38 +87,60 @@ namespace GustUI.Elements
             Sync(dragBarElement);
 
 
-            Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Green*0.9f, Color.DarkGreen*0.9f, Direction.Vertically));
+            Set<BackgroundFillTrait>(new TVFillSimpleGradient(BarFillTop, BarFillBottom, Direction.Vertically));
             Set<BorderSizeTrait>(new TVInt(0));
-            Set<BorderFillTrait>(new TVBorderColorFill(Color.Gray));
-            Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
+            Set<FontTrait>(Resources.StaticResources.Theme.UiFontBold);
             Set<PositionTrait>(position ?? new TVVector(0, 0));
             Set<SizeTrait>(size ?? new TVVector(0, 0));
+
+            accentUnderline = new FilledRectangleElement(0, (int)size.Y - 2, (int)size.X, 2, new TVFillSolidColor(AccentUnderline));
+            AddChild(accentUnderline, "accent-underline");
 
             closeButton.Set<SizeTrait>(new TVVector(size.Y, size.Y));
             closeButton.Set<TextTrait>(Resources.StaticResources.Theme.Icons.CloseIcon.ToTextTrait());
             closeButton.Set<FontTrait>(Resources.StaticResources.Theme.AltSymbolFont);
-            closeButton.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Red, Color.DarkRed, Direction.Vertically));
-            closeButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
+            closeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
+            closeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
             closeButton.Set<PositionTrait>(new TVVector(size.X - size.Y, 0));
             closeButton.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => RequestClose()));
+            closeButton.Set<OnEnterTrait>(new TVEvent<ClickEventArgs>((x) =>
+            {
+                closeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(CloseHoverFill));
+                closeButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
+            }));
+            closeButton.Set<OnExitTrait>(new TVEvent<ClickEventArgs>((x) =>
+            {
+                closeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
+                closeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
+            }));
 
             if (hasMaximimizeButton)
             {
                 sizeButton.Set<SizeTrait>(new TVVector(size.Y, size.Y));
 
                 sizeButton.Set<FontTrait>(Resources.StaticResources.Theme.AltSymbolFont);
-                sizeButton.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Blue, Color.DarkBlue, Direction.Vertically));
-                sizeButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
+                sizeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
+                sizeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
                 sizeButton.Set<PositionTrait>(new TVVector(size.X - (80), 0));
                 sizeButton.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => ((ModalWindowElement)Parent).ToggleFullScreen()));
+                sizeButton.Set<OnEnterTrait>(new TVEvent<ClickEventArgs>((x) =>
+                {
+                    sizeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(SizeHoverFill));
+                    sizeButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
+                }));
+                sizeButton.Set<OnExitTrait>(new TVEvent<ClickEventArgs>((x) =>
+                {
+                    sizeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
+                    sizeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
+                }));
             }
 
             dragBarElement.Set<SizeTrait>(new TVVector(size.X - size.Y, size.Y));
             dragBarElement.Set<PositionTrait>(new TVVector(0, 0));
-            dragBarElement.Set<BackgroundFillTrait>(new TVFillSimpleGradient(Color.Green, Color.DarkGreen, Direction.Vertically));
+            dragBarElement.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
             dragBarElement.Set<TextTrait>(new TVText(title));
-            dragBarElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
-            dragBarElement.Set<ForegroundColorTrait>(new TVColor(Color.White));
+            dragBarElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFontBold);
+            dragBarElement.Set<ForegroundColorTrait>(new TVColor(TitleText));
 
             // Drag-to-move is a ModalWindowElement behavior; other hosts
             // (full-screen modals) get a static title strip.
@@ -136,6 +176,8 @@ namespace GustUI.Elements
             base.Update(parent);
             var size = parent.GetSize();
             Set<SizeTrait>(new TVVector(size.X, BarHeight));
+            accentUnderline?.Set<SizeTrait>(new TVVector(size.X, 2));
+            accentUnderline?.Set<PositionTrait>(new TVVector(0, BarHeight - 2));
             closeButton.Set<PositionTrait>(new TVVector(size.X - BarHeight, 0));
             closeButton.Set<SizeTrait>(new TVVector(BarHeight, BarHeight));
             if (hasMaximimizeButton)

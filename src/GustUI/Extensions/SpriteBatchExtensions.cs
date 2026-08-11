@@ -22,6 +22,13 @@ namespace GustUI.Extensions
 
         public static void DrawString(this DrawManager spriteBatch, KeyedSpriteFont font, string text, Vector2 position, Color color, int borderSize, Color? borderColor)
         {
+            // font.DrawScale, not bare FontScale — the glyph atlas was
+            // baked (RenderScale-dependent) supersample times bigger than
+            // the final on-screen size (FontManager.LoadFont), so this
+            // scale-down exactly cancels that back out to the same net
+            // size while sampling from a higher-detail source bake.
+            float drawScale = font.DrawScale;
+
             Color outline = borderColor ?? color * BorderFade;
             for (var x = -borderSize; x <= borderSize; x++)
             {
@@ -36,14 +43,14 @@ namespace GustUI.Extensions
                             outline,
                             0,
                             Vector2.Zero,
-                            GustConstants.FontScale,
+                            drawScale,
                             SpriteEffects.None,
                             1f);
                     }
                 }
             }
 
-            spriteBatch.DrawString(font, text, position, color, 0, Vector2.Zero, GustConstants.FontScale, SpriteEffects.None, 1f);
+            spriteBatch.DrawString(font, text, position, color, 0, Vector2.Zero, drawScale, SpriteEffects.None, 1f);
 
         }
 

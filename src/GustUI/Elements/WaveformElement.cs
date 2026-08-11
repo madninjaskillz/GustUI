@@ -114,6 +114,14 @@ public class WaveformElement : Element
                     {
                         manager.Draw(data.GetTexture(level), rect, Tint);
                     }
+                    else if (RenderMode == WaveformRenderMode.GeometryBaked)
+                    {
+                        DrawGeometryBaked(manager, data, level, rect, Tint);
+                    }
+                    else if (RenderMode == WaveformRenderMode.Geometry)
+                    {
+                        DrawGeometry(manager, data, level, rect, Tint);
+                    }
                     else
                     {
                         DrawColumns(manager, data.LevelData(level), rect, Tint);
@@ -129,6 +137,14 @@ public class WaveformElement : Element
                             {
                                 manager.Draw(GhostData.GetTexture(ghostLevel), ghostRect, GhostTint);
                             }
+                            else if (RenderMode == WaveformRenderMode.GeometryBaked)
+                            {
+                                DrawGeometryBaked(manager, GhostData, ghostLevel, ghostRect, GhostTint);
+                            }
+                            else if (RenderMode == WaveformRenderMode.Geometry)
+                            {
+                                DrawGeometry(manager, GhostData, ghostLevel, ghostRect, GhostTint);
+                            }
                             else
                             {
                                 DrawColumns(manager, GhostData.LevelData(ghostLevel), ghostRect, GhostTint);
@@ -140,6 +156,21 @@ public class WaveformElement : Element
         }
 
         base.Draw();
+    }
+
+    private static void DrawGeometry(Managers.DrawManager manager, WaveformData data, int level, Rectangle rect, Color tint)
+    {
+        (VertexPositionColor[] vertices, short[] indices, int primitiveCount) = data.BuildGeometry(level, rect, tint);
+        manager.DrawTriangles(vertices, indices, primitiveCount);
+    }
+
+    private static void DrawGeometryBaked(Managers.DrawManager manager, WaveformData data, int level, Rectangle rect, Color tint)
+    {
+        Texture2D baked = data.GetGeometryBakedTexture(level, rect.Width, rect.Height);
+        if (baked != null)
+        {
+            manager.Draw(baked, rect, tint);
+        }
     }
 
     private void DrawColumns(Managers.DrawManager manager, float[] minMax, Rectangle rect, Color tint)
@@ -179,4 +210,22 @@ public enum WaveformRenderMode
 
     /// <summary>Per-pixel column rects every frame (no textures).</summary>
     Columns,
+
+    /// <summary>Real triangle geometry (WaveformData.BuildGeometry),
+    /// interleaved with the sprite batch via DrawManager.DrawTriangles —
+    /// resolution-independent (no bake, no upscale blur at any zoom), at
+    /// the cost of one sprite-batch flush per draw call, EVERY frame.
+    /// Prefer <see cref="GeometryBaked"/> for anything drawn more than a
+    /// couple of frames at the same size (i.e. basically everything).</summary>
+    Geometry,
+
+    /// <summary>Same triangle geometry as <see cref="Geometry"/>, but
+    /// rendered to an offscreen texture ONCE per distinct size
+    /// (WaveformData.GetGeometryBakedTexture) and reused as an ordinary
+    /// tinted sprite on every later frame — BakedTexture's draw-time cost
+    /// (batches normally) with Geometry's crispness (no CPU-rasterize-then-
+    /// stretch blur), for as long as the caller's own width/height doesn't
+    /// change. The practical choice over bare Geometry for anything
+    /// scrolling/static rather than actively resizing every frame.</summary>
+    GeometryBaked,
 }

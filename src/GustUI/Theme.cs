@@ -16,6 +16,12 @@ namespace GustUI
         public TVFont UiFont = new() { Family = "segoeuisl.ttf", Size = 24, Border = 0 };
         public TVFont UiFontLarge = new() { Family = "segoeuisl.ttf", Size = 48, Border = 0 };
         public TVFont UiFontSmall = new() { Family = "segoeuisl.ttf", Size = 12, Border = 0 };
+
+        /// <summary>Segoe UI Bold (segoeuib.ttf) — the app's ONLY other font
+        /// weight (everything else is Semilight): titles/headers that need
+        /// to visually anchor a surface, used sparingly so weight actually
+        /// signals hierarchy instead of becoming noise.</summary>
+        public TVFont UiFontBold = new() { Family = "segoeuib.ttf", Size = 24, Border = 0 };
         public TVFont SymbolFont = new() { Family = "segmdl2.ttf", Size = 24, Border = 0 };
         public TVFont AltSymbolFont = new() { Family = "SegoeIcons.ttf", Size = 24, Border = 0 };
 
@@ -40,36 +46,49 @@ namespace GustUI
         public TVFillImage NineGridBottom = new TVFillImage      { Texture = Resources.StaticResources.UUContent.GetTexture("b.png"), Opacity = NineGridOpacity };
         public TVFillImage NineGridBottomRight = new TVFillImage { Texture = Resources.StaticResources.UUContent.GetTexture("br.png"), Opacity = NineGridOpacity };
 
-        public TVFill PositiveButtonFill = new TVFillSimpleGradient(Color.DarkGreen, Color.DarkGreen * 0.5f, Direction.Vertically);
-        public TVFill NegativeButtonFill = new TVFillSimpleGradient(Color.DarkRed, Color.DarkRed * 0.5f, Direction.Vertically);
-        public TVFill NeutralButtonFill = new TVFillSimpleGradient(Color.Gray, Color.Gray * 0.5f, Direction.Vertically);
+        // Muted, dark-DAW-appropriate button palette (Reaper/Ableton lean on
+        // desaturated neutrals with a small accent, not stoplight primaries)
+        // — replaces the old Color.Green/Red/Gray "toolbar icon" defaults.
+        private static readonly Color PositiveBase = new Color(58, 108, 74);
+        private static readonly Color PositiveHover = new Color(74, 138, 94);
+        private static readonly Color PositivePress = new Color(96, 168, 116);
+        private static readonly Color NegativeBase = new Color(120, 58, 58);
+        private static readonly Color NegativeHover = new Color(158, 72, 72);
+        private static readonly Color NegativePress = new Color(196, 92, 92);
+        private static readonly Color NeutralBase = new Color(52, 52, 60);
+        private static readonly Color NeutralHover = new Color(66, 66, 76);
+        private static readonly Color NeutralPress = new Color(80, 80, 92);
+
+        public TVFill PositiveButtonFill = new TVFillSimpleGradient(PositiveBase, PositiveBase * 0.75f, Direction.Vertically);
+        public TVFill NegativeButtonFill = new TVFillSimpleGradient(NegativeBase, NegativeBase * 0.75f, Direction.Vertically);
+        public TVFill NeutralButtonFill = new TVFillSimpleGradient(NeutralBase, NeutralBase * 0.75f, Direction.Vertically);
 
         public ButtonStates FruitMenuItemStates = new ButtonStates
         {
             NormalFill = new TVFillSolidColor(Color.Transparent),
-            HoveredFill = new TVFillSimpleGradient(Color.DarkGray * 0.5f, Color.DarkGray * 0.8f, Direction.Vertically),
-            PressedFill = new TVFillSimpleGradient(Color.DarkGray * 0.7f, Color.DarkGray * 0.9f, Direction.Vertically)
+            HoveredFill = new TVFillSimpleGradient(new Color(44, 44, 52), new Color(38, 38, 45), Direction.Vertically),
+            PressedFill = new TVFillSimpleGradient(new Color(52, 52, 62), new Color(44, 44, 52), Direction.Vertically)
         };
 
         public ButtonStates PositiveButtonStates = new ButtonStates
         {
-            NormalFill = new TVFillSimpleGradient(Color.DarkGreen, Color.DarkGreen * 0.5f, Direction.Vertically),
-            HoveredFill = new TVFillSimpleGradient(Color.Green, Color.Green * 0.5f, Direction.Vertically),
-            PressedFill = new TVFillSimpleGradient(Color.LightGreen, Color.LightGreen * 0.5f, Direction.Vertically)
+            NormalFill = new TVFillSimpleGradient(PositiveBase, PositiveBase * 0.75f, Direction.Vertically),
+            HoveredFill = new TVFillSimpleGradient(PositiveHover, PositiveHover * 0.75f, Direction.Vertically),
+            PressedFill = new TVFillSimpleGradient(PositivePress, PositivePress * 0.75f, Direction.Vertically)
         };
 
         public ButtonStates NegativeButtonStates = new ButtonStates
         {
-            NormalFill = new TVFillSimpleGradient(Color.DarkRed, Color.DarkRed * 0.5f, Direction.Vertically),
-            HoveredFill = new TVFillSimpleGradient(Color.Red, Color.Red * 0.5f, Direction.Vertically),
-            PressedFill = new TVFillSimpleGradient(Color.LightCoral, Color.LightCoral * 0.5f, Direction.Vertically)
+            NormalFill = new TVFillSimpleGradient(NegativeBase, NegativeBase * 0.75f, Direction.Vertically),
+            HoveredFill = new TVFillSimpleGradient(NegativeHover, NegativeHover * 0.75f, Direction.Vertically),
+            PressedFill = new TVFillSimpleGradient(NegativePress, NegativePress * 0.75f, Direction.Vertically)
         };
 
         public ButtonStates NeutralButtonStates = new ButtonStates
         {
-            NormalFill = new TVFillSimpleGradient(Color.Gray, Color.Gray * 0.5f, Direction.Vertically),
-            HoveredFill = new TVFillSimpleGradient(Color.Silver, Color.Silver * 0.5f, Direction.Vertically),
-            PressedFill = new TVFillSimpleGradient(Color.LightGray, Color.LightGray * 0.5f, Direction.Vertically)
+            NormalFill = new TVFillSimpleGradient(NeutralBase, NeutralBase * 0.75f, Direction.Vertically),
+            HoveredFill = new TVFillSimpleGradient(NeutralHover, NeutralHover * 0.75f, Direction.Vertically),
+            PressedFill = new TVFillSimpleGradient(NeutralPress, NeutralPress * 0.75f, Direction.Vertically)
         };
     }
 

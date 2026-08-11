@@ -27,6 +27,16 @@ public class SliderElement : Element
     public int TrackThickness { get; set; } = 4;
     public int ThumbDiameter { get; set; } = 14;
 
+    /// <summary>Bipolar mode (e.g. pan/balance): the fill draws from the
+    /// CENTER (0.5) to the thumb instead of from the left edge, and a
+    /// small tick mark always shows where center is — so the control reads
+    /// as "how far from center, which direction" instead of the default
+    /// "how far from zero" a volume-style slider means.</summary>
+    public bool Bipolar { get; set; }
+
+    /// <summary>Center tick mark color (<see cref="Bipolar"/> mode only).</summary>
+    public Color CenterMarkColor { get; set; } = new Color(150, 150, 165);
+
     /// <summary>Normalized 0..1 LIVE automated position (see
     /// <see cref="KnobElement.LiveValue"/> for the full rationale) — null draws
     /// nothing extra. Rendered as a small marker riding ABOVE the track at the
@@ -103,10 +113,29 @@ public class SliderElement : Element
             float thumbCenterX = pos.X + ThumbDiameter / 2f + value * (size.X - ThumbDiameter);
 
             manager.DrawFilledRectangle(new Rectangle(trackLeft, trackTop, trackWidth, TrackThickness), TrackColor);
-            int fillWidth = (int)(thumbCenterX - trackLeft);
-            if (fillWidth > 0)
+
+            if (Bipolar)
             {
-                manager.DrawFilledRectangle(new Rectangle(trackLeft, trackTop, fillWidth, TrackThickness), FillColor);
+                float centerX = pos.X + ThumbDiameter / 2f + 0.5f * (size.X - ThumbDiameter);
+                int fillLeft = (int)Math.Min(centerX, thumbCenterX);
+                int fillWidth = (int)Math.Abs(thumbCenterX - centerX);
+                if (fillWidth > 0)
+                {
+                    manager.DrawFilledRectangle(new Rectangle(fillLeft, trackTop, fillWidth, TrackThickness), FillColor);
+                }
+
+                // Center tick mark, drawn OVER the fill so it stays visible
+                // no matter how far the thumb has traveled.
+                int tickHeight = TrackThickness + 6;
+                manager.DrawFilledRectangle(new Rectangle((int)centerX - 1, (int)(centerY - tickHeight / 2f), 2, tickHeight), CenterMarkColor);
+            }
+            else
+            {
+                int fillWidth = (int)(thumbCenterX - trackLeft);
+                if (fillWidth > 0)
+                {
+                    manager.DrawFilledRectangle(new Rectangle(trackLeft, trackTop, fillWidth, TrackThickness), FillColor);
+                }
             }
 
             int d = Math.Min(ThumbDiameter, (int)size.Y);

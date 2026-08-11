@@ -2,6 +2,7 @@
 using GustUI.Traits;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using SpriteFontPlus;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -22,7 +23,14 @@ namespace GustUI.Managers
         public bool IsInBatch { get; private set; } = false;
         private FrameCounter _frameCounter = new FrameCounter();
         private KeyedSpriteFont font = null;
-        private RasterizerState rasterizerState = new RasterizerState() { MultiSampleAntiAlias = false, ScissorTestEnable = true };
+        // CullMode.None: SpriteBatch's own quads are unaffected by cull mode
+        // either way, but DrawTriangles' custom geometry (DrawManager.cs)
+        // very much is — leaving the default CullCounterClockwiseFace would
+        // silently drop every triangle whose winding doesn't happen to
+        // match after the 2D Y-down orthographic projection, i.e. an
+        // invisible shape with no error. A 2D UI has no back-face concept
+        // worth culling for anyway.
+        private RasterizerState rasterizerState = new RasterizerState() { MultiSampleAntiAlias = false, ScissorTestEnable = true, CullMode = CullMode.None };
         private BlendState blendState = null;
         private SamplerState samplerState = null;
 
@@ -373,6 +381,260 @@ namespace GustUI.Managers
             }
 
             SetScissor(scissorStack.Count > 0 ? scissorStack.Peek() : (Rectangle?)null);
+        }
+
+        /// <summary>
+        /// Switches the active SpriteBatch to additive blending — same
+        /// End()/Begin()-to-change-GPU-state-mid-frame shape as
+        /// <see cref="SetScissor"/> (blend state, like blend mode or the
+        /// scissor rect, can only change between batches, not within one).
+        /// For a true glow/bloom stroke: draw the same line 2-3× with
+        /// increasing thickness and decreasing alpha inside a
+        /// BeginAdditive()/<see cref="EndAdditive"/> pair so overlapping
+        /// passes brighten instead of just alpha-composing over each other.
+        /// Caller must already be inside a Begin()/End() batch (mirrors
+        /// SetScissor's assumption) and must pair this with EndAdditive
+        /// before any non-additive drawing resumes.
+        /// </summary>
+        public void BeginAdditive()
+        {
+            End();
+            blendState = BlendState.Additive;
+            Begin();
+        }
+
+        /// <summary>Restores normal alpha blending after <see cref="BeginAdditive"/>.</summary>
+        public void EndAdditive()
+        {
+            End();
+            blendState = null;
+            Begin();
+        }
+
+        private BasicEffect geometryEffect;
+
+        /// <summary>
+        /// Draws indexed triangle geometry (real vertices, not a baked
+        /// texture) interleaved with the sprite batch — the SetScissor/
+        /// BeginAdditive idiom (End, change GPU state, draw, Begin), since
+        /// SpriteBatch itself has no vertex-geometry primitive. Vertex
+        /// positions are in the SAME logical pixel space every other Draw
+        /// call on this class uses (GetActualXnaPosition()'s space):
+        /// RenderScale is folded into the projection the same way Begin()'s
+        /// transform folds it in for sprites, so geometry stays pixel-
+        /// aligned with whatever sprite-drawn UI surrounds it. Blend/
+        /// rasterizer (scissor) state carries over from the just-closed
+        /// batch, matching what a sprite drawn at this exact point in the
+        /// element tree would have seen.
+        ///
+        /// Caller must already be inside a Begin()/End() batch. Every call
+        /// costs one batch flush (End+Begin) — cheap for a handful of
+        /// calls/frame (this pairs with the existing BeginAdditive/
+        /// SetScissor idiom's own cost), but callers drawing MANY small
+        /// shapes (e.g. one call per timeline block) should batch them into
+        /// as few DrawTriangles calls as the geometry allows rather than
+        /// calling this once per shape.
+        /// </summary>
+        // short indices, not int: KNI's default Reach graphics profile
+        // throws NotSupportedException on 32-bit index buffers. A waveform
+        // block's column count never remotely approaches 65535 (16-bit's
+        // ceiling), so this costs nothing.
+        public void DrawTriangles(VertexPositionColor[] vertices, short[] indices, int primitiveCount)
+        {
+            if (primitiveCount <= 0)
+            {
+                return;
+            }
+
+            End();
+
+            GraphicsDevice device = Resources.StaticResources.GraphicsDevice;
+
+            if (geometryEffect == null)
+            {
+                geometryEffect = new BasicEffect(device) { VertexColorEnabled = true, World = Matrix.Identity };
+            }
+
+            Viewport viewport = device.Viewport;
+            geometryEffect.View = RenderScale != 1f ? Matrix.CreateScale(RenderScale, RenderScale, 1f) : Matrix.Identity;
+            geometryEffect.Projection = Matrix.CreateOrthographicOffCenter(0, viewport.Width, viewport.Height, 0, 0, 1);
+
+            device.BlendState = blendState ?? BlendState.AlphaBlend;
+            device.RasterizerState = rasterizerState;
+            device.DepthStencilState = DepthStencilState.None;
+
+            foreach (EffectPass pass in geometryEffect.CurrentTechnique.Passes)
+            {
+                pass.Apply();
+                device.DrawUserIndexedPrimitives(PrimitiveType.TriangleList, vertices, 0, vertices.Length, indices, 0, primitiveCount);
+            }
+
+            Begin();
+        }
+
+        private Effect sdfEffect;
+
+        /// <summary>
+        /// Draws an SDF-baked string (font-rendering plan Phase 1) — crisp at
+        /// ANY pixelSize/RenderScale from a single per-family bake, unlike
+        /// the bitmap path's per-(family,size,RenderScale) rebake. Same End/
+        /// draw/Begin interleave idiom as <see cref="DrawTriangles"/> (a
+        /// custom Effect needs its own batch), for the same reason: costs one
+        /// batch flush per call, so callers drawing many short strings
+        /// (a whole label-heavy screen) pay one flush per DrawSdfString
+        /// call, not per glyph — batch flush cost, not glyph count, is what
+        /// scales here.
+        ///
+        /// position is in the same logical pixel space as every other Draw
+        /// call on this class (RenderScale folds in via the transform, same
+        /// as DrawTriangles) — NOT pre-multiplied by RenderScale.
+        ///
+        /// Caller must already be inside a Begin()/End() batch (same
+        /// precondition as DrawTriangles) — this leaves the batch open again
+        /// on return, it does not need to be reopened by the caller.
+        /// </summary>
+        public void DrawSdfString(SdfFont sdfFont, string text, Vector2 position, float pixelSize, Color color)
+        {
+            if (string.IsNullOrEmpty(text) || sdfFont == null || pixelSize <= 0)
+            {
+                return;
+            }
+
+            End();
+
+            if (sdfEffect == null)
+            {
+                sdfEffect = Resources.StaticResources.Content.Load<Effect>("SdfText");
+            }
+
+            GraphicsDevice device = Resources.StaticResources.GraphicsDevice;
+            Viewport viewport = device.Viewport;
+
+            // A custom Effect passed to SpriteBatch.Begin does NOT get its
+            // transform auto-fed the way the built-in SpriteEffect does (only
+            // updates SpriteBatch's own internal _spriteEffect) — must be set
+            // explicitly every call. Same lesson as the DrawTriangles/
+            // BasicEffect View+Projection split above, just as one combined
+            // matrix (this effect's cbuffer, like stock SpriteEffect.fx,
+            // only exposes a single MatrixTransform).
+            Matrix scaleMatrix = RenderScale != 1f ? Matrix.CreateScale(RenderScale, RenderScale, 1f) : Matrix.Identity;
+            Matrix projection = Matrix.CreateOrthographicOffCenter(0, viewport.Width, viewport.Height, 0, 0, 1);
+            sdfEffect.Parameters["MatrixTransform"].SetValue(scaleMatrix * projection);
+
+            // AA band width, in normalized (0..1) distance-fraction units,
+            // sized so the transition spans ~1 REAL screen pixel regardless
+            // of how much the atlas is being magnified/minified for this
+            // particular draw — see SdfText.fx's header for why this can't
+            // just be a shader constant (no derivatives at the Reach/9.1
+            // feature level, so there's no ddx/ddy to derive it on-GPU).
+            float finalScale = (pixelSize / sdfFont.EmSize) * RenderScale;
+            float smoothing = MathHelper.Clamp(
+                0.5f * SdfFontBaker.OnEdgeValue / (255f * SdfFontBaker.Padding * finalScale),
+                0.005f, 0.25f);
+            sdfEffect.Parameters["Smoothing"].SetValue(smoothing);
+
+            spriteBatch.Begin(SpriteSortMode.Deferred, blendState, samplerState, null, rasterizerState, sdfEffect);
+
+            float glyphScale = pixelSize / sdfFont.EmSize;
+            float cursorX = position.X;
+            foreach (char c in text)
+            {
+                if (!sdfFont.TryGetGlyph(c, out SpriteFontPlus.SdfGlyphInfo g))
+                {
+                    continue;
+                }
+
+                if (g.Width > 0 && g.Height > 0)
+                {
+                    Rectangle dest = new Rectangle(
+                        (int)Math.Round(cursorX + g.XOffset * glyphScale),
+                        (int)Math.Round(position.Y + g.YOffset * glyphScale),
+                        Math.Max(1, (int)Math.Round(g.Width * glyphScale)),
+                        Math.Max(1, (int)Math.Round(g.Height * glyphScale)));
+                    Rectangle src = new Rectangle(g.X, g.Y, g.Width, g.Height);
+                    spriteBatch.Draw(sdfFont.Atlas, dest, src, color);
+                }
+
+                cursorX += g.XAdvance * glyphScale;
+            }
+
+            spriteBatch.End();
+            Begin();
+        }
+
+        /// <summary>
+        /// Renders indexed triangle geometry to a FRESH offscreen texture
+        /// at EXACTLY (width, height) — the "bake once, blit every frame
+        /// after" upgrade to <see cref="DrawTriangles"/>'s "pay the flush
+        /// cost every single frame" one. After this call the shape is a
+        /// normal Texture2D: draw it with the ordinary Draw(texture, rect,
+        /// tint) sprite path (batches, tints, everything the existing
+        /// baked-texture render mode already does) for as long as the
+        /// caller's own cache says the size hasn't changed — panning,
+        /// scrolling, and clipping never need a fresh bake, only a real
+        /// (width, height) change does. Vertex positions must already be
+        /// in the TARGET's own local space (0,0 top-left to width, height
+        /// bottom-right), not screen position and not RenderScale-adjusted
+        /// — this bakes a SIZE, not a placement; RenderScale (if any)
+        /// still applies naturally when the resulting texture is later
+        /// drawn through the normal sprite path.
+        ///
+        /// Mirrors <see cref="GetTargetClone"/>'s render-target save/
+        /// restore shape (bypasses the tracked <c>currentTarget</c> field
+        /// on purpose — this is a nested, transient target swap, not a
+        /// frame-level one) rather than <see cref="DrawTriangles"/>'s
+        /// "caller must already be mid-batch" assumption, since a bake is
+        /// naturally a rarer, cache-driven call that shouldn't have to
+        /// happen only from inside the middle of the main draw pass.
+        /// </summary>
+        public Texture2D BakeTrianglesToTexture(VertexPositionColor[] vertices, short[] indices, int primitiveCount, int width, int height)
+        {
+            if (width <= 0 || height <= 0)
+            {
+                return null;
+            }
+
+            bool wasInBatch = IsInBatch;
+            if (wasInBatch)
+            {
+                End();
+            }
+
+            GraphicsDevice device = Resources.StaticResources.GraphicsDevice;
+            var preTarget = currentTarget;
+            var target = new RenderTarget2D(device, width, height, false, SurfaceFormat.Color, DepthFormat.None);
+            device.SetRenderTarget(target);
+            device.Clear(Color.Transparent);
+
+            if (primitiveCount > 0)
+            {
+                if (geometryEffect == null)
+                {
+                    geometryEffect = new BasicEffect(device) { VertexColorEnabled = true, World = Matrix.Identity };
+                }
+
+                geometryEffect.View = Matrix.Identity;
+                geometryEffect.Projection = Matrix.CreateOrthographicOffCenter(0, width, height, 0, 0, 1);
+
+                device.BlendState = BlendState.AlphaBlend;
+                device.RasterizerState = rasterizerState;
+                device.DepthStencilState = DepthStencilState.None;
+
+                foreach (EffectPass pass in geometryEffect.CurrentTechnique.Passes)
+                {
+                    pass.Apply();
+                    device.DrawUserIndexedPrimitives(PrimitiveType.TriangleList, vertices, 0, vertices.Length, indices, 0, primitiveCount);
+                }
+            }
+
+            device.SetRenderTarget(preTarget);
+
+            if (wasInBatch)
+            {
+                Begin();
+            }
+
+            return target;
         }
 
         public void SetScissor(Rectangle? rect)
