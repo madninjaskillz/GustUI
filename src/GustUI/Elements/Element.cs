@@ -167,7 +167,13 @@ public class Element : IDisposable
         }
     }
 
-    public void Kill()
+    /// <summary>Removes this element from its parent. Virtual so a host that
+    /// wants a disappear transition (e.g. <see cref="ModalWindowElement"/>)
+    /// can intercept every removal path — including one a caller reaches
+    /// via a plain <c>Element</c>-typed reference (<c>Parent.Kill()</c>,
+    /// common in button click handlers) — animate, then call this base
+    /// implementation once the animation finishes.</summary>
+    public virtual void Kill()
     {
         if (Parent != null)
         {
