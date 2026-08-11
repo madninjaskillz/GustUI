@@ -299,27 +299,78 @@ namespace GustUI.Managers
         /// distance field before the SdfFontBaker.Padding border clips it.</summary>
         private const float SdfBakeEmSize = 64f;
 
+        /// <summary>Codepoints StbTrueTypeSharp's stbtt_GetGlyphSDF crashes
+        /// on: a genuine, UNCATCHABLE CLR stack overflow inside its bezier-
+        /// flattening ray-intersection/cubic-solve code, triggered by a
+        /// specific degenerate curve shape in each of these two glyphs
+        /// (confirmed for segmdl2.ttf; World also crashes SegoeIcons.ttf's
+        /// own glyph at the same codepoint — Emoji2 wasn't re-checked there
+        /// since the app never requests it through that font anyway).
+        /// Found by isolating each of the app's ~196 actually-used
+        /// UIFont.Symbol codepoints in its own OS process one at a time (a
+        /// managed try/catch cannot survive a real stack overflow, so this
+        /// could only be done OUTSIDE the running app — see the session
+        /// that added this comment for the throwaway repro tool). Neither
+        /// icon is used anywhere in the app today; excluding just these two
+        /// from the SDF bake — instead of dropping the ENTIRE icon range,
+        /// the original, much blunter fix — is a silent, harmless gap: they
+        /// simply won't render in SDF mode (TryGetGlyph returns false, same
+        /// as any other missing glyph) until this stb bug is fixed upstream
+        /// or independently worked around (e.g. a from-scratch SDF
+        /// generator, or patching StbTrueTypeSharp's bezier subdivision to
+        /// cap recursion depth instead of relying on convergence).</summary>
+        private static readonly HashSet<int> SdfUnsafeSymbolCodepoints = new HashSet<int>
+        {
+            (int)UIFont.Symbol.World,
+            (int)UIFont.Symbol.Emoji2,
+        };
+
+        /// <summary>Which UIFont.Symbol codepoints to include in a given
+        /// font's SDF bake — NOT a blanket "every enum value, every font"
+        /// sweep. Two reasons: (1) most fonts never render an icon
+        /// codepoint at all (segoeuisl.ttf/segoeuib.ttf are plain text
+        /// fonts — BasicLatin alone covers everything they're ever asked to
+        /// draw); (2) stbtt_GetGlyphSDF's crash risk (see
+        /// SdfUnsafeSymbolCodepoints) is PER-GLYPH, i.e. per (font,
+        /// codepoint) pair, not just per codepoint — segmdl2.ttf's full
+        /// icon set was exhaustively verified safe (minus the two excluded
+        /// there), but SegoeIcons.ttf was NOT: it has its OWN, DIFFERENT
+        /// crashers (Setting/Favorite/People confirmed, likely more
+        /// unscanned — its glyph OUTLINES for the "same" codepoints are
+        /// unrelated data, so segmdl2.ttf's clean bill of health says
+        /// nothing about it). Rather than exhaustively re-verify a whole
+        /// second ~2200-codepoint space for two icons, SegoeIcons.ttf gets
+        /// only the exact two codepoints the app ever actually asks it to
+        /// render (Theme.Icons.CloseIcon/MaximizeIcon) — individually
+        /// confirmed safe. Any font not listed here gets none (BasicLatin
+        /// only) — the original all-icons-excluded fix's fallback.</summary>
+        private static IEnumerable<CharacterRange> IconRangesFor(string path)
+        {
+            if (path == "segmdl2.ttf")
+            {
+                return Enum.GetValues(typeof(UIFont.Symbol))
+                    .Cast<UIFont.Symbol>()
+                    .Where(s => !SdfUnsafeSymbolCodepoints.Contains((int)s))
+                    .Select(s => new CharacterRange((char)s));
+            }
+
+            if (path == "SegoeIcons.ttf")
+            {
+                return new[]
+                {
+                    new CharacterRange((char)UIFont.Symbol.Cancel),
+                    new CharacterRange((char)UIFont.Symbol.FullScreen),
+                };
+            }
+
+            return Array.Empty<CharacterRange>();
+        }
+
         /// <summary>SDF counterpart to <see cref="LoadFont(string, float)"/> —
         /// see <see cref="SdfBakeEmSize"/> for why this takes no size
-        /// parameter at all.
-        ///
-        /// DELIBERATELY BasicLatin only, NOT the bitmap path's added icon
-        /// codepoint range: baking the app's icon fonts (segmdl2.ttf/
-        /// SegoeIcons.ttf) through stbtt_GetGlyphSDF reliably hit a genuine
-        /// STACK OVERFLOW inside StbTrueTypeSharp's bezier-flattening ray-
-        /// intersection code on at least one glyph somewhere in that ~2200-
-        /// codepoint span — a fatal, uncatchable CLR failure (stack overflow
-        /// terminates the process; try/catch cannot intervene), not
-        /// something this method can defend against per-glyph. Text-mode
-        /// TextElements that also embed an icon codepoint (rare — most icon
-        /// buttons render icons through a separate path, not inlined into a
-        /// prose TextElement) will simply skip that character in SDF mode
-        /// (TryGetGlyph returns false, same as any other missing glyph) —
-        /// icons stay on the bitmap path either way, so this only affects
-        /// the SDF/bitmap CHOICE for prose text, not icon rendering itself.
-        /// Revisiting icon-range SDF baking needs isolating the actual
-        /// pathological glyph(s) first, likely by bisecting the codepoint
-        /// range in a standalone repro outside the running app.</summary>
+        /// parameter at all. Character coverage is BasicLatin plus whatever
+        /// <see cref="IconRangesFor"/> says this specific font needs — see
+        /// its doc for why that's per-font rather than a blanket sweep.</summary>
         public SdfFont LoadSdfFont(string path)
         {
             if (SdfFontCache.TryGetValue(path, out var cached))
@@ -328,7 +379,7 @@ namespace GustUI.Managers
             }
 
             var bake = SdfFontBaker.Bake(content.ReadAllBytes(path), SdfBakeEmSize, 2048, 2048,
-                new[] { CharacterRange.BasicLatin });
+                new[] { CharacterRange.BasicLatin }.Concat(IconRangesFor(path)));
 
             var texture = bake.CreateTexture(graphicsDevice);
             var font = new SdfFont(texture, bake.Glyphs, bake.EmSize, path);

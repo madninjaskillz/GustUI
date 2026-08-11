@@ -50,6 +50,32 @@ namespace GustUI.Managers
             this.spriteBatch = spriteBatch;
         }
 
+        private readonly List<Action> pendingBakes = new List<Action>();
+
+        /// <summary>
+        /// Defers a render-target bake (anything that calls SetRenderTarget,
+        /// e.g. BakeTrianglesToTexture) to the next safe point — right here
+        /// in DrawLoop, BEFORE SetRenderTarget(null)/Clear sets up the
+        /// backbuffer for the frame. Queuing a bake instead of running it
+        /// immediately, mid-scene, is not an optimization: GraphicsDevice
+        /// discards a render target's contents when you switch away from it
+        /// (the default RenderTargetUsage.DiscardContents), and that
+        /// includes the BACKBUFFER — a bake triggered mid-traversal (e.g. a
+        /// waveform block's lazy cache miss, discovered while drawing this
+        /// frame's UI to the backbuffer) steals the render target out from
+        /// under the frame already in progress and corrupts it (observed as
+        /// a solid/garbage-colored flash — "purple screen" — for that
+        /// frame). Queuing means: this frame, the caller keeps drawing
+        /// whatever it already had (stale texture or nothing); the bake
+        /// itself runs at the very start of the NEXT frame, before the
+        /// backbuffer has been touched at all, so there is nothing to
+        /// corrupt. One frame of staleness, never a corrupted frame.
+        /// </summary>
+        public void QueuePendingBake(Action bake)
+        {
+            pendingBakes.Add(bake);
+        }
+
         private RenderTarget2D GetRT()
         {
             var sz = Resources.StaticResources.RootWindow.ElementTrait<SizeTrait>().Value();
@@ -71,6 +97,20 @@ namespace GustUI.Managers
             FrameProfiler.Begin(FrameProfiler.Bucket.DrawFontCache);
             Resources.StaticResources.FontManager.ManageCaches();
             FrameProfiler.End(FrameProfiler.Bucket.DrawFontCache);
+
+            if (pendingBakes.Count > 0)
+            {
+                // Snapshot + clear BEFORE running: a bake can itself queue
+                // another one (e.g. a still-settling resize drag re-misses
+                // the moment its own bake lands), which must wait for the
+                // NEXT frame, not re-enter this same pass.
+                var bakes = pendingBakes.ToArray();
+                pendingBakes.Clear();
+                foreach (Action bake in bakes)
+                {
+                    bake();
+                }
+            }
 
             SetRenderTarget(null);
             Clear(Color.Transparent);

@@ -319,6 +319,7 @@ namespace GustUI
         private int geometryBakeLevel = -1;
         private int geometryBakeWidth = -1;
         private int geometryBakeHeight = -1;
+        private bool geometryBakePending;
 
         /// <summary>
         /// GPU-baked-once-then-cached alternative to <see cref="GetTexture"/>:
@@ -340,25 +341,53 @@ namespace GustUI
         /// </summary>
         public Texture2D GetGeometryBakedTexture(int level, int width, int height)
         {
-            if (geometryBakeTexture != null && geometryBakeLevel == level && geometryBakeWidth == width && geometryBakeHeight == height)
+            bool hit = geometryBakeTexture != null && geometryBakeLevel == level && geometryBakeWidth == width && geometryBakeHeight == height;
+
+            // On a miss, the bake is QUEUED (DrawManager.QueuePendingBake),
+            // not run here — this is called mid-scene-traversal, from deep
+            // inside the current frame's backbuffer draw, and baking (a
+            // SetRenderTarget away from the backbuffer and back) right here
+            // corrupts that same frame's backbuffer (see QueuePendingBake's
+            // doc for why). geometryBakePending guards against re-queuing
+            // the same bake every remaining call this frame (multiple
+            // blocks, ghost-tail draws, etc. can all miss on the same
+            // instance) — it clears itself once the queued action actually
+            // runs, at the START of next frame.
+            //
+            // Meanwhile this returns whatever was baked LAST (possibly the
+            // wrong size, sprite-stretched onto the caller's current rect,
+            // or null if nothing has ever baked) rather than nothing —
+            // during a continuous resize/zoom drag, every frame is a "miss"
+            // (the target size keeps changing), and blanking the waveform
+            // for the drag's entire duration would be a worse regression
+            // than one stretched frame; the real bake catches up to
+            // whatever size the drag settles on within a frame of it
+            // stopping.
+            if (!hit && !geometryBakePending)
             {
-                return geometryBakeTexture;
+                geometryBakePending = true;
+                int reqLevel = level, reqWidth = width, reqHeight = height;
+                Resources.StaticResources.DrawManager.QueuePendingBake(() =>
+                {
+                    (VertexPositionColor[] vertices, short[] indices, int primitiveCount) = BuildGeometry(reqLevel, new Rectangle(0, 0, reqWidth, reqHeight), Color.White);
+                    Texture2D previous = geometryBakeTexture;
+                    geometryBakeTexture = Resources.StaticResources.DrawManager.BakeTrianglesToTexture(vertices, indices, primitiveCount, reqWidth, reqHeight);
+                    // A RenderTarget2D is a heavier GPU resource than
+                    // GetTexture's plain Texture2D, and a live zoom/resize
+                    // drag can re-bake every single frame — explicit
+                    // Dispose here (unlike GetTexture's own cache, which
+                    // just drops the reference and leaves it to GC
+                    // finalization) keeps that churn from piling up VRAM
+                    // pressure mid-drag instead of trickling it out over
+                    // however long finalization takes.
+                    previous?.Dispose();
+                    geometryBakeLevel = reqLevel;
+                    geometryBakeWidth = reqWidth;
+                    geometryBakeHeight = reqHeight;
+                    geometryBakePending = false;
+                });
             }
 
-            (VertexPositionColor[] vertices, short[] indices, int primitiveCount) = BuildGeometry(level, new Rectangle(0, 0, width, height), Color.White);
-            Texture2D previous = geometryBakeTexture;
-            geometryBakeTexture = Resources.StaticResources.DrawManager.BakeTrianglesToTexture(vertices, indices, primitiveCount, width, height);
-            // A RenderTarget2D is a heavier GPU resource than GetTexture's
-            // plain Texture2D, and a live zoom/resize drag can re-bake every
-            // single frame — explicit Dispose here (unlike GetTexture's own
-            // cache, which just drops the reference and leaves it to GC
-            // finalization) keeps that churn from piling up VRAM pressure
-            // mid-drag instead of trickling it out over however long
-            // finalization takes.
-            previous?.Dispose();
-            geometryBakeLevel = level;
-            geometryBakeWidth = width;
-            geometryBakeHeight = height;
             return geometryBakeTexture;
         }
 
