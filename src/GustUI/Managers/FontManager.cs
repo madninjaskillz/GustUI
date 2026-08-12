@@ -18,15 +18,19 @@ namespace GustUI.Managers
 {
     public class FontManager
     {
-        /// <summary>Global text-rendering strategy toggle (app Preferences >
-        /// Waveform's sibling — a future "Text" section): off (default) is
-        /// the classic per-(family,size,RenderScale) bitmap atlas path; on
-        /// switches TextElement/TooltipElement to the SDF path (DrawManager.
-        /// DrawSdfString) — crisp at any size/zoom from a single per-family
-        /// bake. Same "GustUI exposes a plain static toggle, the app's
-        /// UserPreferences owns persistence and pushes into it" convention
-        /// as WaveformData.PronouncedPeaks/PeakBrightWaveform.</summary>
-        public static bool UseSdf { get; set; }
+        /// <summary>
+        /// Always true as of Phase 7 of the geometry-renderer migration
+        /// ("retire bitmap text, go all-SDF") — TextElement no longer has a
+        /// bitmap fallback (SDF gained outline support, closing the one gap
+        /// bitmap used to cover), so there is no remaining reason to turn
+        /// this off. Kept as a settable property rather than deleted
+        /// outright / inlining `true` at every call site: it's still the
+        /// single flag DrawManager/TextElement check, so a future targeted
+        /// revert (or a test that needs to force it) has one place to do
+        /// so, without resurrecting the old per-(family,size,RenderScale)
+        /// bitmap bake path this default change retires.
+        /// </summary>
+        public static bool UseSdf { get; set; } = true;
 
         GraphicsDevice graphicsDevice;
         SpriteBatch spriteBatch;

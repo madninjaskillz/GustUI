@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using GustUI.Attributes;
 using GustUI.Extensions;
+using GustUI.Managers;
 using GustUI.Traits;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -112,7 +113,7 @@ namespace GustUI.Elements
             }
 
             float baselineY = Math.Clamp(Baseline ?? size.Y, 0f, size.Y);
-            Texture2D gradient = GetFillGradientTexture(height);
+            AtlasRegion gradient = GetFillGradientTexture(height);
 
             for (int x = 0; x < width; x++)
             {
@@ -125,8 +126,8 @@ namespace GustUI.Elements
                 }
 
                 var dest = new Rectangle((int)origin.X + x, (int)origin.Y + y0, 1, fillHeight);
-                var source = new Rectangle(0, y0, 1, fillHeight);
-                manager.Draw(gradient, dest, source, FillColor);
+                var source = new Rectangle(gradient.Pixels.X, gradient.Pixels.Y + y0, 1, fillHeight);
+                manager.Draw(gradient.Texture, dest, source, FillColor);
             }
         }
 
@@ -186,77 +187,61 @@ namespace GustUI.Elements
                 int haloDiameter = LiveMarkerDiameter * 2;
                 var haloRect = new Rectangle(
                     (int)(center.X - haloDiameter / 2f), (int)(center.Y - haloDiameter / 2f), haloDiameter, haloDiameter);
+                AtlasRegion halo = GetLiveDotTexture(haloDiameter);
                 manager.BeginAdditive();
-                manager.Draw(GetLiveDotTexture(haloDiameter), haloRect, LiveMarkerColor * 0.35f);
+                manager.Draw(halo.Texture, haloRect, halo.Pixels, LiveMarkerColor * 0.35f);
                 manager.EndAdditive();
             }
 
             int diameter = LiveMarkerDiameter;
             var dotRect = new Rectangle(
                 (int)(center.X - diameter / 2f), (int)(center.Y - diameter / 2f), diameter, diameter);
-            manager.Draw(GetLiveDotTexture(diameter), dotRect, LiveMarkerColor);
+            AtlasRegion dot = GetLiveDotTexture(diameter);
+            manager.Draw(dot.Texture, dotRect, dot.Pixels, LiveMarkerColor);
         }
-
-        private static readonly Dictionary<int, Texture2D> FillGradientCache = new Dictionary<int, Texture2D>();
 
         /// <summary>1px-wide, element-height-tall alpha ramp (opaque top,
-        /// transparent bottom), baked once per height — the fixed texture
-        /// <see cref="DrawFill"/> slices per column. White so the caller's
-        /// tint color fully controls hue, same as every other baked-mask
-        /// texture in this library (KnobElement's disc/ring, the rounded-rect
-        /// corner atlas).</summary>
-        private static Texture2D GetFillGradientTexture(int height)
+        /// transparent bottom), baked once per height into the shared
+        /// TextureAtlas — the fixed texture <see cref="DrawFill"/> slices per
+        /// column. White so the caller's tint color fully controls hue, same
+        /// as every other baked-mask texture in this library (KnobElement's
+        /// disc/ring, the rounded-rect corner atlas).</summary>
+        private static AtlasRegion GetFillGradientTexture(int height)
         {
-            if (FillGradientCache.TryGetValue(height, out Texture2D cached))
+            return Resources.StaticResources.DrawManager.GeometryAtlas.GetOrBake($"glowFill{height}", 1, height, data =>
             {
-                return cached;
-            }
-
-            var data = new Color[height];
-            for (int y = 0; y < height; y++)
-            {
-                float alpha = height <= 1 ? 0.55f : MathHelper.Lerp(0.55f, 0f, y / (float)(height - 1));
-                data[y] = Color.White * alpha;
-            }
-
-            var texture = new Texture2D(Resources.StaticResources.GraphicsDevice, 1, height);
-            texture.SetData(data);
-            FillGradientCache[height] = texture;
-            return texture;
+                for (int y = 0; y < height; y++)
+                {
+                    float alpha = height <= 1 ? 0.55f : MathHelper.Lerp(0.55f, 0f, y / (float)(height - 1));
+                    data[y] = Color.White * alpha;
+                }
+            });
         }
 
-        private static readonly Dictionary<int, Texture2D> LiveDotCache = new Dictionary<int, Texture2D>();
-
-        /// <summary>Antialiased filled disc, baked once per diameter — same
-        /// technique as <see cref="KnobElement"/>'s LiveValue rim marker
-        /// (kept as an independent copy here rather than a shared helper:
-        /// KnobElement's is private and the two libraries' baking idioms are
-        /// meant to be copy-and-adapt per element, not centralized).</summary>
-        private static Texture2D GetLiveDotTexture(int diameter)
+        /// <summary>Antialiased filled disc, baked once per diameter into the
+        /// shared TextureAtlas — same technique as <see cref="KnobElement"/>'s
+        /// LiveValue rim marker (kept as an independently-keyed atlas bake
+        /// rather than a shared helper: KnobElement's is private and the two
+        /// libraries' baking idioms are meant to be copy-and-adapt per
+        /// element, not centralized — only the STORAGE is now shared via
+        /// TextureAtlas, not the generation code).</summary>
+        private static AtlasRegion GetLiveDotTexture(int diameter)
         {
-            if (LiveDotCache.TryGetValue(diameter, out Texture2D cached))
+            return Resources.StaticResources.DrawManager.GeometryAtlas.GetOrBake($"glowLiveDot{diameter}", diameter, diameter, data =>
             {
-                return cached;
-            }
-
-            var data = new Color[diameter * diameter];
-            float r = diameter / 2f;
-            for (int y = 0; y < diameter; y++)
-            {
-                for (int x = 0; x < diameter; x++)
+                float r = diameter / 2f;
+                for (int y = 0; y < diameter; y++)
                 {
-                    float dx = x - r + 0.5f;
-                    float dy = y - r + 0.5f;
-                    float dist = (float)Math.Sqrt(dx * dx + dy * dy);
-                    float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
-                    data[y * diameter + x] = alpha <= 0f ? Color.Transparent : Color.White * alpha;
+                    for (int x = 0; x < diameter; x++)
+                    {
+                        float dx = x - r + 0.5f;
+                        float dy = y - r + 0.5f;
+                        float dist = (float)Math.Sqrt(dx * dx + dy * dy);
+                        float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
+                        data[y * diameter + x] = alpha <= 0f ? Color.Transparent : Color.White * alpha;
+                    }
                 }
-            }
-
-            var texture = new Texture2D(Resources.StaticResources.GraphicsDevice, diameter, diameter);
-            texture.SetData(data);
-            LiveDotCache[diameter] = texture;
-            return texture;
+            });
         }
     }
 }

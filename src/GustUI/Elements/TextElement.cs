@@ -77,23 +77,16 @@ namespace GustUI.Elements
         private Vector2 wrapCacheTotalSize;   // pre-multiplied by FontScale
 
         /// <summary>Resolves the per-line measurement function for the
-        /// CURRENT render mode/font — SDF (Managers.FontManager.UseSdf,
-        /// unless this element has an outline border, which the SDF path
-        /// doesn't support yet and silently falls back to bitmap for) or the
-        /// classic per-size bitmap atlas. Centralizing this dispatch here
-        /// keeps getText/WrapText/CalculatedSize ignorant of which font
-        /// representation is actually behind it.</summary>
+        /// current font — always SDF now (Phase 7: bitmap text is retired;
+        /// SDF gained outline support so there's no more border-only
+        /// fallback case). Centralizing this dispatch here keeps
+        /// getText/WrapText/CalculatedSize ignorant of the font
+        /// representation behind it.</summary>
         private Func<string, Vector2> MakeMeasure(TVFont fontValue)
         {
-            if (Managers.FontManager.UseSdf && fontValue.Border <= 0)
-            {
-                var sdfFont = Resources.StaticResources.FontManager.LoadSdfFont(fontValue.Family);
-                float size = fontValue.Size;
-                return s => sdfFont.MeasureString(s, size);
-            }
-
-            var font = GetFont(fontValue.Family, fontValue.Size);
-            return s => font.SpriteFont.MeasureString(s) * font.DrawScale;
+            var sdfFont = Resources.StaticResources.FontManager.LoadSdfFont(fontValue.Family);
+            float size = fontValue.Size;
+            return s => sdfFont.MeasureString(s, size);
         }
 
         private string getText()
@@ -225,14 +218,11 @@ namespace GustUI.Elements
                 int border = fontValue.Border;
                 Color foreground = foregroundTrait.Value().AsXna;
 
-                // Border/outline text (SequencerView's legacy block-label
-                // style) stays on the bitmap path — SpriteBatchExtensions.
-                // DrawString's border is N offset copies of the glyph atlas,
-                // a technique the SDF path doesn't implement yet.
-                bool useSdf = Managers.FontManager.UseSdf && border <= 0;
-                Managers.FontManager.KeyedSpriteFont font = useSdf ? null : GetFont(fontValue.Family, fontValue.Size);
-                Managers.SdfFont sdfFont = useSdf ? Resources.StaticResources.FontManager.LoadSdfFont(fontValue.Family) : null;
-                bool fontReady = useSdf ? Ensure.NotNull(sdfFont, nameof(sdfFont)) : Ensure.NotNull(font, nameof(font));
+                // Always SDF now (Phase 7: bitmap text retired; SDF gained
+                // outline support — SequencerView's legacy bordered block
+                // labels render through it too, not a separate path).
+                Managers.SdfFont sdfFont = Resources.StaticResources.FontManager.LoadSdfFont(fontValue.Family);
+                bool fontReady = Ensure.NotNull(sdfFont, nameof(sdfFont));
 
                 if (fontReady &&
                 Ensure.NotNull(text, nameof(text)))
@@ -271,21 +261,8 @@ namespace GustUI.Elements
                                 break;
                         }
 
-                        if (useSdf)
-                        {
-                            Resources.StaticResources.DrawManager.DrawSdfString(
-                                sdfFont, line, p + offsetVector, fontValue.Size, foreground);
-                        }
-                        else
-                        {
-                            Resources.StaticResources.DrawManager.DrawString(
-                            font,
-                            line,
-                                p+offsetVector,
-                                foreground,
-                                border,
-                                fontValue.BorderColor);
-                        }
+                        Resources.StaticResources.DrawManager.DrawSdfString(
+                            sdfFont, line, p + offsetVector, fontValue.Size, foreground, border, fontValue.BorderColor);
                         p.Y += lineSize.Y;
                         p.X = pr.X;
                         ySize = ySize+  (int)lineSize.Y;

@@ -58,9 +58,17 @@ namespace GustUI.Extensions
         {
             Vector2 edge = end - start;
             float angle = (float)Math.Atan2(edge.Y, edge.X);
+            var rect = new Rectangle((int)start.X, (int)start.Y, (int)edge.Length(), 1);
+
+            if (spriteBatch.UseGeometryBackend)
+            {
+                AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
+                spriteBatch.GeometryBatch.AppendRotatedQuad(white.Texture, rect, white.Pixels, color, angle, new Vector2(0, 0), spriteBatch.GetClipRectForGeometry(), null);
+                return;
+            }
 
             spriteBatch.Draw(Resources.StaticResources.Pixel,
-                new Rectangle((int)start.X, (int)start.Y, (int)edge.Length(), 1),
+                rect,
                 null,
                 color,
                 angle,
@@ -75,9 +83,17 @@ namespace GustUI.Extensions
         {
             Vector2 edge = end - start;
             float angle = (float)Math.Atan2(edge.Y, edge.X);
+            var rect = new Rectangle((int)start.X, (int)start.Y, (int)edge.Length() + 1, thickness);
+
+            if (spriteBatch.UseGeometryBackend)
+            {
+                AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
+                spriteBatch.GeometryBatch.AppendRotatedQuad(white.Texture, rect, white.Pixels, color, angle, new Vector2(0, thickness / 2f), spriteBatch.GetClipRectForGeometry(), null);
+                return;
+            }
 
             spriteBatch.Draw(Resources.StaticResources.Pixel,
-                new Rectangle((int)start.X, (int)start.Y, (int)edge.Length() + 1, thickness),
+                rect,
                 null,
                 color,
                 angle,
@@ -111,18 +127,28 @@ namespace GustUI.Extensions
 
         public static void DrawRectangle(this DrawManager spriteBatch, Rectangle rectangle, Color color, int borderSize = 1)
         {
+            // Delegates to DrawFilledRectangle (not a direct Pixel draw)
+            // specifically so border strokes automatically pick up the
+            // geometry-backend routing below without duplicating it here.
             for (int i = 0; i < borderSize; i++)
             {
-                spriteBatch.Draw(Resources.StaticResources.Pixel, new Rectangle(rectangle.Left, rectangle.Top + i, rectangle.Width, 1), color);
-                spriteBatch.Draw(Resources.StaticResources.Pixel, new Rectangle(rectangle.Left, rectangle.Bottom - i, rectangle.Width, 1), color);
+                spriteBatch.DrawFilledRectangle(new Rectangle(rectangle.Left, rectangle.Top + i, rectangle.Width, 1), color);
+                spriteBatch.DrawFilledRectangle(new Rectangle(rectangle.Left, rectangle.Bottom - i, rectangle.Width, 1), color);
 
-                spriteBatch.Draw(Resources.StaticResources.Pixel, new Rectangle(rectangle.Left + i, rectangle.Top, 1, rectangle.Height), color);
-                spriteBatch.Draw(Resources.StaticResources.Pixel, new Rectangle(rectangle.Right - i, rectangle.Top, 1, rectangle.Height), color);
+                spriteBatch.DrawFilledRectangle(new Rectangle(rectangle.Left + i, rectangle.Top, 1, rectangle.Height), color);
+                spriteBatch.DrawFilledRectangle(new Rectangle(rectangle.Right - i, rectangle.Top, 1, rectangle.Height), color);
             }
         }
 
         public static void DrawFilledRectangle(this DrawManager spriteBatch, Rectangle rectangle, Color color)
         {
+            if (spriteBatch.UseGeometryBackend)
+            {
+                AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
+                spriteBatch.GeometryBatch.AppendQuad(white.Texture, rectangle, white.Pixels, color, spriteBatch.GetClipRectForGeometry(), null);
+                return;
+            }
+
             spriteBatch.Draw(Resources.StaticResources.Pixel, rectangle, color);
         }
 
@@ -153,18 +179,21 @@ namespace GustUI.Extensions
                 return;
             }
 
-            Texture2D corners = GetCornerDisc(radius);
+            AtlasRegion corners = GetCornerDisc(spriteBatch, radius);
+            Rectangle atlasRect = corners.Pixels;
             int d = radius * 2;
 
-            // Four corner quadrants, sampled out of the one baked disc.
-            spriteBatch.Draw(corners, new Rectangle(rectangle.Left, rectangle.Top, radius, radius),
-                new Rectangle(0, 0, radius, radius), color);
-            spriteBatch.Draw(corners, new Rectangle(rectangle.Right - radius, rectangle.Top, radius, radius),
-                new Rectangle(radius, 0, radius, radius), color);
-            spriteBatch.Draw(corners, new Rectangle(rectangle.Left, rectangle.Bottom - radius, radius, radius),
-                new Rectangle(0, radius, radius, radius), color);
-            spriteBatch.Draw(corners, new Rectangle(rectangle.Right - radius, rectangle.Bottom - radius, radius, radius),
-                new Rectangle(radius, radius, radius, radius), color);
+            // Four corner quadrants, sampled out of the one baked disc —
+            // offsets now relative to atlasRect's own packed position
+            // (TextureAtlas.GetOrBake), not (0,0) of a standalone texture.
+            spriteBatch.Draw(corners.Texture, new Rectangle(rectangle.Left, rectangle.Top, radius, radius),
+                new Rectangle(atlasRect.X, atlasRect.Y, radius, radius), color);
+            spriteBatch.Draw(corners.Texture, new Rectangle(rectangle.Right - radius, rectangle.Top, radius, radius),
+                new Rectangle(atlasRect.X + radius, atlasRect.Y, radius, radius), color);
+            spriteBatch.Draw(corners.Texture, new Rectangle(rectangle.Left, rectangle.Bottom - radius, radius, radius),
+                new Rectangle(atlasRect.X, atlasRect.Y + radius, radius, radius), color);
+            spriteBatch.Draw(corners.Texture, new Rectangle(rectangle.Right - radius, rectangle.Bottom - radius, radius, radius),
+                new Rectangle(atlasRect.X + radius, atlasRect.Y + radius, radius, radius), color);
 
             // Interior: top strip, bottom strip, and the full-width middle.
             spriteBatch.DrawFilledRectangle(
@@ -188,37 +217,34 @@ namespace GustUI.Extensions
             spriteBatch.DrawRoundedRectangle(inner, interiorColor, Math.Max(0, radius - thickness));
         }
 
-        private static readonly Dictionary<int, Texture2D> CornerDiscCache = new Dictionary<int, Texture2D>();
-
         /// <summary>Antialiased filled disc of diameter 2r — the corner atlas
-        /// for <see cref="DrawRoundedRectangle"/>. Same alpha-mask/SetData
-        /// idiom KnobElement and ToggleSwitchElement bake their shapes with.</summary>
-        private static Texture2D GetCornerDisc(int radius)
+        /// for <see cref="DrawRoundedRectangle"/>. Baked into the shared
+        /// TextureAtlas (Phase 4 of the geometry-renderer migration) instead
+        /// of its own standalone Texture2D, so a panel's rounded corners can
+        /// share a GeometryBatch segment with everything else atlas-packed
+        /// (knob dial/ring, toggle pill, etc.) rather than forcing a
+        /// texture-swap boundary. Works identically whether
+        /// UseGeometryBackend is on or off — DrawManager.Draw's 4-arg
+        /// overload (texture, destRect, sourceRect, color) samples the
+        /// SAME packed sub-rect either way, geometry or SpriteBatch.</summary>
+        private static AtlasRegion GetCornerDisc(DrawManager spriteBatch, int radius)
         {
-            if (CornerDiscCache.TryGetValue(radius, out Texture2D cached))
-            {
-                return cached;
-            }
-
             int d = radius * 2;
-            var data = new Color[d * d];
-            float r = radius;
-            for (int y = 0; y < d; y++)
+            return spriteBatch.GeometryAtlas.GetOrBake($"corner{radius}", d, d, data =>
             {
-                for (int x = 0; x < d; x++)
+                float r = radius;
+                for (int y = 0; y < d; y++)
                 {
-                    float dx = x - r + 0.5f;
-                    float dy = y - r + 0.5f;
-                    float dist = (float)Math.Sqrt(dx * dx + dy * dy);
-                    float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
-                    data[y * d + x] = alpha <= 0f ? Color.Transparent : Color.White * alpha;
+                    for (int x = 0; x < d; x++)
+                    {
+                        float dx = x - r + 0.5f;
+                        float dy = y - r + 0.5f;
+                        float dist = (float)Math.Sqrt(dx * dx + dy * dy);
+                        float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
+                        data[y * d + x] = alpha <= 0f ? Color.Transparent : Color.White * alpha;
+                    }
                 }
-            }
-
-            var texture = new Texture2D(Resources.StaticResources.GraphicsDevice, d, d);
-            texture.SetData(data);
-            CornerDiscCache[radius] = texture;
-            return texture;
+            });
         }
 
 

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using GustUI.Attributes;
 using GustUI.Extensions;
+using GustUI.Managers;
 using GustUI.Traits;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
@@ -122,80 +123,65 @@ namespace GustUI.Elements
                 Color trackColor = Color.Lerp(OffColor, OnColor, t);
 
                 var dest = new Rectangle((int)pos.X, (int)pos.Y, w, h);
-                manager.Draw(GetPillTexture(w, h), dest, trackColor);
+                AtlasRegion pill = GetPillTexture(w, h);
+                manager.Draw(pill.Texture, dest, pill.Pixels, trackColor);
 
                 int diameter = Math.Max(2, h - 4);
                 float travel = Math.Max(0, w - diameter - 4);
                 float thumbX = pos.X + 2 + t * travel;
                 float thumbY = pos.Y + (h - diameter) / 2f;
                 var thumbDest = new Rectangle((int)thumbX, (int)thumbY, diameter, diameter);
-                manager.Draw(GetThumbTexture(diameter), thumbDest, ThumbColor);
+                AtlasRegion thumb = GetThumbTexture(diameter);
+                manager.Draw(thumb.Texture, thumbDest, thumb.Pixels, ThumbColor);
             }
 
             base.Draw();
         }
 
-        private static readonly Dictionary<(int, int), Texture2D> PillCache = new Dictionary<(int, int), Texture2D>();
-        private static readonly Dictionary<int, Texture2D> ThumbCache = new Dictionary<int, Texture2D>();
-
         /// <summary>Antialiased rounded-rect (radius = height/2, a true pill
-        /// for the track), baked once per (width, height).</summary>
-        private static Texture2D GetPillTexture(int w, int h)
+        /// for the track), baked once per (width, height) into the shared
+        /// TextureAtlas.</summary>
+        private static AtlasRegion GetPillTexture(int w, int h)
         {
-            if (PillCache.TryGetValue((w, h), out Texture2D cached))
+            return Resources.StaticResources.DrawManager.GeometryAtlas.GetOrBake($"togglePill{w}x{h}", w, h, data =>
             {
-                return cached;
-            }
-
-            var data = new Color[w * h];
-            float r = h / 2f;
-            for (int y = 0; y < h; y++)
-            {
-                for (int x = 0; x < w; x++)
+                float r = h / 2f;
+                for (int y = 0; y < h; y++)
                 {
-                    // Distance to the nearest point of the pill's medial
-                    // segment [r, r+w-2r] at height r — i.e. a capsule SDF.
-                    float cx = MathHelper.Clamp(x + 0.5f, r, w - r);
-                    float dx = x + 0.5f - cx;
-                    float dy = y + 0.5f - r;
-                    float dist = (float)Math.Sqrt(dx * dx + dy * dy);
-                    float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
-                    data[y * w + x] = Color.White * alpha;
+                    for (int x = 0; x < w; x++)
+                    {
+                        // Distance to the nearest point of the pill's medial
+                        // segment [r, r+w-2r] at height r — i.e. a capsule SDF.
+                        float cx = MathHelper.Clamp(x + 0.5f, r, w - r);
+                        float dx = x + 0.5f - cx;
+                        float dy = y + 0.5f - r;
+                        float dist = (float)Math.Sqrt(dx * dx + dy * dy);
+                        float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
+                        data[y * w + x] = Color.White * alpha;
+                    }
                 }
-            }
-
-            var texture = new Texture2D(Resources.StaticResources.GraphicsDevice, w, h);
-            texture.SetData(data);
-            PillCache[(w, h)] = texture;
-            return texture;
+            });
         }
 
-        /// <summary>Antialiased filled disc — the sliding thumb, baked once per diameter.</summary>
-        private static Texture2D GetThumbTexture(int diameter)
+        /// <summary>Antialiased filled disc — the sliding thumb, baked once
+        /// per diameter into the shared TextureAtlas.</summary>
+        private static AtlasRegion GetThumbTexture(int diameter)
         {
-            if (ThumbCache.TryGetValue(diameter, out Texture2D cached))
+            return Resources.StaticResources.DrawManager.GeometryAtlas.GetOrBake($"toggleThumb{diameter}", diameter, diameter, data =>
             {
-                return cached;
-            }
-
-            var data = new Color[diameter * diameter];
-            float r = diameter / 2f;
-            for (int y = 0; y < diameter; y++)
-            {
-                for (int x = 0; x < diameter; x++)
+                float r = diameter / 2f;
+                for (int y = 0; y < diameter; y++)
                 {
-                    float dx = x - r + 0.5f;
-                    float dy = y - r + 0.5f;
-                    float dist = (float)Math.Sqrt(dx * dx + dy * dy);
-                    float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
-                    data[y * diameter + x] = Color.White * alpha;
+                    for (int x = 0; x < diameter; x++)
+                    {
+                        float dx = x - r + 0.5f;
+                        float dy = y - r + 0.5f;
+                        float dist = (float)Math.Sqrt(dx * dx + dy * dy);
+                        float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
+                        data[y * diameter + x] = Color.White * alpha;
+                    }
                 }
-            }
-
-            var texture = new Texture2D(Resources.StaticResources.GraphicsDevice, diameter, diameter);
-            texture.SetData(data);
-            ThumbCache[diameter] = texture;
-            return texture;
+            });
         }
     }
 }

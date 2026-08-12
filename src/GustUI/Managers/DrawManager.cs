@@ -1,4 +1,5 @@
 ﻿using GustUI.Extensions;
+using GustUI.Rendering;
 using GustUI.Traits;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -44,6 +45,113 @@ namespace GustUI.Managers
         /// rendering on a scaled display. Set both to the SAME value.
         /// </summary>
         public float RenderScale { get; set; } = 1f;
+
+        /// <summary>
+        /// Switch (mirrors FontManager.UseSdf's convention) to the
+        /// persistent-buffer geometry renderer (Rendering.GeometryBatch)
+        /// replacing SpriteBatch as the primitive-drawing backend for flat
+        /// shapes — see the GustUI geometry-renderer migration plan.
+        /// Default ON (Phase 8: flipped once every shape category migrated
+        /// in Phases 2-6 was verified via the desktop screenshot harness).
+        /// MUST stay true in any normal run: SDF text (Phase 7) appends to
+        /// GeometryBatch and issues its own immediate DrawIndexedPrimitives
+        /// call unconditionally, regardless of this flag — SpriteBatch's
+        /// SpriteSortMode.Deferred queues sprite draws and only actually
+        /// commits them at the next real End()/Begin() sync point, so if
+        /// this flag is false, an ordinary shape (e.g. a panel's own
+        /// background fill) queued BEFORE some later-drawn text stays
+        /// uncommitted until the next sync point while the text commits
+        /// immediately — the deferred background then paints OVER the
+        /// already-rasterized text the instant it finally flushes,
+        /// silently erasing it with no exception and no obviously-wrong
+        /// per-draw state (found 2026-08-12: EVERY piece of text inside
+        /// EVERY modal rendered invisible — even forced to output solid
+        /// opaque white by a diagnostic pixel shader — while non-modal
+        /// text worked fine; a raw GetBackBufferData read confirmed the
+        /// glyph pixels were correctly white immediately after their own
+        /// DrawIndexedPrimitives call and only turned into the panel's
+        /// background color after DrawManager.End()'s final SpriteBatch
+        /// commit, isolating it to exactly this deferred-vs-immediate
+        /// ordering gap rather than anything glyph/shader/vertex-specific).
+        /// False is kept only as an emergency escape hatch/perf A-B knob,
+        /// not a supported steady state.
+        /// </summary>
+        public bool UseGeometryBackend { get; set; } = true;
+
+        private GeometryBatch geometryBatch;
+        private TextureAtlas geometryAtlas;
+        private Effect geometryBatchEffect;
+
+        /// <summary>The frame-scoped accumulator backing UseGeometryBackend draws. Lazily created so a session that never enables the flag never allocates it.</summary>
+        public GeometryBatch GeometryBatch => geometryBatch ?? (geometryBatch = new GeometryBatch(Resources.StaticResources.GraphicsDevice));
+
+        /// <summary>Shared atlas for baked alpha-mask shapes (rounded-rect corners, knob dial/ring, etc.) migrated onto the geometry backend — see TextureAtlas's own doc comment.</summary>
+        public TextureAtlas GeometryAtlas => geometryAtlas ?? (geometryAtlas = new TextureAtlas(Resources.StaticResources.GraphicsDevice));
+
+        private Effect GetGeometryBatchEffect()
+        {
+            if (geometryBatchEffect == null)
+            {
+                geometryBatchEffect = Resources.StaticResources.Content.Load<Effect>("GeometryBatch");
+            }
+
+            return geometryBatchEffect;
+        }
+
+        private Effect GetSdfBatchEffect()
+        {
+            if (sdfEffect == null)
+            {
+                sdfEffect = Resources.StaticResources.Content.Load<Effect>("SdfText");
+            }
+
+            return sdfEffect;
+        }
+
+        /// <summary>
+        /// Uploads and draws whatever's accumulated in <see cref="GeometryBatch"/>
+        /// since the last flush, resetting it for further appends — see
+        /// GeometryBatch.Flush's own doc comment for why this is called
+        /// from multiple places per frame (every DrawManager.End(), not
+        /// just once at frame end) during the staged migration. Unconditional
+        /// (not gated by UseGeometryBackend): since Phase 7, ALL text goes
+        /// through GeometryBatch.AppendGlyphQuad regardless of that flag —
+        /// bitmap text is retired outright, not made conditional on the
+        /// broader shape-primitive migration — so this must still flush
+        /// even in a session where UseGeometryBackend is off and nothing
+        /// else ever appends to the batch. Cheap when empty either way
+        /// (GeometryBatch.Flush's own early-return).
+        /// </summary>
+        private void FlushGeometryBatch()
+        {
+            if (geometryBatch == null || geometryBatch.IsEmpty)
+            {
+                return;
+            }
+
+            Effect flatEffect = GetGeometryBatchEffect();
+            Effect textEffect = GetSdfBatchEffect();
+            Viewport viewport = Resources.StaticResources.GraphicsDevice.Viewport;
+            Matrix scale = RenderScale != 1f ? Matrix.CreateScale(RenderScale, RenderScale, 1f) : Matrix.Identity;
+            Matrix projection = Matrix.CreateOrthographicOffCenter(0, viewport.Width, viewport.Height, 0, 0, 1);
+            Matrix matrixTransform = scale * projection;
+
+            flatEffect.Parameters["MatrixTransform"].SetValue(matrixTransform);
+            // Separate scalar (not just folded into MatrixTransform): the
+            // pixel shader can't read SV_Position (Reach forbids it — see
+            // GeometryBatch.fx), so it re-derives a physical-pixel-space
+            // position from the raw vertex position via this same factor,
+            // matching PushScissor's own ClipRect scaling exactly.
+            flatEffect.Parameters["RenderScale"].SetValue(RenderScale);
+
+            textEffect.Parameters["MatrixTransform"].SetValue(matrixTransform);
+            // Smoothing/BorderWidth/BorderColor are NOT set here — they vary
+            // per text segment (that's exactly why a font-size/border change
+            // forces a new segment) and GeometryBatch.Flush sets them itself
+            // right before drawing each such segment.
+
+            geometryBatch.Flush(flatEffect, textEffect);
+        }
 
         public DrawManager(SpriteBatch spriteBatch)
         {
@@ -111,6 +219,10 @@ namespace GustUI.Managers
                     bake();
                 }
             }
+
+            // Unconditional (not gated by UseGeometryBackend) — see
+            // FlushGeometryBatch's comment: text always uses this batch now.
+            GeometryBatch.BeginFrame();
 
             SetRenderTarget(null);
             Clear(Color.Transparent);
@@ -207,13 +319,12 @@ namespace GustUI.Managers
 
             FrameProfiler.End(FrameProfiler.Bucket.DrawDebug);
             End();
-
-            
         }
 
         internal void DrawString(KeyedSpriteFont font, string text, Vector2 position, Color white)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
+            SyncGeometryBeforeSprite();
             FrameProfiler.CountString();
             var cache = Resources.StaticResources.FontManager.GetCachedText(font.Key, text, white);
             if (cache == null)
@@ -320,6 +431,40 @@ namespace GustUI.Managers
 
         public void Begin(SpriteSortMode mode = SpriteSortMode.Deferred)
         {
+            BeginSprite(mode);
+        }
+
+        public void End()
+        {
+            // Geometry flushes BEFORE the sprite batch commits, at every
+            // GENERAL sync point (BeginAdditive/EndAdditive, DrawTriangles,
+            // end of frame) — see FlushGeometryBatch/GeometryBatch.Flush's
+            // own comments. Unconditional (not gated by UseGeometryBackend):
+            // text (Phase 7) always appends here regardless of that flag.
+            // NOT called from SetScissor (Phase 3: PushScissor/PopScissor's
+            // clip is per-vertex data now, not a GPU-state sync point, so
+            // geometry can accumulate freely across scissor changes) — see
+            // SyncGeometryBeforeSprite for how paint order against sprite
+            // content already committed via SetScissor's OWN sprite-only
+            // flush stays correct anyway.
+            FlushGeometryBatch();
+            EndSprite();
+        }
+
+        /// <summary>
+        /// The actual SpriteBatch End()/Begin() pair, WITHOUT the geometry
+        /// flush — used by SetScissor (Phase 3: scissor changes are pure
+        /// GPU/SpriteBatch state now, geometry doesn't need to sync with
+        /// them since clip travels per-vertex) so that pushing/popping a
+        /// clip region no longer forces a geometry-batch flush the way it
+        /// did through Phase 1-2 (when SetScissor called the general
+        /// Begin()/End() pair). Public Begin()/End() still call these too,
+        /// via the wrappers above — this split exists so ONE call site
+        /// (SetScissor) can skip the geometry half while every other
+        /// caller keeps it.
+        /// </summary>
+        private void BeginSprite(SpriteSortMode mode = SpriteSortMode.Deferred)
+        {
             IsInBatch = true;
             FrameProfiler.CountFlush();
             // Z MUST stay 1. Matrix.CreateScale(float) scales all THREE axes,
@@ -339,15 +484,41 @@ namespace GustUI.Managers
             spriteBatch.Begin(mode, blendState, samplerState, null, rasterizerState, null, transform);
         }
 
-        public void End()
+        private void EndSprite()
         {
             spriteBatch.End();
             IsInBatch = false;
         }
 
+        /// <summary>
+        /// Flushes any pending geometry-backend content before queueing NEW
+        /// sprite content (icons, images, still-unmigrated corner blits) —
+        /// called from Draw(texture,...). Unconditional (not gated by
+        /// UseGeometryBackend): text (Phase 7) always appends to the
+        /// geometry batch regardless of that flag, so even in a session
+        /// where it's off, a pending glyph run needs to flush before a
+        /// still-sprite-drawn icon/image commits on top of it. A defensive
+        /// backstop, not the primary sync mechanism: SetScissor still
+        /// flushes geometry on every clip change (see its own comment), so
+        /// in practice this is nearly always a no-op by the time it runs
+        /// (FlushGeometryBatch/GeometryBatch.Flush both early-return on an
+        /// empty batch — cheap). It matters for the cases SetScissor's
+        /// coupling doesn't cover: sprite content drawn AFTER geometry
+        /// content within the SAME clip region (or at the unclipped root),
+        /// where no scissor change happens in between to force the sync —
+        /// without this, such geometry could stay queued past when the
+        /// sprite content it should render BEHIND already committed,
+        /// painting over it.
+        /// </summary>
+        private void SyncGeometryBeforeSprite()
+        {
+            FlushGeometryBatch();
+        }
+
         internal void DrawString(KeyedSpriteFont font, string text, Vector2 vector2, Color color, int v1, Vector2 zero, float fontScale, SpriteEffects none, float v2)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
+            SyncGeometryBeforeSprite();
             FrameProfiler.CountString();
             var cache = Resources.StaticResources.FontManager.GetCachedText(font.Key, text, color);
             if (cache == null)
@@ -360,9 +531,28 @@ namespace GustUI.Managers
             }
         }
 
+        /// <summary>
+        /// Rotated-quad draw (KnobElement's pointer, DrawLine/DrawThickLine's
+        /// rotated-rect idiom). <paramref name="vector2"/> (origin) is passed
+        /// straight through to GeometryBatch.AppendRotatedQuad's own
+        /// dest-local-pixel-space convention, UNCHANGED — matching exactly
+        /// how DrawLine/DrawThickLine's own geometry branch already does it
+        /// (SpriteBatchExtensions.cs), which is screenshot-verified correct.
+        /// The `value` parameter has always been dead (never read, spriteBatch.Draw
+        /// below still hardcodes null for source) — untouched, not this
+        /// change's concern.
+        /// </summary>
         internal void Draw(Texture2D pixel, Rectangle rectangle, object value, Color color, float angle, Vector2 vector2, SpriteEffects none, int v)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
+            if (UseGeometryBackend)
+            {
+                Rectangle src = new Rectangle(0, 0, pixel.Width, pixel.Height);
+                GeometryBatch.AppendRotatedQuad(pixel, rectangle, src, color, angle, vector2, GetClipRectForGeometry(), null);
+                return;
+            }
+
+            SyncGeometryBeforeSprite();
             FrameProfiler.CountSprite();
             spriteBatch.Draw(pixel, rectangle, null, color, angle, vector2, none, v);
         }
@@ -370,6 +560,7 @@ namespace GustUI.Managers
         internal void Draw(Texture2D pixel, Vector2 position, Color color)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
+            SyncGeometryBeforeSprite();
             FrameProfiler.CountSprite();
             spriteBatch.Draw(pixel, position, color);
         }
@@ -377,6 +568,14 @@ namespace GustUI.Managers
         internal void Draw(Texture2D pixel, Rectangle rectangle, Color color)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
+            if (UseGeometryBackend)
+            {
+                Rectangle src = new Rectangle(0, 0, pixel.Width, pixel.Height);
+                GeometryBatch.AppendQuad(pixel, rectangle, src, color, GetClipRectForGeometry(), null);
+                return;
+            }
+
+            SyncGeometryBeforeSprite();
             FrameProfiler.CountSprite();
             spriteBatch.Draw(pixel, rectangle, color);
         }
@@ -384,6 +583,14 @@ namespace GustUI.Managers
         internal void Draw(Texture2D texture, Rectangle rectangle, Rectangle? source, Color color)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
+            if (UseGeometryBackend)
+            {
+                Rectangle src = source ?? new Rectangle(0, 0, texture.Width, texture.Height);
+                GeometryBatch.AppendQuad(texture, rectangle, src, color, GetClipRectForGeometry(), null);
+                return;
+            }
+
+            SyncGeometryBeforeSprite();
             FrameProfiler.CountSprite();
             spriteBatch.Draw(texture, rectangle, source, color);
         }
@@ -421,6 +628,38 @@ namespace GustUI.Managers
             }
 
             SetScissor(scissorStack.Count > 0 ? scissorStack.Peek() : (Rectangle?)null);
+        }
+
+        /// <summary>
+        /// The clip rect geometry-backend Append* calls should stamp onto
+        /// their vertices right now — the top of scissorStack (already
+        /// RenderScale-scaled into physical-pixel space by PushScissor) if
+        /// any ClipChildren ancestor is active, else the full viewport (no
+        /// clip). This runs REDUNDANTLY alongside SetScissor's real
+        /// GraphicsDevice.ScissorRectangle update (which is still required
+        /// for whatever content remains on SpriteBatch — text is
+        /// ubiquitous inside these exact regions — and still forces a
+        /// flush via the general End()/Begin() pair; see SetScissor's own
+        /// comment for why decoupling them was tried and reverted, having
+        /// measured no flush-count benefit at this stage of the migration)
+        /// — that's intentional groundwork: geometry itself ignores
+        /// GraphicsDevice.ScissorRectangle entirely (RasterizerState.CullNone
+        /// in GeometryBatch.Flush leaves ScissorTestEnable off) and relies
+        /// solely on this per-vertex data, so once SpriteBatch no longer
+        /// needs the real scissor rect here (Phase 7+), SetScissor's
+        /// GPU-state work can be dropped for the geometry-only case without
+        /// touching this method at all.
+        /// </summary>
+        internal Vector4 GetClipRectForGeometry()
+        {
+            if (scissorStack.Count > 0)
+            {
+                Rectangle r = scissorStack.Peek();
+                return new Vector4(r.Left, r.Top, r.Right, r.Bottom);
+            }
+
+            Viewport viewport = Resources.StaticResources.GraphicsDevice.Viewport;
+            return new Vector4(0, 0, viewport.Width, viewport.Height);
         }
 
         /// <summary>
@@ -514,52 +753,46 @@ namespace GustUI.Managers
 
         private Effect sdfEffect;
 
+        /// <summary>Border-free overload — see the full overload below.</summary>
+        public void DrawSdfString(SdfFont sdfFont, string text, Vector2 position, float pixelSize, Color color)
+        {
+            DrawSdfString(sdfFont, text, position, pixelSize, color, 0, null);
+        }
+
         /// <summary>
-        /// Draws an SDF-baked string (font-rendering plan Phase 1) — crisp at
-        /// ANY pixelSize/RenderScale from a single per-family bake, unlike
-        /// the bitmap path's per-(family,size,RenderScale) rebake. Same End/
-        /// draw/Begin interleave idiom as <see cref="DrawTriangles"/> (a
-        /// custom Effect needs its own batch), for the same reason: costs one
-        /// batch flush per call, so callers drawing many short strings
-        /// (a whole label-heavy screen) pay one flush per DrawSdfString
-        /// call, not per glyph — batch flush cost, not glyph count, is what
-        /// scales here.
+        /// Draws an SDF-baked string — crisp at ANY pixelSize/RenderScale
+        /// from a single per-family bake, unlike the retired bitmap path's
+        /// per-(family,size,RenderScale) rebake. Phase 7 of the geometry-
+        /// renderer migration: appends glyph quads into GeometryBatch
+        /// (GeometryBatch.AppendGlyphQuad) instead of driving its own
+        /// SpriteBatch batch — so, unlike this method's pre-Phase-7 form,
+        /// it does NOT cost a flush per call; many strings of the same
+        /// (font size, RenderScale, border state) batch into one segment,
+        /// flushed at the same sync points every other geometry content
+        /// uses (see DrawManager.End()/FlushGeometryBatch).
         ///
         /// position is in the same logical pixel space as every other Draw
-        /// call on this class (RenderScale folds in via the transform, same
-        /// as DrawTriangles) — NOT pre-multiplied by RenderScale.
+        /// call on this class (RenderScale folds in via GeometryBatch's own
+        /// transform) — NOT pre-multiplied by RenderScale.
         ///
-        /// Caller must already be inside a Begin()/End() batch (same
-        /// precondition as DrawTriangles) — this leaves the batch open again
-        /// on return, it does not need to be reopened by the caller.
+        /// <paramref name="borderSize"/> follows the same convention the
+        /// retired bitmap DrawString's outline did (0 = none; N = an N-pixel
+        /// stroke); <paramref name="borderColor"/> defaults to a dimmed
+        /// version of <paramref name="color"/> (matching
+        /// SpriteBatchExtensions.DrawString's BorderFade=0.1 default) when
+        /// null. Converted into the SDF's normalized distance-field units
+        /// via the SAME per-draw texel-to-screen-pixel scale factor
+        /// Smoothing's own conversion uses (see SdfText.fx's own comment for
+        /// why unbordered draws — BorderColor.a forced to 0 below — are
+        /// mathematically UNAFFECTED by this being the same shader that now
+        /// also supports outlines, not just visually close).
         /// </summary>
-        public void DrawSdfString(SdfFont sdfFont, string text, Vector2 position, float pixelSize, Color color)
+        public void DrawSdfString(SdfFont sdfFont, string text, Vector2 position, float pixelSize, Color color, int borderSize, Color? borderColor)
         {
             if (string.IsNullOrEmpty(text) || sdfFont == null || pixelSize <= 0)
             {
                 return;
             }
-
-            End();
-
-            if (sdfEffect == null)
-            {
-                sdfEffect = Resources.StaticResources.Content.Load<Effect>("SdfText");
-            }
-
-            GraphicsDevice device = Resources.StaticResources.GraphicsDevice;
-            Viewport viewport = device.Viewport;
-
-            // A custom Effect passed to SpriteBatch.Begin does NOT get its
-            // transform auto-fed the way the built-in SpriteEffect does (only
-            // updates SpriteBatch's own internal _spriteEffect) — must be set
-            // explicitly every call. Same lesson as the DrawTriangles/
-            // BasicEffect View+Projection split above, just as one combined
-            // matrix (this effect's cbuffer, like stock SpriteEffect.fx,
-            // only exposes a single MatrixTransform).
-            Matrix scaleMatrix = RenderScale != 1f ? Matrix.CreateScale(RenderScale, RenderScale, 1f) : Matrix.Identity;
-            Matrix projection = Matrix.CreateOrthographicOffCenter(0, viewport.Width, viewport.Height, 0, 0, 1);
-            sdfEffect.Parameters["MatrixTransform"].SetValue(scaleMatrix * projection);
 
             // AA band width, in normalized (0..1) distance-fraction units —
             // sized so the transition spans ~1 REAL screen pixel regardless
@@ -568,8 +801,8 @@ namespace GustUI.Managers
             // just be a shader constant (no derivatives at the Reach/9.1
             // feature level, so there's no ddx/ddy to derive it on-GPU).
             // The literal "1 physical pixel" band that formula alone produces
-            // reads visibly THINNER/softer than the bitmap path at typical
-            // UI text sizes (found 2026-08-12, direct SDF-vs-bitmap
+            // reads visibly THINNER/softer than the retired bitmap path at
+            // typical UI text sizes (found 2026-08-12, direct SDF-vs-bitmap
             // screenshot comparison at UiFontSmall=16 over EmSize=64's heavy
             // ~4x minification): a full-pixel-wide linear ramp swallows most
             // of a thin stroke's own width before any of it reaches full
@@ -579,15 +812,25 @@ namespace GustUI.Managers
             // at UiFontLarge=32 (near-native, minimal minification) to
             // confirm it doesn't introduce visible aliasing there either.
             float finalScale = (pixelSize / sdfFont.EmSize) * RenderScale;
-            float smoothing = MathHelper.Clamp(
-                0.5f * SdfFontBaker.OnEdgeValue / (255f * SdfFontBaker.Padding * finalScale) * 0.35f,
-                0.005f, 0.25f);
-            sdfEffect.Parameters["Smoothing"].SetValue(smoothing);
+            float pixelToNormalized = 0.5f * SdfFontBaker.OnEdgeValue / (255f * SdfFontBaker.Padding * finalScale);
+            float smoothing = MathHelper.Clamp(pixelToNormalized * 0.35f, 0.005f, 0.25f);
 
-            spriteBatch.Begin(SpriteSortMode.Deferred, blendState, samplerState, null, rasterizerState, sdfEffect);
+            // Border width uses the SAME base pixel-to-normalized-distance
+            // conversion Smoothing derives from, but WITHOUT that 0.35
+            // correction — 0.35 was tuned specifically to match the retired
+            // bitmap path's ANTIALIASING weight, not a literal stroke width,
+            // and a border's whole point is to BE the literal pixel width
+            // the caller asked for.
+            float borderWidth = borderSize > 0 ? borderSize * pixelToNormalized : 0f;
+            // BorderFade = 0.1, matching SpriteBatchExtensions.DrawString's
+            // own default outline dimming — alpha forced to exactly 0 when
+            // there's no border so the shader's degenerate-case identity
+            // holds (see SdfText.fx's own comment).
+            Color effectiveBorderColor = borderSize > 0 ? (borderColor ?? color * 0.1f) : Color.Transparent;
 
             float glyphScale = pixelSize / sdfFont.EmSize;
             float cursorX = position.X;
+            Vector4 clipRect = GetClipRectForGeometry();
             foreach (char c in text)
             {
                 if (!sdfFont.TryGetGlyph(c, out SpriteFontPlus.SdfGlyphInfo g))
@@ -597,38 +840,26 @@ namespace GustUI.Managers
 
                 if (g.Width > 0 && g.Height > 0)
                 {
-                    // Vector2 position + float scale, NOT an integer Rectangle
-                    // (found 2026-08-12: the previous (int)Math.Round() on
-                    // each glyph's dest.X/dest.Y snapped every glyph to the
-                    // nearest LOGICAL pixel independently, BEFORE the
-                    // RenderScale transform below multiplies it out — at 1x
-                    // that's up to half a pixel of jitter per glyph, easy to
-                    // miss; at 400% DPI it's up to 2 PHYSICAL pixels, and
-                    // since each glyph's sub-pixel remainder rounds
-                    // independently, different letters snap to different
-                    // relative offsets — "every character sits at a
-                    // different position", worse the taller/wider the glyph
-                    // (so most visible on ascenders like 'd' and detached
-                    // features like 'i's dot). The bitmap path never had this
-                    // bug: it hands the whole string to MonoGame's own
-                    // SpriteFont.DrawString, which positions every glyph in
-                    // continuous float space and lets the SAME transform
-                    // that already handles RenderScale rasterize it — no
-                    // separate, earlier rounding step to introduce drift.
-                    // SDF doesn't need pixel-snapping to look crisp (that's
-                    // the technique's whole point), so this brings it in
-                    // line with the same float-position, GPU-rasterizes-the-
-                    // final-transform model.
+                    // Float position, NOT an integer Rectangle (found
+                    // 2026-08-12: (int)Math.Round() on each glyph's
+                    // dest.X/dest.Y independently, before the RenderScale
+                    // transform multiplies it out, produced up to half a
+                    // pixel of jitter per glyph at 1x — up to 2 physical
+                    // pixels at 400% DPI, each glyph's remainder rounding
+                    // independently so different letters visibly drifted
+                    // relative to each other. SDF doesn't need pixel-
+                    // snapping to look crisp — that's the technique's whole
+                    // point — so this keeps every glyph in continuous float
+                    // space through to the GPU's own final rasterization,
+                    // same as GeometryBatch's other Append* calls.
                     Vector2 destPos = new Vector2(cursorX + g.XOffset * glyphScale, position.Y + g.YOffset * glyphScale);
+                    Vector2 destSize = new Vector2(g.Width * glyphScale, g.Height * glyphScale);
                     Rectangle src = new Rectangle(g.X, g.Y, g.Width, g.Height);
-                    spriteBatch.Draw(sdfFont.Atlas, destPos, src, color, 0f, Vector2.Zero, glyphScale, SpriteEffects.None, 0f);
+                    GeometryBatch.AppendGlyphQuad(sdfFont.Atlas, destPos, destSize, src, color, smoothing, borderWidth, effectiveBorderColor, clipRect);
                 }
 
                 cursorX += g.XAdvance * glyphScale;
             }
-
-            spriteBatch.End();
-            Begin();
         }
 
         /// <summary>
@@ -708,6 +939,29 @@ namespace GustUI.Managers
 
         public void SetScissor(Rectangle? rect)
         {
+            // Deliberately the GENERAL End()/Begin() pair (flushes geometry
+            // too), NOT the sprite-only BeginSprite/EndSprite split defined
+            // above — measured via FrameProfiler on a busy scenario
+            // (--scenario deepzoom) that decoupling geometry from scissor
+            // flushes does NOT reduce total flush count at this stage of
+            // the migration (368 decoupled vs 370 coupled, on ~296 baseline
+            // sprite-only flushes) — worse than that, it ADDS flushes
+            // relative to baseline either way. Root cause: SetScissor's own
+            // real GraphicsDevice.ScissorRectangle update is still fully
+            // required for whatever remains on SpriteBatch (chiefly text —
+            // ubiquitous inside these exact ClipChildren regions, e.g.
+            // every timeline run label), so decoupling geometry from it
+            // doesn't remove any of the ORIGINAL scissor-flush cost — it
+            // only splits what used to be one combined sprite flush
+            // (background rect + its own label, both sprite-batched) into
+            // two (one geometry DrawIndexedPrimitives + one sprite flush),
+            // since they're now on different backends. The real elimination
+            // of scissor-driven flush cost is deferred until enough of what
+            // still draws inside these regions (text — Phase 7, baked
+            // shapes — Phase 4/5) is ALSO on the geometry backend that
+            // SpriteBatch stops needing real GPU scissor here at all —
+            // revisit decoupling then, when it can be measured to actually
+            // help instead of just adding complexity for no gain.
             if (rect.HasValue)
             {
                 End();
