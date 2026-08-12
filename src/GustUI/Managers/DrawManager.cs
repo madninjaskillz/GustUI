@@ -10,7 +10,6 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using static GustUI.Managers.FontManager;
 using static System.Net.Mime.MediaTypeNames;
 
 namespace GustUI.Managers
@@ -23,7 +22,7 @@ namespace GustUI.Managers
         private RenderTarget2D renderTargetClone;
         public bool IsInBatch { get; private set; } = false;
         private FrameCounter _frameCounter = new FrameCounter();
-        private KeyedSpriteFont font = null;
+        private SdfFont debugFont = null;
         // CullMode.None: SpriteBatch's own quads are unaffected by cull mode
         // either way, but DrawTriangles' custom geometry (DrawManager.cs)
         // very much is — leaving the default CullCounterClockwiseFace would
@@ -46,43 +45,41 @@ namespace GustUI.Managers
         /// </summary>
         public float RenderScale { get; set; } = 1f;
 
-        /// <summary>
-        /// Switch (mirrors FontManager.UseSdf's convention) to the
-        /// persistent-buffer geometry renderer (Rendering.GeometryBatch)
-        /// replacing SpriteBatch as the primitive-drawing backend for flat
-        /// shapes — see the GustUI geometry-renderer migration plan.
-        /// Default ON (Phase 8: flipped once every shape category migrated
-        /// in Phases 2-6 was verified via the desktop screenshot harness).
-        /// MUST stay true in any normal run: SDF text (Phase 7) appends to
-        /// GeometryBatch and issues its own immediate DrawIndexedPrimitives
-        /// call unconditionally, regardless of this flag — SpriteBatch's
-        /// SpriteSortMode.Deferred queues sprite draws and only actually
-        /// commits them at the next real End()/Begin() sync point, so if
-        /// this flag is false, an ordinary shape (e.g. a panel's own
-        /// background fill) queued BEFORE some later-drawn text stays
-        /// uncommitted until the next sync point while the text commits
-        /// immediately — the deferred background then paints OVER the
-        /// already-rasterized text the instant it finally flushes,
-        /// silently erasing it with no exception and no obviously-wrong
-        /// per-draw state (found 2026-08-12: EVERY piece of text inside
-        /// EVERY modal rendered invisible — even forced to output solid
-        /// opaque white by a diagnostic pixel shader — while non-modal
-        /// text worked fine; a raw GetBackBufferData read confirmed the
-        /// glyph pixels were correctly white immediately after their own
-        /// DrawIndexedPrimitives call and only turned into the panel's
-        /// background color after DrawManager.End()'s final SpriteBatch
-        /// commit, isolating it to exactly this deferred-vs-immediate
-        /// ordering gap rather than anything glyph/shader/vertex-specific).
-        /// False is kept only as an emergency escape hatch/perf A-B knob,
-        /// not a supported steady state.
-        /// </summary>
-        public bool UseGeometryBackend { get; set; } = true;
-
         private GeometryBatch geometryBatch;
         private TextureAtlas geometryAtlas;
         private Effect geometryBatchEffect;
 
-        /// <summary>The frame-scoped accumulator backing UseGeometryBackend draws. Lazily created so a session that never enables the flag never allocates it.</summary>
+        /// <summary>
+        /// The frame-scoped accumulator backing every DrawManager primitive
+        /// draw (flat shapes AND SDF text, unconditionally — see the
+        /// GustUI geometry-renderer migration plan; Phase 8 completed the
+        /// migration off SpriteBatch entirely for primitives). Lazily
+        /// created on first use.
+        ///
+        /// IMPORTANT — do not reintroduce a SpriteBatch fallback for flat
+        /// shapes: SpriteBatch's SpriteSortMode.Deferred queues draws and
+        /// only actually commits them at the next real End()/Begin() sync
+        /// point, while GeometryBatch content (including all text) commits
+        /// IMMEDIATELY via DrawIndexedPrimitives during the same tree walk.
+        /// Mixing the two backends for ordinary shapes reintroduces a real,
+        /// silent bug: an ordinary shape (e.g. a panel's own background
+        /// fill) queued on SpriteBatch BEFORE some later-drawn geometry
+        /// text stays uncommitted until the next sync point, then paints
+        /// OVER the already-rasterized text the instant it finally
+        /// flushes — no exception, no obviously-wrong per-draw state.
+        /// Found 2026-08-12: EVERY piece of text inside EVERY modal
+        /// rendered invisible — even forced to output solid opaque white
+        /// by a diagnostic pixel shader — while non-modal text worked
+        /// fine; a raw GetBackBufferData read confirmed the glyph pixels
+        /// were correctly white immediately after their own
+        /// DrawIndexedPrimitives call and only turned into the panel's
+        /// background color after DrawManager.End()'s final SpriteBatch
+        /// commit, isolating it to exactly this deferred-vs-immediate
+        /// ordering gap. This is why the migration's staged
+        /// DrawManager.UseGeometryBackend opt-in flag was removed in
+        /// Phase 8 rather than kept as a toggle — false was never actually
+        /// safe once SDF text (Phase 7) went geometry-only.
+        /// </summary>
         public GeometryBatch GeometryBatch => geometryBatch ?? (geometryBatch = new GeometryBatch(Resources.StaticResources.GraphicsDevice));
 
         /// <summary>Shared atlas for baked alpha-mask shapes (rounded-rect corners, knob dial/ring, etc.) migrated onto the geometry backend — see TextureAtlas's own doc comment.</summary>
@@ -113,14 +110,8 @@ namespace GustUI.Managers
         /// since the last flush, resetting it for further appends — see
         /// GeometryBatch.Flush's own doc comment for why this is called
         /// from multiple places per frame (every DrawManager.End(), not
-        /// just once at frame end) during the staged migration. Unconditional
-        /// (not gated by UseGeometryBackend): since Phase 7, ALL text goes
-        /// through GeometryBatch.AppendGlyphQuad regardless of that flag —
-        /// bitmap text is retired outright, not made conditional on the
-        /// broader shape-primitive migration — so this must still flush
-        /// even in a session where UseGeometryBackend is off and nothing
-        /// else ever appends to the batch. Cheap when empty either way
-        /// (GeometryBatch.Flush's own early-return).
+        /// just once at frame end). Cheap when empty (GeometryBatch.Flush's
+        /// own early-return).
         /// </summary>
         private void FlushGeometryBatch()
         {
@@ -202,10 +193,6 @@ namespace GustUI.Managers
 
             _frameCounter.Update(deltaTime);
 
-            FrameProfiler.Begin(FrameProfiler.Bucket.DrawFontCache);
-            Resources.StaticResources.FontManager.ManageCaches();
-            FrameProfiler.End(FrameProfiler.Bucket.DrawFontCache);
-
             if (pendingBakes.Count > 0)
             {
                 // Snapshot + clear BEFORE running: a bake can itself queue
@@ -220,8 +207,6 @@ namespace GustUI.Managers
                 }
             }
 
-            // Unconditional (not gated by UseGeometryBackend) — see
-            // FlushGeometryBatch's comment: text always uses this batch now.
             GeometryBatch.BeginFrame();
 
             SetRenderTarget(null);
@@ -247,6 +232,7 @@ namespace GustUI.Managers
                 debugBottom = MathHelper.Lerp(debugBottom, 0, lerpSpeed);
             }
             int bottom = (int)debugBottom;
+            float debugFontSize = Resources.StaticResources.Theme.UiFontSmall.Size;
 
             if (Resources.StaticResources.DebugMode != DebugMode.None)
             {
@@ -262,31 +248,31 @@ namespace GustUI.Managers
                         Resources.StaticResources.RootWindow.DebugWrite(0, 160);
                     }
                 }
-                if (font == null)
+                if (debugFont == null)
                 {
-                    font = Resources.StaticResources.FontManager.LoadFont(Resources.StaticResources.Theme.UiFontSmall.Family, Resources.StaticResources.Theme.UiFontSmall.Size);
+                    debugFont = Resources.StaticResources.FontManager.LoadSdfFont(Resources.StaticResources.Theme.UiFontSmall.Family);
                 }
                 Vector2 ps = new Vector2(0, 60);
-                DrawString(font, fps, ps + new Vector2(1, 1), Color.Black);
-                DrawString(font, fps, ps + new Vector2(3, 1), Color.Black);
-                DrawString(font, fps, ps + new Vector2(1, 3), Color.Black);
-                DrawString(font, fps, ps + new Vector2(3, 3), Color.Black);
-                DrawString(font, fps, ps + new Vector2(2, 2), Color.White);
+                DrawSdfString(debugFont, fps, ps + new Vector2(1, 1), debugFontSize, Color.Black);
+                DrawSdfString(debugFont, fps, ps + new Vector2(3, 1), debugFontSize, Color.Black);
+                DrawSdfString(debugFont, fps, ps + new Vector2(1, 3), debugFontSize, Color.Black);
+                DrawSdfString(debugFont, fps, ps + new Vector2(3, 3), debugFontSize, Color.Black);
+                DrawSdfString(debugFont, fps, ps + new Vector2(2, 2), debugFontSize, Color.White);
 
 
                 SpriteBatchExtensions.DrawFilledRectangle(this, new Rectangle(0, 0, (int)Resources.StaticResources.RootWindow.GetSize().X, bottom), Color.Blue * 0.8f);
 
                 string consoleText = "CMD:>";
-                var ctHeight = (int)font.MeasureString(consoleText).Y;
+                var ctHeight = (int)debugFont.MeasureString(consoleText, debugFontSize).Y;
                 var ctBorder = 2;
                 SpriteBatchExtensions.DrawFilledRectangle(this, new Rectangle(ctBorder, bottom - ctHeight - (ctBorder * 2), (int)Resources.StaticResources.RootWindow.GetSize().X - (ctBorder * 2), ctHeight + ctBorder), Color.Black * 0.8f);
                 bottom = bottom - ctHeight - (ctBorder * 2);
 
-                DrawString(font, consoleText, new Vector2(5, 0) + new Vector2(0, bottom), Color.Black);
-                DrawString(font, consoleText, new Vector2(5, 0) + new Vector2(2, bottom), Color.Black);
-                DrawString(font, consoleText, new Vector2(5, 0) + new Vector2(0, bottom + 2), Color.Black);
-                DrawString(font, consoleText, new Vector2(5, 0) + new Vector2(2, bottom + 2), Color.Black);
-                DrawString(font, consoleText, new Vector2(5, 0) + new Vector2(1, bottom + 1), Color.Yellow);
+                DrawSdfString(debugFont, consoleText, new Vector2(5, 0) + new Vector2(0, bottom), debugFontSize, Color.Black);
+                DrawSdfString(debugFont, consoleText, new Vector2(5, 0) + new Vector2(2, bottom), debugFontSize, Color.Black);
+                DrawSdfString(debugFont, consoleText, new Vector2(5, 0) + new Vector2(0, bottom + 2), debugFontSize, Color.Black);
+                DrawSdfString(debugFont, consoleText, new Vector2(5, 0) + new Vector2(2, bottom + 2), debugFontSize, Color.Black);
+                DrawSdfString(debugFont, consoleText, new Vector2(5, 0) + new Vector2(1, bottom + 1), debugFontSize, Color.Yellow);
 
             }
 
@@ -297,14 +283,14 @@ namespace GustUI.Managers
 
                 for (int i = Log.log.Count; i > 0; i--)
                 {
-                    var height = ((int)font.MeasureString(Log.log.ToArray()[i - 1].ToString()).Y) + 4;
+                    var height = ((int)debugFont.MeasureString(Log.log.ToArray()[i - 1].ToString(), debugFontSize).Y) + 4;
                     bottom = bottom - height;
 
-                    DrawString(font, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(0, bottom), Color.Black * 0.5f);
-                    DrawString(font, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(2, bottom), Color.Black * 0.5f);
-                    DrawString(font, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(0, bottom + 2), Color.Black * 0.5f);
-                    DrawString(font, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(2, bottom + 2), Color.Black * 0.5f);
-                    DrawString(font, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(1, bottom + 1), Color.White);
+                    DrawSdfString(debugFont, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(0, bottom), debugFontSize, Color.Black * 0.5f);
+                    DrawSdfString(debugFont, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(2, bottom), debugFontSize, Color.Black * 0.5f);
+                    DrawSdfString(debugFont, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(0, bottom + 2), debugFontSize, Color.Black * 0.5f);
+                    DrawSdfString(debugFont, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(2, bottom + 2), debugFontSize, Color.Black * 0.5f);
+                    DrawSdfString(debugFont, Log.log.ToArray()[i - 1].ToString(), new Vector2(5, 0) + new Vector2(1, bottom + 1), debugFontSize, Color.White);
 
                     if (bottom < 0)
                     {
@@ -321,24 +307,7 @@ namespace GustUI.Managers
             End();
         }
 
-        internal void DrawString(KeyedSpriteFont font, string text, Vector2 position, Color white)
-        {
-            Ensure.IsTrue(IsInBatch, "IsInBatch");
-            SyncGeometryBeforeSprite();
-            FrameProfiler.CountString();
-            var cache = Resources.StaticResources.FontManager.GetCachedText(font.Key, text, white);
-            if (cache == null)
-            {
-                spriteBatch.DrawString(font.SpriteFont, text, position, white);
-            }
-            else
-            {
-
-                spriteBatch.Draw(cache, position, white);
-
-            }
-        }
-                private void Clear(Color color)
+        private void Clear(Color color)
         {
             Resources.StaticResources.GraphicsDevice.Clear(color);
         }
@@ -439,14 +408,10 @@ namespace GustUI.Managers
             // Geometry flushes BEFORE the sprite batch commits, at every
             // GENERAL sync point (BeginAdditive/EndAdditive, DrawTriangles,
             // end of frame) — see FlushGeometryBatch/GeometryBatch.Flush's
-            // own comments. Unconditional (not gated by UseGeometryBackend):
-            // text (Phase 7) always appends here regardless of that flag.
-            // NOT called from SetScissor (Phase 3: PushScissor/PopScissor's
-            // clip is per-vertex data now, not a GPU-state sync point, so
-            // geometry can accumulate freely across scissor changes) — see
-            // SyncGeometryBeforeSprite for how paint order against sprite
-            // content already committed via SetScissor's OWN sprite-only
-            // flush stays correct anyway.
+            // own comments. NOT called from SetScissor (Phase 3:
+            // PushScissor/PopScissor's clip is per-vertex data, not a
+            // GPU-state sync point, so geometry can accumulate freely
+            // across scissor changes) — see SetScissor's own comment.
             FlushGeometryBatch();
             EndSprite();
         }
@@ -490,46 +455,6 @@ namespace GustUI.Managers
             IsInBatch = false;
         }
 
-        /// <summary>
-        /// Flushes any pending geometry-backend content before queueing NEW
-        /// sprite content (icons, images, still-unmigrated corner blits) —
-        /// called from Draw(texture,...). Unconditional (not gated by
-        /// UseGeometryBackend): text (Phase 7) always appends to the
-        /// geometry batch regardless of that flag, so even in a session
-        /// where it's off, a pending glyph run needs to flush before a
-        /// still-sprite-drawn icon/image commits on top of it. A defensive
-        /// backstop, not the primary sync mechanism: SetScissor still
-        /// flushes geometry on every clip change (see its own comment), so
-        /// in practice this is nearly always a no-op by the time it runs
-        /// (FlushGeometryBatch/GeometryBatch.Flush both early-return on an
-        /// empty batch — cheap). It matters for the cases SetScissor's
-        /// coupling doesn't cover: sprite content drawn AFTER geometry
-        /// content within the SAME clip region (or at the unclipped root),
-        /// where no scissor change happens in between to force the sync —
-        /// without this, such geometry could stay queued past when the
-        /// sprite content it should render BEHIND already committed,
-        /// painting over it.
-        /// </summary>
-        private void SyncGeometryBeforeSprite()
-        {
-            FlushGeometryBatch();
-        }
-
-        internal void DrawString(KeyedSpriteFont font, string text, Vector2 vector2, Color color, int v1, Vector2 zero, float fontScale, SpriteEffects none, float v2)
-        {
-            Ensure.IsTrue(IsInBatch, "IsInBatch");
-            SyncGeometryBeforeSprite();
-            FrameProfiler.CountString();
-            var cache = Resources.StaticResources.FontManager.GetCachedText(font.Key, text, color);
-            if (cache == null)
-            {
-                spriteBatch.DrawString(font.SpriteFont, text, vector2, color, v1, zero, fontScale, none, v2);
-            }
-            else
-            {
-                spriteBatch.Draw(cache, vector2,null, color, 0, Vector2.Zero, fontScale, none, 0);
-            }
-        }
 
         /// <summary>
         /// Rotated-quad draw (KnobElement's pointer, DrawLine/DrawThickLine's
@@ -538,61 +463,28 @@ namespace GustUI.Managers
         /// dest-local-pixel-space convention, UNCHANGED — matching exactly
         /// how DrawLine/DrawThickLine's own geometry branch already does it
         /// (SpriteBatchExtensions.cs), which is screenshot-verified correct.
-        /// The `value` parameter has always been dead (never read, spriteBatch.Draw
-        /// below still hardcodes null for source) — untouched, not this
-        /// change's concern.
+        /// The `value` parameter has always been dead (never read) —
+        /// untouched, not this change's concern.
         /// </summary>
         internal void Draw(Texture2D pixel, Rectangle rectangle, object value, Color color, float angle, Vector2 vector2, SpriteEffects none, int v)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
-            if (UseGeometryBackend)
-            {
-                Rectangle src = new Rectangle(0, 0, pixel.Width, pixel.Height);
-                GeometryBatch.AppendRotatedQuad(pixel, rectangle, src, color, angle, vector2, GetClipRectForGeometry(), null);
-                return;
-            }
-
-            SyncGeometryBeforeSprite();
-            FrameProfiler.CountSprite();
-            spriteBatch.Draw(pixel, rectangle, null, color, angle, vector2, none, v);
-        }
-
-        internal void Draw(Texture2D pixel, Vector2 position, Color color)
-        {
-            Ensure.IsTrue(IsInBatch, "IsInBatch");
-            SyncGeometryBeforeSprite();
-            FrameProfiler.CountSprite();
-            spriteBatch.Draw(pixel, position, color);
+            Rectangle src = new Rectangle(0, 0, pixel.Width, pixel.Height);
+            GeometryBatch.AppendRotatedQuad(pixel, rectangle, src, color, angle, vector2, GetClipRectForGeometry(), null);
         }
 
         internal void Draw(Texture2D pixel, Rectangle rectangle, Color color)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
-            if (UseGeometryBackend)
-            {
-                Rectangle src = new Rectangle(0, 0, pixel.Width, pixel.Height);
-                GeometryBatch.AppendQuad(pixel, rectangle, src, color, GetClipRectForGeometry(), null);
-                return;
-            }
-
-            SyncGeometryBeforeSprite();
-            FrameProfiler.CountSprite();
-            spriteBatch.Draw(pixel, rectangle, color);
+            Rectangle src = new Rectangle(0, 0, pixel.Width, pixel.Height);
+            GeometryBatch.AppendQuad(pixel, rectangle, src, color, GetClipRectForGeometry(), null);
         }
 
         internal void Draw(Texture2D texture, Rectangle rectangle, Rectangle? source, Color color)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
-            if (UseGeometryBackend)
-            {
-                Rectangle src = source ?? new Rectangle(0, 0, texture.Width, texture.Height);
-                GeometryBatch.AppendQuad(texture, rectangle, src, color, GetClipRectForGeometry(), null);
-                return;
-            }
-
-            SyncGeometryBeforeSprite();
-            FrameProfiler.CountSprite();
-            spriteBatch.Draw(texture, rectangle, source, color);
+            Rectangle src = source ?? new Rectangle(0, 0, texture.Width, texture.Height);
+            GeometryBatch.AppendQuad(texture, rectangle, src, color, GetClipRectForGeometry(), null);
         }
 
         // Public clipping API: nested scissors intersect with the enclosing one.

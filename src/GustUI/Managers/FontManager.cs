@@ -18,279 +18,16 @@ namespace GustUI.Managers
 {
     public class FontManager
     {
-        /// <summary>
-        /// Always true as of Phase 7 of the geometry-renderer migration
-        /// ("retire bitmap text, go all-SDF") — TextElement no longer has a
-        /// bitmap fallback (SDF gained outline support, closing the one gap
-        /// bitmap used to cover), so there is no remaining reason to turn
-        /// this off. Kept as a settable property rather than deleted
-        /// outright / inlining `true` at every call site: it's still the
-        /// single flag DrawManager/TextElement check, so a future targeted
-        /// revert (or a test that needs to force it) has one place to do
-        /// so, without resurrecting the old per-(family,size,RenderScale)
-        /// bitmap bake path this default change retires.
-        /// </summary>
-        public static bool UseSdf { get; set; } = true;
-
         GraphicsDevice graphicsDevice;
-        SpriteBatch spriteBatch;
         IContentManager content;
         public FontManager(GraphicsDevice graphicsDevice, IContentManager content)
         {
             this.graphicsDevice = graphicsDevice;
             this.content = content;
-            this.spriteBatch = new SpriteBatch(this.graphicsDevice);
         }
 
-        private readonly Dictionary<string, KeyedSpriteFont> FontCache = new();
-        private readonly Dictionary<FontCacheKey, FontCacheValue> FontWriteCache = new Dictionary<FontCacheKey, FontCacheValue>();
-        private readonly Dictionary<FontCacheKey, int> FontRequestCount = new Dictionary<FontCacheKey, int>();
-        private readonly Dictionary<FontCacheKey, DateTime> FontLastUsed = new Dictionary<FontCacheKey, DateTime>();
-        // IEquatable + explicit hash: without them Dictionary falls back to
-        // reflection-based ValueType equality with boxing on every lookup —
-        // measured at ~0.15 ms per DrawString under interpreted WASM, which
-        // made text the single largest draw cost.
-        internal struct FontCacheKey : IEquatable<FontCacheKey>
-        {
-            internal string FontKey;
-            internal string Text;
-            internal Color color;
-
-            public bool Equals(FontCacheKey other)
-            {
-                return color.PackedValue == other.color.PackedValue
-                    && Text == other.Text
-                    && FontKey == other.FontKey;
-            }
-
-            public override bool Equals(object obj) => obj is FontCacheKey other && Equals(other);
-
-            public override int GetHashCode()
-            {
-                int h = Text != null ? Text.GetHashCode() : 0;
-                h = (h * 397) ^ (FontKey != null ? FontKey.GetHashCode() : 0);
-                h = (h * 397) ^ (int)color.PackedValue;
-                return h;
-            }
-        }
-
-        internal class FontCacheValue
-        {
-            internal Texture2D Texture2D;
-            internal DateTime LastUsed;
-        }
-
-        // Coarse per-frame clock: LastUsed feeds a 10s expiry, so refreshing it
-        // from a value sampled once per ManageCaches call (instead of
-        // DateTime.Now per DrawString) is plenty.
-        private DateTime frameNow = DateTime.Now;
-
-        public Texture2D GetCachedText(string fontKey, string text, Color color)
-        {
-            FontCacheKey key = new FontCacheKey
-            {
-                FontKey = fontKey,
-                Text = text,
-                color = color
-            };
-
-            if (FontWriteCache.TryGetValue(key, out FontCacheValue cached))
-            {
-                cached.LastUsed = frameNow;
-                return cached.Texture2D;
-            }
-
-            if (FontRequestCount.TryGetValue(key, out int count))
-            {
-                FontRequestCount[key] = count + 1;
-            }
-            else
-            {
-                FontRequestCount.Add(key, 0);
-            }
-
-            return null;
-        }
-
-        internal string CacheInfo => $"Fonts Cached: {FontCache.Count}, TRC: {FontRequestCount.Count}, TIC: {FontWriteCache.Count}";
-
-        private DateTime lastClean = DateTime.Now;
-        private DateTime lastManage = DateTime.MinValue;
-        private readonly List<FontCacheKey> scratchKeys = new List<FontCacheKey>();
-
-        internal void ManageCaches()
-        {
-            frameNow = DateTime.Now;
-
-            // Expiry/bake bookkeeping only needs to run a few times a second,
-            // not per frame (the per-frame LINQ over both caches showed up at
-            // ~1.4 ms/frame in the interpreter).
-            if (frameNow - lastManage < TimeSpan.FromMilliseconds(250))
-            {
-                return;
-            }
-
-            lastManage = frameNow;
-
-            scratchKeys.Clear();
-            foreach (var x in FontWriteCache)
-            {
-                if (frameNow - x.Value.LastUsed > TimeSpan.FromSeconds(10))
-                {
-                    scratchKeys.Add(x.Key);
-                }
-            }
-
-            foreach (var e in scratchKeys)
-            {
-                FontWriteCache.Remove(e);
-                FontRequestCount.Remove(e);
-            }
-
-            if (frameNow - lastClean > TimeSpan.FromSeconds(10))
-            {
-                lastClean = frameNow;
-                scratchKeys.Clear();
-                foreach (var x in FontRequestCount)
-                {
-                    if (x.Value < 50)
-                    {
-                        scratchKeys.Add(x.Key);
-                    }
-                }
-
-                foreach (var r in scratchKeys)
-                {
-                    FontRequestCount.Remove(r);
-                }
-            }
-
-            scratchKeys.Clear();
-            foreach (var x in FontRequestCount)
-            {
-                if (x.Value > 50 && !FontWriteCache.ContainsKey(x.Key))
-                {
-                    scratchKeys.Add(x.Key);
-                }
-            }
-
-            foreach (var r in scratchKeys)
-            {
-                var font = LoadFont(r.FontKey);
-                if (font != null)
-                {
-                    var size = font.MeasureString(r.Text);
-                    RenderTarget2D rt = new RenderTarget2D(graphicsDevice, (int)(size.X) + 2, (int)(size.Y) + 2);
-                    graphicsDevice.SetRenderTarget(rt);
-                    graphicsDevice.Clear(Color.Transparent);
-                    spriteBatch.Begin(SpriteSortMode.Deferred);
-                    // Baked in WHITE, never r.color: DrawString's cache-hit path
-                    // (below, and DrawManager.DrawString) draws this texture
-                    // TINTED by the caller's color every frame. Baking the
-                    // color in here as well meant a promoted label's color got
-                    // squared per channel the instant it crossed the 50-draw
-                    // threshold (e.g. a 0.78 gray channel -> 0.78^2 ~= 0.61) -
-                    // visibly dimmer, and fast enough at a high frame rate to
-                    // read as "text loads, then dims a fraction of a second
-                    // later". The texture is a colorless alpha mask; color is
-                    // applied exactly once, at draw time, same as the
-                    // un-cached SpriteFont.DrawString path above it.
-                    spriteBatch.DrawString(font, r.Text, Vector2.Zero, Color.White);
-                    spriteBatch.End();
-                    FontWriteCache.Add(r, new FontCacheValue
-                    {
-                        LastUsed = DateTime.Now,
-                        Texture2D = rt
-                    });
-                }
-            }
-        }
-        private SpriteFont LoadFont(string key)
-        {
-            if (FontCache.TryGetValue(key, out var cachedFont))
-            {
-                return cachedFont.SpriteFont;
-            }
-            return null;
-        }
-        /// <summary>
-        /// On-screen size of <paramref name="text"/> in the given font — the
-        /// same scaled measurement <see cref="Elements.TextElement"/> renders
-        /// with, for consumers that lay labels out themselves (fit/clip/align
-        /// decisions before binding a pooled element).
-        /// </summary>
-        public Vector2 MeasureText(TraitValues.TVFont font, string text)
-        {
-            if (font == null || font.Family == null || string.IsNullOrEmpty(text))
-            {
-                return Vector2.Zero;
-            }
-
-            if (UseSdf)
-            {
-                return LoadSdfFont(font.Family).MeasureString(text, font.Size);
-            }
-
-            var keyedFont = LoadFont(font.Family, font.Size);
-            return keyedFont.SpriteFont.MeasureString(text) * keyedFont.DrawScale;
-        }
-
-        /// <summary>Current DrawManager.RenderScale, rounded to 2 decimals so
-        /// float jitter can't spawn a fresh bake+cache-entry every frame —
-        /// real DPI values are discrete steps (1, 1.25, 1.5, 2, ...), never
-        /// a continuously drifting number. Defaults to 1 if DrawManager
-        /// isn't up yet (defensive only: LoadFont is never actually called
-        /// that early in practice, since it's driven by Draw()).</summary>
-        private static float CurrentBakeRenderScale()
-        {
-            float scale = Resources.StaticResources?.DrawManager != null
-                ? Math.Max(1f, Resources.StaticResources.DrawManager.RenderScale)
-                : 1f;
-            return (float)Math.Round(scale, 2);
-        }
-
-        public KeyedSpriteFont LoadFont(string path, float size)
-        {
-            float renderScale = CurrentBakeRenderScale();
-            var key = $"{path}_{size}_{renderScale}";
-
-            if (FontCache.TryGetValue(key, out var cachedFont))
-            {
-                return cachedFont;
-            }
-
-            // Supersample scales with RenderScale (see GustConstants.
-            // FontBakeSupersample's doc) so the oversampling margin that
-            // keeps text crisp doesn't shrink away on HiDPI displays.
-            float supersample = GustConstants.FontBakeSupersample * renderScale;
-            float drawScale = GustConstants.FontScale / supersample;
-            var bake = TtfFontBaker.Bake(content.ReadAllBytes(path), size / GustConstants.FontScale * supersample, 2048, 2048, new[] { CharacterRange.BasicLatin, new CharacterRange((char)Enum.GetValues(typeof(UIFont.Symbol)).Cast<UIFont.Symbol>().Min(), (char)Enum.GetValues(typeof(UIFont.Symbol)).Cast<UIFont.Symbol>().Max()) });
-
-            var font = bake.CreateSpriteFont(graphicsDevice);
-
-            var keyed = new KeyedSpriteFont { SpriteFont = font, Key = key, DrawScale = drawScale };
-            FontCache.Add(key, keyed);
-
-            return keyed;
-        }
-
-        public class KeyedSpriteFont
-        {
-            public SpriteFont SpriteFont { get; set; }
-            public string Key { get; set; }
-
-            /// <summary>Sprite draw-time scale that cancels this specific
-            /// bake's supersample back out to the intended on-screen size
-            /// (RenderScale-dependent — see LoadFont — so it varies per
-            /// bake, unlike the old fixed GustConstants.EffectiveFontScale
-            /// constant it replaces).</summary>
-            public float DrawScale { get; set; }
-
-            internal Vector2 MeasureString(string consoleText)
-            {
-                return SpriteFont.MeasureString(consoleText);
-            }
-        }
+        /// <summary>SDF font atlases loaded so far, keyed by family — a debug-overlay stat, not load-bearing anywhere.</summary>
+        internal string CacheInfo => $"SDF fonts cached: {SdfFontCache.Count}";
 
         private readonly Dictionary<string, SdfFont> SdfFontCache = new();
 
@@ -370,9 +107,10 @@ namespace GustUI.Managers
             return Array.Empty<CharacterRange>();
         }
 
-        /// <summary>SDF counterpart to <see cref="LoadFont(string, float)"/> —
-        /// see <see cref="SdfBakeEmSize"/> for why this takes no size
-        /// parameter at all. Character coverage is BasicLatin plus whatever
+        /// <summary>Loads (and caches, one bake per family) the SDF atlas for
+        /// <paramref name="path"/> — see <see cref="SdfBakeEmSize"/> for why
+        /// this takes no size parameter at all. Character coverage is
+        /// BasicLatin plus whatever
         /// <see cref="IconRangesFor"/> says this specific font needs — see
         /// its doc for why that's per-font rather than a blanket sweep.</summary>
         public SdfFont LoadSdfFont(string path)
@@ -391,7 +129,10 @@ namespace GustUI.Managers
             return font;
         }
 
-        /// <summary>SDF counterpart to <see cref="MeasureText"/>.</summary>
+        /// <summary>On-screen size of <paramref name="text"/> in the given
+        /// font — the same scaled measurement <see cref="Elements.TextElement"/>
+        /// renders with, for consumers that lay labels out themselves
+        /// (fit/clip/align decisions before binding a pooled element).</summary>
         public Vector2 MeasureSdfText(TraitValues.TVFont font, string text)
         {
             if (font == null || font.Family == null || string.IsNullOrEmpty(text))
@@ -404,11 +145,10 @@ namespace GustUI.Managers
     }
 
     /// <summary>Draw-ready wrapper around an <see cref="SdfFontBakerResult"/>'s
-    /// atlas + glyph table — the SDF counterpart to
-    /// <see cref="FontManager.KeyedSpriteFont"/>. Holds no notion of a target
-    /// pixel size (unlike KeyedSpriteFont, which IS baked at one) since every
-    /// glyph rect/metric here is resolution-independent until a caller scales
-    /// it by (targetPixelSize / EmSize) — see <see cref="MeasureString"/> and
+    /// atlas + glyph table. Holds no notion of a target pixel size — unlike
+    /// the retired bitmap path's per-size bake, every glyph rect/metric here
+    /// is resolution-independent until a caller scales it by
+    /// (targetPixelSize / EmSize) — see <see cref="MeasureString"/> and
     /// DrawManager.DrawSdfString.</summary>
     public class SdfFont
     {

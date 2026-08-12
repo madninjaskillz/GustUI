@@ -49,7 +49,8 @@ public class NativeElement : Element
 
         if (renderTarget != null)
         {
-            Resources.StaticResources.DrawManager.Draw(renderTarget, this.GetActualPosition().AsXna, Color.White);
+            Vector2 pos = this.GetActualPosition().AsXna;
+            Resources.StaticResources.DrawManager.Draw(renderTarget, new Rectangle((int)pos.X, (int)pos.Y, renderTarget.Width, renderTarget.Height), Color.White);
         }
         
         base.Draw();

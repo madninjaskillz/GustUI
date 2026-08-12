@@ -222,11 +222,8 @@ namespace SpriteFontPlus
                             {
                                 // Atlas budget exhausted: drop this glyph's
                                 // PIXELS (not its advance — see above) rather
-                                // than corrupt earlier ones — same silent-cap
-                                // tradeoff TtfFontBaker's fixed 2048x2048
-                                // accepts today (see GustConstants.
-                                // FontBakeSupersample's sibling doc for the
-                                // equivalent bitmap-path budget).
+                                // than corrupt earlier ones — a silent-cap
+                                // tradeoff of the fixed 2048x2048 atlas size.
                                 StbTrueType.stbtt_FreeSDF(sdf, null);
                                 w = 0;
                                 h = 0;

@@ -107,7 +107,7 @@ namespace GustUI.Elements
         /// </summary>
         private static int MeasureTopLevelItemWidth(string text)
         {
-            float textWidth = Resources.StaticResources.FontManager.MeasureText(Resources.StaticResources.Theme.UiFont, text).X;
+            float textWidth = Resources.StaticResources.FontManager.MeasureSdfText(Resources.StaticResources.Theme.UiFont, text).X;
             return Math.Max(MinItemWidth, ItemTextLeftInset + (int)Math.Ceiling(textWidth) + ItemTextRightPadding);
         }
 

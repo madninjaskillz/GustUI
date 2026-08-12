@@ -400,12 +400,13 @@ public class Element : IDisposable
         }
     }
 
-    KeyedSpriteFont font;
+    Managers.SdfFont debugSdfFont;
+    private float DebugFontSize => Resources.StaticResources.Theme.UiFontSmall.Size;
     public virtual void DebugDraw(Color? filled = null)
     {
-        if (font == null)
+        if (debugSdfFont == null)
         {
-            font = Resources.StaticResources.FontManager.LoadFont(Resources.StaticResources.Theme.UiFontSmall.Family, Resources.StaticResources.Theme.UiFontSmall.Size);
+            debugSdfFont = Resources.StaticResources.FontManager.LoadSdfFont(Resources.StaticResources.Theme.UiFontSmall.Family);
         }
         Resources.StaticResources.DrawManager.DrawRectangle(this.GetActualPosition().Rectangle(this.ElementTrait<SizeTrait>().Value()), Color.Red, 1);
         if (filled.HasValue)
@@ -418,12 +419,12 @@ public class Element : IDisposable
         if (Resources.StaticResources.InputManager.GetElementState(this) == InputManager.ElementState.Hovered)
         {
             string ot = this.ElementName + ": " + this.GetRelativePosition() + " / " + this.GetSize();
-            Vector2 dbgpos = this.GetActualPosition().AsXna + this.GetSize().AsXna - font.SpriteFont.MeasureString(ot);
-            Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(0, 0), Color.Black * 0.5f);
-            Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(2, 0), Color.Black * 0.5f);
-            Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(0, 0 + 2), Color.Black * 0.5f);
-            Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(2, 0 + 2), Color.Black * 0.5f);
-            Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(1, 0 + 1), Color.White);
+            Vector2 dbgpos = this.GetActualPosition().AsXna + this.GetSize().AsXna - debugSdfFont.MeasureString(ot, DebugFontSize);
+            Resources.StaticResources.DrawManager.DrawSdfString(debugSdfFont, ot, dbgpos + new Vector2(0, 0), DebugFontSize, Color.Black * 0.5f);
+            Resources.StaticResources.DrawManager.DrawSdfString(debugSdfFont, ot, dbgpos + new Vector2(2, 0), DebugFontSize, Color.Black * 0.5f);
+            Resources.StaticResources.DrawManager.DrawSdfString(debugSdfFont, ot, dbgpos + new Vector2(0, 0 + 2), DebugFontSize, Color.Black * 0.5f);
+            Resources.StaticResources.DrawManager.DrawSdfString(debugSdfFont, ot, dbgpos + new Vector2(2, 0 + 2), DebugFontSize, Color.Black * 0.5f);
+            Resources.StaticResources.DrawManager.DrawSdfString(debugSdfFont, ot, dbgpos + new Vector2(1, 0 + 1), DebugFontSize, Color.White);
         }
         if (this.HasTrait<ChildrenTrait>())
         {
@@ -440,12 +441,13 @@ public class Element : IDisposable
     {
         string ot = this.ElementName + ": " + this.GetRelativePosition() + " / " + this.GetSize();
         Vector2 dbgpos = new Vector2(10+ (depth * 20), top);
-        if (font == null)
+        if (debugSdfFont == null)
         {
-            font = Resources.StaticResources.FontManager.LoadFont(Resources.StaticResources.Theme.UiFontSmall.Family, Resources.StaticResources.Theme.UiFontSmall.Size);
+            debugSdfFont = Resources.StaticResources.FontManager.LoadSdfFont(Resources.StaticResources.Theme.UiFontSmall.Family);
         }
 
-        Rectangle r = new Rectangle((int)dbgpos.X, (int)dbgpos.Y, (int)font.SpriteFont.MeasureString(ot).X, (int)font.SpriteFont.MeasureString(ot).Y);
+        Vector2 measured = debugSdfFont.MeasureString(ot, DebugFontSize);
+        Rectangle r = new Rectangle((int)dbgpos.X, (int)dbgpos.Y, (int)measured.X, (int)measured.Y);
         Color c = Color.White*0.8f;
         MouseState ms = Mouse.GetState();
         if (r.Contains(ms.Position))
@@ -469,11 +471,11 @@ public class Element : IDisposable
             c = Color.Purple;
         }
 
-        Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(0, 0), Color.Black * 0.5f);
-        Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(2, 0), Color.Black * 0.5f);
-        Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(0, 0 + 2), Color.Black * 0.5f);
-        Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(2, 0 + 2), Color.Black * 0.5f);
-        Resources.StaticResources.DrawManager.DrawString(font, ot, dbgpos + new Vector2(1, 0 + 1), c);
+        Resources.StaticResources.DrawManager.DrawSdfString(debugSdfFont, ot, dbgpos + new Vector2(0, 0), DebugFontSize, Color.Black * 0.5f);
+        Resources.StaticResources.DrawManager.DrawSdfString(debugSdfFont, ot, dbgpos + new Vector2(2, 0), DebugFontSize, Color.Black * 0.5f);
+        Resources.StaticResources.DrawManager.DrawSdfString(debugSdfFont, ot, dbgpos + new Vector2(0, 0 + 2), DebugFontSize, Color.Black * 0.5f);
+        Resources.StaticResources.DrawManager.DrawSdfString(debugSdfFont, ot, dbgpos + new Vector2(2, 0 + 2), DebugFontSize, Color.Black * 0.5f);
+        Resources.StaticResources.DrawManager.DrawSdfString(debugSdfFont, ot, dbgpos + new Vector2(1, 0 + 1), DebugFontSize, c);
 
         top = top + 20;
         if (this.HasTrait<ChildrenTrait>())

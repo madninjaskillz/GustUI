@@ -7,75 +7,19 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using static GustUI.Managers.FontManager;
 
 namespace GustUI.Extensions
 {
     internal static class SpriteBatchExtensions
     {
-        private const float BorderFade = 0.1f;
-
-        public static void DrawString(this DrawManager spriteBatch, KeyedSpriteFont font, string text, Vector2 position, Color color, int borderSize)
-        {
-            DrawString(spriteBatch, font, text, position, color, borderSize, null);
-        }
-
-        public static void DrawString(this DrawManager spriteBatch, KeyedSpriteFont font, string text, Vector2 position, Color color, int borderSize, Color? borderColor)
-        {
-            // font.DrawScale, not bare FontScale — the glyph atlas was
-            // baked (RenderScale-dependent) supersample times bigger than
-            // the final on-screen size (FontManager.LoadFont), so this
-            // scale-down exactly cancels that back out to the same net
-            // size while sampling from a higher-detail source bake.
-            float drawScale = font.DrawScale;
-
-            Color outline = borderColor ?? color * BorderFade;
-            for (var x = -borderSize; x <= borderSize; x++)
-            {
-                for (var y = -borderSize; y <= borderSize; y++)
-                {
-                    if (x != 0 || y != 0)
-                    {
-                        spriteBatch.DrawString(
-                            font,
-                            text,
-                            position + new Vector2(x, y),
-                            outline,
-                            0,
-                            Vector2.Zero,
-                            drawScale,
-                            SpriteEffects.None,
-                            1f);
-                    }
-                }
-            }
-
-            spriteBatch.DrawString(font, text, position, color, 0, Vector2.Zero, drawScale, SpriteEffects.None, 1f);
-
-        }
-
         public static void DrawLine(this DrawManager spriteBatch, Vector2 start, Vector2 end, Color color)
         {
             Vector2 edge = end - start;
             float angle = (float)Math.Atan2(edge.Y, edge.X);
             var rect = new Rectangle((int)start.X, (int)start.Y, (int)edge.Length(), 1);
 
-            if (spriteBatch.UseGeometryBackend)
-            {
-                AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
-                spriteBatch.GeometryBatch.AppendRotatedQuad(white.Texture, rect, white.Pixels, color, angle, new Vector2(0, 0), spriteBatch.GetClipRectForGeometry(), null);
-                return;
-            }
-
-            spriteBatch.Draw(Resources.StaticResources.Pixel,
-                rect,
-                null,
-                color,
-                angle,
-                new Vector2(0, 0),
-                SpriteEffects.None,
-                0);
-
+            AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
+            spriteBatch.GeometryBatch.AppendRotatedQuad(white.Texture, rect, white.Pixels, color, angle, new Vector2(0, 0), spriteBatch.GetClipRectForGeometry(), null);
         }
 
         /// <summary>DrawLine with a pixel thickness (rotated filled rect).</summary>
@@ -85,21 +29,8 @@ namespace GustUI.Extensions
             float angle = (float)Math.Atan2(edge.Y, edge.X);
             var rect = new Rectangle((int)start.X, (int)start.Y, (int)edge.Length() + 1, thickness);
 
-            if (spriteBatch.UseGeometryBackend)
-            {
-                AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
-                spriteBatch.GeometryBatch.AppendRotatedQuad(white.Texture, rect, white.Pixels, color, angle, new Vector2(0, thickness / 2f), spriteBatch.GetClipRectForGeometry(), null);
-                return;
-            }
-
-            spriteBatch.Draw(Resources.StaticResources.Pixel,
-                rect,
-                null,
-                color,
-                angle,
-                new Vector2(0, thickness / 2f),
-                SpriteEffects.None,
-                0);
+            AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
+            spriteBatch.GeometryBatch.AppendRotatedQuad(white.Texture, rect, white.Pixels, color, angle, new Vector2(0, thickness / 2f), spriteBatch.GetClipRectForGeometry(), null);
         }
 
         /// <summary>
@@ -142,14 +73,8 @@ namespace GustUI.Extensions
 
         public static void DrawFilledRectangle(this DrawManager spriteBatch, Rectangle rectangle, Color color)
         {
-            if (spriteBatch.UseGeometryBackend)
-            {
-                AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
-                spriteBatch.GeometryBatch.AppendQuad(white.Texture, rectangle, white.Pixels, color, spriteBatch.GetClipRectForGeometry(), null);
-                return;
-            }
-
-            spriteBatch.Draw(Resources.StaticResources.Pixel, rectangle, color);
+            AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
+            spriteBatch.GeometryBatch.AppendQuad(white.Texture, rectangle, white.Pixels, color, spriteBatch.GetClipRectForGeometry(), null);
         }
 
         /// <summary>
@@ -223,10 +148,7 @@ namespace GustUI.Extensions
         /// of its own standalone Texture2D, so a panel's rounded corners can
         /// share a GeometryBatch segment with everything else atlas-packed
         /// (knob dial/ring, toggle pill, etc.) rather than forcing a
-        /// texture-swap boundary. Works identically whether
-        /// UseGeometryBackend is on or off — DrawManager.Draw's 4-arg
-        /// overload (texture, destRect, sourceRect, color) samples the
-        /// SAME packed sub-rect either way, geometry or SpriteBatch.</summary>
+        /// texture-swap boundary.</summary>
         private static AtlasRegion GetCornerDisc(DrawManager spriteBatch, int radius)
         {
             int d = radius * 2;

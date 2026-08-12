@@ -45,24 +45,6 @@ namespace GustUI.Elements
             foregroundTrait = ElementTrait<ForegroundColorTrait>();
         }
 
-        // FontManager.LoadFont builds an interpolated key string per call, so
-        // the resolved font is cached against (family, size) here.
-        private Managers.FontManager.KeyedSpriteFont cachedFont;
-        private string cachedFontFamily;
-        private float cachedFontSize = float.MinValue;
-
-        private Managers.FontManager.KeyedSpriteFont GetFont(string family, float size)
-        {
-            if (cachedFont == null || cachedFontFamily != family || cachedFontSize != size)
-            {
-                cachedFont = Resources.StaticResources.FontManager.LoadFont(family, size);
-                cachedFontFamily = family;
-                cachedFontSize = size;
-            }
-
-            return cachedFont;
-        }
-
         // Word-wrap result cache: wrapping calls MeasureString per word, which
         // is far too expensive to repeat every Draw for static labels. The
         // cache is invalidated whenever the source text, font or wrap width
