@@ -41,10 +41,27 @@ namespace GustUI.TraitValues
     public class TVFillSolidColor : TVFill
     {
         public Color Color { get; set; }
+
+        /// <summary>Optional live-computed alternative to <see cref="Color"/>
+        /// — set via the <c>Func&lt;Color&gt;</c> constructor when a fill
+        /// needs to track something that changes after construction (e.g.
+        /// GustUI.Resources.StaticResources.Theme after a light/dark
+        /// switch) without the owning view rebuilding or re-Setting the
+        /// trait. Draw() reads <see cref="ResolvedColor"/>, not
+        /// <see cref="Color"/>, so this is evaluated fresh every frame.</summary>
+        private readonly Func<Color> colorFunc;
+
+        public Color ResolvedColor => colorFunc != null ? colorFunc() : Color;
+
         public TVFillSolidColor() { }
         public TVFillSolidColor(Color color)
         {
             Color = color;
+        }
+
+        public TVFillSolidColor(Func<Color> colorFunc)
+        {
+            this.colorFunc = colorFunc;
         }
     }
 
@@ -68,6 +85,16 @@ namespace GustUI.TraitValues
 
         public int BorderSize { get; set; } = 1;
 
+        /// <summary>Optional live-computed alternatives to <see cref="Color"/>/
+        /// <see cref="BorderColor"/> — see TVFillSolidColor's matching
+        /// field for why. Draw() reads <see cref="ResolvedColor"/>/
+        /// <see cref="ResolvedBorderColor"/>, evaluated fresh every frame.</summary>
+        private readonly Func<Color> colorFunc;
+        private readonly Func<Color> borderColorFunc;
+
+        public Color ResolvedColor => colorFunc != null ? colorFunc() : Color;
+        public Color? ResolvedBorderColor => borderColorFunc != null ? borderColorFunc() : BorderColor;
+
         public TVFillRoundedColor() { }
 
         public TVFillRoundedColor(Color color, int radius = 0)
@@ -81,6 +108,14 @@ namespace GustUI.TraitValues
             Color = color;
             Radius = radius;
             BorderColor = borderColor;
+            BorderSize = borderSize;
+        }
+
+        public TVFillRoundedColor(Func<Color> colorFunc, int radius, Func<Color> borderColorFunc, int borderSize = 1)
+        {
+            this.colorFunc = colorFunc;
+            Radius = radius;
+            this.borderColorFunc = borderColorFunc;
             BorderSize = borderSize;
         }
     }

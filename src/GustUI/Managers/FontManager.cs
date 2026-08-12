@@ -426,7 +426,20 @@ namespace GustUI.Managers
         /// <summary>Same "line height == the requested pixel size" convention
         /// TtfFontBakerResult.CreateSpriteFont's LineSpacing constructor arg
         /// already uses (not a real ascent+descent+lineGap metric) — kept
-        /// for drop-in parity with the bitmap path's MeasureString callers.</summary>
+        /// for drop-in parity with the bitmap path's MeasureString callers,
+        /// which (via MonoGame's own SpriteFont.MeasureString) DOES split on
+        /// embedded '\n' and multiply height by line count — this one didn't
+        /// (found 2026-08-12: TextElement.Draw()'s own per-line loop measures
+        /// each wrapped line separately via getText()'s wrapCacheLineSizes,
+        /// so on-screen wrapping always rendered correctly; only
+        /// TextElement.CalculatedSize() — which hands the WHOLE wrapped,
+        /// already-'\n'-joined string to this method in one call — silently
+        /// got back a single line's height back for an N-line block. Callers
+        /// that reserve layout space from CalculatedSize() (PreferencesModal's
+        /// row-height sizing) under-reserved for any hint wrapping to more
+        /// than one line, and the next row would overlap it — invisible until
+        /// a hint actually wrapped far enough for the shortfall to clear the
+        /// row gap, e.g. wider text at a taller font size.</summary>
         public Vector2 MeasureString(string text, float targetPixelSize)
         {
             if (string.IsNullOrEmpty(text))
@@ -435,13 +448,23 @@ namespace GustUI.Managers
             }
 
             float scale = targetPixelSize / EmSize;
-            float width = 0f;
-            foreach (char c in text)
+            string[] lines = text.Split('\n');
+            float maxWidth = 0f;
+            foreach (string line in lines)
             {
-                width += TryGetGlyph(c, out var g) ? g.XAdvance * scale : 0f;
+                float width = 0f;
+                foreach (char c in line)
+                {
+                    width += TryGetGlyph(c, out var g) ? g.XAdvance * scale : 0f;
+                }
+
+                if (width > maxWidth)
+                {
+                    maxWidth = width;
+                }
             }
 
-            return new Vector2(width, targetPixelSize);
+            return new Vector2(maxWidth, targetPixelSize * lines.Length);
         }
     }
 }

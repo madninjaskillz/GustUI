@@ -90,6 +90,23 @@ namespace SpriteFontPlus
         /// padding border maps to exactly the 0..255 byte range.</summary>
         public const float PixelDistScale = (float)OnEdgeValue / Padding;
 
+        /// <summary>Gap, in atlas pixels, left between adjacent glyph cells
+        /// by the shelf packer below (both between glyphs on the same shelf
+        /// and between shelf rows) — separate from <see cref="Padding"/>,
+        /// which is baked INTO each glyph's own bitmap. DrawManager.
+        /// DrawSdfString draws through a null SamplerState (MonoGame/XNA
+        /// default: LinearClamp, bilinear), and this atlas is never
+        /// mipmapped — so any single sampled pixel can reach at most 1 texel
+        /// past the requested src rect edge. A gap of 1 (this constant's
+        /// value before 2026-08-12) left no margin for that reach: whichever
+        /// glyph a tall neighbor happened to pack directly below could bleed
+        /// a sliver of its own ink into the glyph above it. Found via 't' in
+        /// Theme.UiFont ("segoeuisl.ttf") visibly dipping below its true
+        /// baseline in SDF mode only — baked metrics and DrawSdfString's own
+        /// Rectangle math both checked out byte-for-byte identical to 'e'/
+        /// 's' at draw time, isolating the bug to sampling, not geometry.</summary>
+        private const int AtlasGlyphGap = 2;
+
         public unsafe static SdfFontBakerResult Bake(byte[] ttf, float emSize, int bitmapWidth, int bitmapHeight,
             IEnumerable<CharacterRange> characterRanges)
         {
@@ -195,7 +212,7 @@ namespace SpriteFontPlus
                             if (penX + w > bitmapWidth)
                             {
                                 penX = 0;
-                                penY += shelfHeight + 1;
+                                penY += shelfHeight + AtlasGlyphGap;
                                 shelfHeight = 0;
                                 glyphX = penX;
                                 glyphY = penY;
@@ -225,7 +242,7 @@ namespace SpriteFontPlus
                                 }
 
                                 StbTrueType.stbtt_FreeSDF(sdf, null);
-                                penX += w + 1;
+                                penX += w + AtlasGlyphGap;
                                 shelfHeight = Math.Max(shelfHeight, h);
                             }
                         }

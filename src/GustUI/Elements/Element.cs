@@ -549,9 +549,18 @@ public class Element : IDisposable
 
     internal void MoveToFront()
     {
-
-        this.Depth = Resources.StaticResources.RootWindow.Children.Items.Any() ? Resources.StaticResources.RootWindow.Children.Items.Max(x => x.Depth) + 1 : 0;
-
+        // Excludes TooltipElement: its shared instance sits permanently in
+        // RootWindow.Children (Hide() only toggles visibility, never
+        // detaches it) at a fixed depth of 1,000,000 — the highest tier in
+        // the app, above popups (500,000) and modals. Without this
+        // exclusion, the FIRST tooltip shown anywhere in the session
+        // poisons every future MoveToFront() call (modal spawn, drag-to-
+        // front) into jumping above the tooltip tier and, worse, above the
+        // popup tier — a reopened modal would then bury its own dropdown
+        // popups behind itself, since those draw at the fixed PopupDepth
+        // rather than via MoveToFront.
+        var candidates = Resources.StaticResources.RootWindow.Children.Items.Where(x => !(x is TooltipElement));
+        this.Depth = candidates.Any() ? candidates.Max(x => x.Depth) + 1 : 0;
     }
 
     internal void handleStopDrag(TVEventArgs x)
@@ -599,7 +608,22 @@ public class Element : IDisposable
     }
     public bool IsMouseOver()
     {
-        return IsMouseOver(Mouse.GetState().Position.ToVector2());
+        // InputManager.CurrentMouseState, NOT a fresh Mouse.GetState() —
+        // that's the raw, undivided physical-pixel position; CurrentMouseState
+        // is the one already divided by InputManager.MouseScale (DesktopGL's
+        // DPI compensation, see EzmuzeStudioGame.SyncDevicePixelRatio). Every
+        // element's own bounds (PositionTrait/SizeTrait) live in that same
+        // divided LOGICAL space, so comparing them against the raw physical
+        // position silently drifts apart at any DPI scale other than 1 — the
+        // drift grows with distance from the origin, so elements near (0,0)
+        // still read correctly while ones further down/right increasingly
+        // don't. Invisible for years at DPI scale 1 (physical == logical
+        // numerically); surfaced 2026-08-12 as FruitPopupMenu's outside-click
+        // dismiss firing on genuine clicks inside a tall dropdown — the
+        // popup's own IsMouseOver() call here disagreed with the click that
+        // just landed on one of its own lower rows and killed itself first.
+        MouseState scaled = Resources.StaticResources.InputManager.CurrentMouseState;
+        return IsMouseOver(new Vector2(scaled.X, scaled.Y));
     }
     public bool IsMouseOver(Vector2 position)
     {

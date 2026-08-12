@@ -198,8 +198,26 @@ namespace GustUI.Elements
             restPosition = ElementTrait<PositionTrait>().Value();
         }
 
+        /// <summary>Minimum inset between a modal's chrome (title bar,
+        /// edges, footer) and its content (design-guide.md §3 — modals
+        /// carry at least this much margin; nested containers within that
+        /// content are exempt, since the outer inset already separates them
+        /// from the modal edge).</summary>
+        private const float ContentMargin = 12f;
+
         private void Setup()
         {
+            // Same fix as FullScreenModalElement/FruitMenuElement: a view
+            // rebuild (Stage.Clear, ezmuze-studio) kills every non-chrome
+            // window child, which used to include an open Preferences/About
+            // dialog as collateral damage of an unrelated sequencer rebuild
+            // (e.g. adding a channel while the dialog was open) — silently
+            // closing it and abandoning any dropdown it had open. Explicit
+            // closes (the Close button, Esc) still work: they call Kill()
+            // directly, which IsChrome does not intercept — it only exempts
+            // this element from the automated Stage.Clear sweep.
+            IsChrome = true;
+
             Set<BackgroundFillTrait>(new TVFillSimpleGradient(BodyFillTop, BodyFillBottom, Direction.Vertically));
             var size = this.GetSize();
             Set<BorderFillTrait>(new TVBorder9Grid());
@@ -207,11 +225,10 @@ namespace GustUI.Elements
 
             float contentHeight = content is TextElement textElement ? textElement.CalculatedSize().Y : content.GetSize().Y;
             float contentWidth = content is TextElement tx ? tx.CalculatedSize().X : content.GetSize().X;
-            float buttonHeight = (this.buttons.Count > 0 ? 80 : 10);
+            float buttonHeight = (this.buttons.Count > 0 ? 80 : ContentMargin);
 
-
-            float calcHeight = 80 + contentHeight + buttonHeight;
-            float calcWidth = 20 + contentWidth;
+            float calcHeight = 40 + ContentMargin + contentHeight + ContentMargin + buttonHeight;
+            float calcWidth = contentWidth + ContentMargin * 2;
             size = new TVVector(calcWidth, calcHeight);
             titleBarElement.Set<SizeTrait>(new TVVector(size.X, 40));
 
@@ -253,9 +270,11 @@ namespace GustUI.Elements
             {
                 float contentHeight = content is TextElement textElement ? textElement.CalculatedSize().Y : content.GetSize().Y;
                 float contentWidth = content is TextElement tx ? tx.CalculatedSize().X : content.GetSize().X;
-                float buttonHeight = (this.buttons.Count > 0 ? 80 : 10);
+                float buttonHeight = (this.buttons.Count > 0 ? 80 : ContentMargin);
 
-                this.Set<SizeTrait>(new TVVector(contentWidth, 40 + contentHeight + buttonHeight));
+                this.Set<SizeTrait>(new TVVector(
+                    contentWidth + ContentMargin * 2,
+                    40 + ContentMargin + contentHeight + ContentMargin + buttonHeight));
             }
 
             var size = this.GetSize();
@@ -446,7 +465,11 @@ namespace GustUI.Elements
             }
 
             //content.Set<PositionTrait>(new TVVector((size.X / 2f) - (content.GetSize().X / 2f), (size.Y / 2f) - (content.GetSize().Y / 2f)));
-            content.Set<PositionTrait>(new TVVector((size.X / 2f) - (content.GetSize().X / 2f), 40));
+            // X centering falls out of the size calc above already including
+            // ContentMargin on both sides (design-guide.md §3): size.X is
+            // contentWidth + 2*margin, so (size.X/2) - (contentWidth/2)
+            // resolves to exactly margin either side.
+            content.Set<PositionTrait>(new TVVector((size.X / 2f) - (content.GetSize().X / 2f), 40 + ContentMargin));
 
         }
 

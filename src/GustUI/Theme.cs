@@ -71,17 +71,18 @@ namespace GustUI
     {
         private const float NineGridOpacity = 0.25f;
 
-        // ---- Typography scale (design-guide.md §2, revised 2026-08-11 — the
-        // old 12/24/48 three-tier scale ran too small at the bottom and too
-        // large at the top). Field NAMES are kept stable (UiFontSmall/UiFont/
-        // UiFontLarge) so the many existing call sites across GustUI/Ezmuze
-        // don't need a rename sweep; only the SIZES change, plus two new
-        // intermediate tiers for finer hierarchy.
-        public TVFont UiFontSmall = new() { Family = "segoeuisl.ttf", Size = 14, Border = 0 };      // caption
-        public TVFont UiFontSecondary = new() { Family = "segoeuisl.ttf", Size = 18, Border = 0 };  // secondary/list-row/tooltip
+        // ---- Typography scale (design-guide.md §2, revised 2026-08-12 — the
+        // 14/18/24/30/38 scale from the previous day's revision still ran too
+        // small at the bottom and too large at the top; narrowed toward the
+        // 24 anchor to 16/20/24/28/32, an even 4-step arithmetic progression).
+        // Field NAMES are kept stable (UiFontSmall/UiFont/UiFontLarge) so the
+        // many existing call sites across GustUI/Ezmuze don't need a rename
+        // sweep; only the SIZES change.
+        public TVFont UiFontSmall = new() { Family = "segoeuisl.ttf", Size = 16, Border = 0 };      // caption
+        public TVFont UiFontSecondary = new() { Family = "segoeuisl.ttf", Size = 20, Border = 0 };  // secondary/list-row/tooltip
         public TVFont UiFont = new() { Family = "segoeuisl.ttf", Size = 24, Border = 0 };            // body (unchanged anchor size)
-        public TVFont UiFontSubtitle = new() { Family = "segoeuisl.ttf", Size = 30, Border = 0 };    // panel/modal sub-titles
-        public TVFont UiFontLarge = new() { Family = "segoeuisl.ttf", Size = 38, Border = 0 };       // top-level section headers only
+        public TVFont UiFontSubtitle = new() { Family = "segoeuisl.ttf", Size = 28, Border = 0 };    // panel/modal sub-titles
+        public TVFont UiFontLarge = new() { Family = "segoeuisl.ttf", Size = 32, Border = 0 };       // top-level section headers only
 
         /// <summary>Segoe UI Bold (segoeuib.ttf) — the app's ONLY other font
         /// weight (everything else is Semilight): titles/headers that need

@@ -561,15 +561,26 @@ namespace GustUI.Managers
             Matrix projection = Matrix.CreateOrthographicOffCenter(0, viewport.Width, viewport.Height, 0, 0, 1);
             sdfEffect.Parameters["MatrixTransform"].SetValue(scaleMatrix * projection);
 
-            // AA band width, in normalized (0..1) distance-fraction units,
+            // AA band width, in normalized (0..1) distance-fraction units —
             // sized so the transition spans ~1 REAL screen pixel regardless
             // of how much the atlas is being magnified/minified for this
             // particular draw — see SdfText.fx's header for why this can't
             // just be a shader constant (no derivatives at the Reach/9.1
             // feature level, so there's no ddx/ddy to derive it on-GPU).
+            // The literal "1 physical pixel" band that formula alone produces
+            // reads visibly THINNER/softer than the bitmap path at typical
+            // UI text sizes (found 2026-08-12, direct SDF-vs-bitmap
+            // screenshot comparison at UiFontSmall=16 over EmSize=64's heavy
+            // ~4x minification): a full-pixel-wide linear ramp swallows most
+            // of a thin stroke's own width before any of it reaches full
+            // opacity. The 0.35 factor is an empirically-tuned correction,
+            // not a re-derivation — chosen by comparing crops against the
+            // bitmap reference until stroke weight matched, then re-checked
+            // at UiFontLarge=32 (near-native, minimal minification) to
+            // confirm it doesn't introduce visible aliasing there either.
             float finalScale = (pixelSize / sdfFont.EmSize) * RenderScale;
             float smoothing = MathHelper.Clamp(
-                0.5f * SdfFontBaker.OnEdgeValue / (255f * SdfFontBaker.Padding * finalScale),
+                0.5f * SdfFontBaker.OnEdgeValue / (255f * SdfFontBaker.Padding * finalScale) * 0.35f,
                 0.005f, 0.25f);
             sdfEffect.Parameters["Smoothing"].SetValue(smoothing);
 
@@ -586,13 +597,31 @@ namespace GustUI.Managers
 
                 if (g.Width > 0 && g.Height > 0)
                 {
-                    Rectangle dest = new Rectangle(
-                        (int)Math.Round(cursorX + g.XOffset * glyphScale),
-                        (int)Math.Round(position.Y + g.YOffset * glyphScale),
-                        Math.Max(1, (int)Math.Round(g.Width * glyphScale)),
-                        Math.Max(1, (int)Math.Round(g.Height * glyphScale)));
+                    // Vector2 position + float scale, NOT an integer Rectangle
+                    // (found 2026-08-12: the previous (int)Math.Round() on
+                    // each glyph's dest.X/dest.Y snapped every glyph to the
+                    // nearest LOGICAL pixel independently, BEFORE the
+                    // RenderScale transform below multiplies it out — at 1x
+                    // that's up to half a pixel of jitter per glyph, easy to
+                    // miss; at 400% DPI it's up to 2 PHYSICAL pixels, and
+                    // since each glyph's sub-pixel remainder rounds
+                    // independently, different letters snap to different
+                    // relative offsets — "every character sits at a
+                    // different position", worse the taller/wider the glyph
+                    // (so most visible on ascenders like 'd' and detached
+                    // features like 'i's dot). The bitmap path never had this
+                    // bug: it hands the whole string to MonoGame's own
+                    // SpriteFont.DrawString, which positions every glyph in
+                    // continuous float space and lets the SAME transform
+                    // that already handles RenderScale rasterize it — no
+                    // separate, earlier rounding step to introduce drift.
+                    // SDF doesn't need pixel-snapping to look crisp (that's
+                    // the technique's whole point), so this brings it in
+                    // line with the same float-position, GPU-rasterizes-the-
+                    // final-transform model.
+                    Vector2 destPos = new Vector2(cursorX + g.XOffset * glyphScale, position.Y + g.YOffset * glyphScale);
                     Rectangle src = new Rectangle(g.X, g.Y, g.Width, g.Height);
-                    spriteBatch.Draw(sdfFont.Atlas, dest, src, color);
+                    spriteBatch.Draw(sdfFont.Atlas, destPos, src, color, 0f, Vector2.Zero, glyphScale, SpriteEffects.None, 0f);
                 }
 
                 cursorX += g.XAdvance * glyphScale;
