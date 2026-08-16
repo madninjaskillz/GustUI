@@ -29,16 +29,17 @@ namespace GustUI.Elements
         // below it reads as "not there" (the "modal title bars have become
         // somewhat invisible" regression) — a subtle top-lit gradient plus
         // an accent underline gives the bar its own presence without going
-        // back to the old saturated-primary-color look. A faint accent wash
-        // (2026-08-16, design-guide.md §9) blended into that same neutral
-        // gradient — 8% at the top fading to nothing by the bottom, where
-        // the underline already carries the full-strength accent — nudges
-        // the bar a little further from "not there" without reintroducing
-        // a colored bar.
+        // back to the old saturated-primary-color look. An accent wash
+        // (2026-08-16, design-guide.md §9; strengthened same day — the
+        // first pass at 8%/0% read as too subtle to register) blended into
+        // that same neutral gradient — 18% at the top, still fading to a
+        // lighter 5% by the bottom where the underline carries the accent
+        // at full strength — nudges the bar further from "not there"
+        // without reintroducing a fully colored bar.
         // Live Theme reads (not cached), so a title bar built after a theme
         // switch (design-guide.md §1) picks up the current palette.
-        private static Color BarFillTop => Color.Lerp(Resources.StaticResources.Theme.SurfaceRaised, Resources.StaticResources.Theme.AccentSelection, 0.08f);
-        private static Color BarFillBottom => Resources.StaticResources.Theme.SurfaceHeader;
+        private static Color BarFillTop => Color.Lerp(Resources.StaticResources.Theme.SurfaceRaised, Resources.StaticResources.Theme.AccentSelection, 0.18f);
+        private static Color BarFillBottom => Color.Lerp(Resources.StaticResources.Theme.SurfaceHeader, Resources.StaticResources.Theme.AccentSelection, 0.05f);
         private static Color AccentUnderline => Resources.StaticResources.Theme.AccentSelection;
         private static Color TitleText => Resources.StaticResources.Theme.BodyText;
         private static Color CloseHoverFill => Resources.StaticResources.Theme.AccentMuteOn;
