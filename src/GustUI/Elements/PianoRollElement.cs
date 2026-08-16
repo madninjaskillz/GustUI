@@ -50,8 +50,6 @@ namespace GustUI.Elements
                    typeof(OnMousePress), typeof(OnMouseButtonHeldDown), typeof(OnMouseRelease))]
     public class PianoRollElement : Element
     {
-        private static Texture2D pixel;
-
         /// <summary>Notes to draw (host-owned; replaced/edited after model changes).</summary>
         public List<PianoRollNoteView> Notes = new List<PianoRollNoteView>();
 
@@ -93,17 +91,6 @@ namespace GustUI.Elements
         public Color BendHandleColor = new Color(255, 210, 120);
         public Color PlayheadColor = new Color(255, 90, 90);
 
-        private Texture2D Pixel()
-        {
-            if (pixel == null)
-            {
-                pixel = new Texture2D(Resources.StaticResources.GraphicsDevice, 1, 1);
-                pixel.SetData(new[] { Color.White });
-            }
-
-            return pixel;
-        }
-
         public float XForBeat(double beats, float width)
             => BeatsVisible <= 0 ? 0f : (float)(beats / BeatsVisible * width);
 
@@ -123,7 +110,6 @@ namespace GustUI.Elements
                 return;
             }
 
-            Texture2D px = Pixel();
             int x0 = (int)pos.X;
             int y0 = (int)pos.Y;
             manager.DrawFilledRectangle(new Rectangle(x0, y0, width, height), BackColor);
@@ -178,12 +164,12 @@ namespace GustUI.Elements
             // ---- notes ----
             foreach (PianoRollNoteView note in Notes)
             {
-                DrawNote(manager, px, note, x0, y0, width, height, 1f);
+                DrawNote(manager, note, x0, y0, width, height, 1f);
             }
 
             if (GhostNote != null)
             {
-                DrawNote(manager, px, GhostNote, x0, y0, width, height, 0.55f);
+                DrawNote(manager, GhostNote, x0, y0, width, height, 0.55f);
             }
 
             // ---- playhead ----
@@ -196,7 +182,7 @@ namespace GustUI.Elements
             base.Draw();
         }
 
-        private void DrawNote(Managers.DrawManager manager, Texture2D px, PianoRollNoteView note,
+        private void DrawNote(Managers.DrawManager manager, PianoRollNoteView note,
             int x0, int y0, int width, int height, float alpha)
         {
             int left = x0 + (int)XForBeat(note.StartBeats, width);

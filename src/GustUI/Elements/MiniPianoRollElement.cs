@@ -42,8 +42,6 @@ namespace GustUI.Elements
     [ElementTraits(typeof(PositionTrait), typeof(SizeTrait))]
     public class MiniPianoRollElement : Element
     {
-        private static Texture2D pixel;
-
         /// <summary>Notes to draw, in ONE tile's beat-local coordinates
         /// (host-owned; replaced/edited after model changes).</summary>
         public List<MiniRollNote> Notes { get; } = new List<MiniRollNote>();
@@ -87,11 +85,10 @@ namespace GustUI.Elements
             if (totalWidth >= 1 && height >= 2 && Notes.Count > 0 && BeatsVisible > 0)
             {
                 var manager = Resources.StaticResources.DrawManager;
-                Texture2D px = Pixel();
 
                 if (BackColor.A > 0)
                 {
-                    manager.Draw(px, new Rectangle((int)pos.X, (int)pos.Y, totalWidth, height), BackColor);
+                    manager.DrawFilledRectangle(new Rectangle((int)pos.X, (int)pos.Y, totalWidth, height), BackColor);
                 }
 
                 int tiles = Math.Max(1, TileCount);
@@ -141,23 +138,12 @@ namespace GustUI.Elements
                             (int)pos.Y + Math.Max(0, height - noteHeight));
 
                         float alpha = 0.4f + 0.6f * MathHelper.Clamp(note.Velocity, 0f, 1f);
-                        manager.Draw(px, new Rectangle(left, top, noteWidth, noteHeight), NoteColor * alpha);
+                        manager.DrawFilledRectangle(new Rectangle(left, top, noteWidth, noteHeight), NoteColor * alpha);
                     }
                 }
             }
 
             base.Draw();
-        }
-
-        private static Texture2D Pixel()
-        {
-            if (pixel == null)
-            {
-                pixel = new Texture2D(Resources.StaticResources.GraphicsDevice, 1, 1);
-                pixel.SetData(new[] { Color.White });
-            }
-
-            return pixel;
         }
     }
 }

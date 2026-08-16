@@ -136,6 +136,13 @@ namespace GustUI.Managers
             flatEffect.Parameters["RenderScale"].SetValue(RenderScale);
 
             textEffect.Parameters["MatrixTransform"].SetValue(matrixTransform);
+            // Now genuinely needed (2026-08-13, SdfText.fx clip-rect fix):
+            // ScreenPos re-derives physical-pixel position the same way
+            // flatEffect's RenderScale above does, for the SAME reason (the
+            // pixel shader can't read SV_Position under Reach) — SdfText.fx
+            // previously had no RenderScale parameter at all since its pixel
+            // shader never used a screen-space position for anything.
+            textEffect.Parameters["RenderScale"].SetValue(RenderScale);
             // Smoothing/BorderWidth/BorderColor are NOT set here — they vary
             // per text segment (that's exactly why a font-size/border change
             // forces a new segment) and GeometryBatch.Flush sets them itself
@@ -304,7 +311,107 @@ namespace GustUI.Managers
             }
 
             FrameProfiler.End(FrameProfiler.Bucket.DrawDebug);
+            DrawTelemetryOverlay();
             End();
+        }
+
+        /// <summary>
+        /// The Telemetry HUD (design-guide.md-adjacent debug tooling, not a
+        /// normal app view): a 10-second rolling line graph of total
+        /// per-frame instrumented CPU time, top-right, plus a live table of
+        /// the top tags by total self-time — <see cref="Managers.Telemetry"/>'s
+        /// own doc comment covers the tag/exclusive-time model this reads
+        /// from. Hand-drawn directly here (not a GustUI Element) for the
+        /// same reason the FPS/console debug block above is: it needs to
+        /// render on top of literally everything, every frame, regardless
+        /// of which view/modal is currently in the element tree.
+        /// </summary>
+        private void DrawTelemetryOverlay()
+        {
+            if (!Telemetry.OverlayVisible)
+            {
+                return;
+            }
+
+            if (debugFont == null)
+            {
+                debugFont = Resources.StaticResources.FontManager.LoadSdfFont(Resources.StaticResources.Theme.UiFontSmall.Family);
+            }
+
+            const int width = 340;
+            const int graphHeight = 90;
+            const int rowHeight = 16;
+            const int topN = 6;
+            const int padding = 8;
+            const float fontSize = 13f;
+
+            List<Telemetry.TagStats> stats = Telemetry.GetAllStats();
+            stats.Sort((a, b) => b.TotalMs.CompareTo(a.TotalMs));
+            int rows = Math.Min(topN, stats.Count);
+            int height = padding * 3 + 16 + graphHeight + Math.Max(rows, 1) * rowHeight;
+
+            float windowWidth = Resources.StaticResources.RootWindow.GetSize().X;
+            var origin = new Vector2(windowWidth - width - 8, 48);
+            var panelRect = new Rectangle((int)origin.X, (int)origin.Y, width, height);
+
+            SpriteBatchExtensions.DrawFilledRectangle(this, panelRect, new Color(10, 10, 14) * 0.88f);
+            SpriteBatchExtensions.DrawRectangle(this, panelRect, new Color(70, 70, 84), 1);
+            DrawSdfString(debugFont, "CPU telemetry — last 10s", origin + new Vector2(padding, padding - 2), fontSize, Color.White);
+
+            var graphRect = new Rectangle((int)origin.X + padding, (int)origin.Y + padding + 16, width - padding * 2, graphHeight);
+            SpriteBatchExtensions.DrawFilledRectangle(this, graphRect, new Color(4, 4, 6) * 0.7f);
+
+            var samples = new List<(double TimeSeconds, float TotalMs)>(Telemetry.RecentSamples(10.0));
+            if (samples.Count > 1)
+            {
+                float maxMs = 4f; // floor so a near-idle graph isn't all noise
+                foreach ((double _, float ms) in samples)
+                {
+                    if (ms > maxMs)
+                    {
+                        maxMs = ms;
+                    }
+                }
+
+                double newestT = samples[0].TimeSeconds;
+                Vector2 previous = default;
+                bool havePrevious = false;
+
+                // Samples come back newest-first; walk oldest-first so the
+                // line draws left (10s ago) to right (now).
+                for (int i = samples.Count - 1; i >= 0; i--)
+                {
+                    (double t, float ms) = samples[i];
+                    float age = (float)(newestT - t);
+                    float x = graphRect.Right - MathHelper.Clamp(age / 10f, 0f, 1f) * graphRect.Width;
+                    float y = graphRect.Bottom - MathHelper.Clamp(ms / maxMs, 0f, 1f) * graphRect.Height;
+                    var point = new Vector2(x, y);
+                    if (havePrevious)
+                    {
+                        SpriteBatchExtensions.DrawLine(this, previous, point, Resources.StaticResources.Theme.AccentSelection);
+                    }
+
+                    previous = point;
+                    havePrevious = true;
+                }
+
+                DrawSdfString(debugFont, $"{maxMs:0}ms", new Vector2(graphRect.Right - 38, graphRect.Top + 2), 11f, Color.White * 0.6f);
+            }
+
+            float rowY = origin.Y + padding + 16 + graphHeight + 6;
+            if (rows == 0)
+            {
+                DrawSdfString(debugFont, "(no tagged sections yet)", new Vector2(origin.X + padding, rowY), fontSize, Color.White * 0.6f);
+            }
+            else
+            {
+                for (int i = 0; i < rows; i++)
+                {
+                    Telemetry.TagStats s = stats[i];
+                    string line = $"{s.Tag}  {s.TotalMs:0.0}ms  x{s.Calls}  ~{s.AvgMs:0.000}ms";
+                    DrawSdfString(debugFont, line, new Vector2(origin.X + padding, rowY + i * rowHeight), fontSize, Color.White * 0.9f);
+                }
+            }
         }
 
         private void Clear(Color color)
@@ -643,6 +750,84 @@ namespace GustUI.Managers
             Begin();
         }
 
+        // A single "big triangle" covering the whole clip space (-1,-1) to
+        // (3,-1) to (-1,3) — the standard fullscreen-pass trick: it covers
+        // every pixel of whatever viewport is bound (same as a quad would)
+        // with one fewer vertex and no diagonal seam, at the cost of some
+        // wasted rasterization outside the visible area that the GPU clips
+        // for free. UVs run 0..1 across the visible region the same way a
+        // quad's would (the extra corner UVs run to 2/-1, simply never
+        // sampled since they land outside the clipped/visible triangle).
+        private static readonly VertexPositionTexture[] fullScreenTriangle =
+        {
+            new VertexPositionTexture(new Vector3(-1, 1, 0), new Vector2(0, 0)),
+            new VertexPositionTexture(new Vector3(3, 1, 0), new Vector2(2, 0)),
+            new VertexPositionTexture(new Vector3(-1, -3, 0), new Vector2(0, 2)),
+        };
+
+        /// <summary>
+        /// Draws <paramref name="effect"/>'s current technique over one
+        /// fullscreen triangle — the primitive a custom multi-uniform shader
+        /// effect (arbitrary iTime/resolution/texture-array parameters, unlike
+        /// GeometryBatch's fixed flat/text effects) needs to cover a target
+        /// with. Same End()/raw-draw/Begin() shape as <see cref="DrawTriangles"/>:
+        /// caller must already be inside a Begin()/End() batch, and sets the
+        /// effect's own scalar/vector parameters BEFORE calling this — this
+        /// method only manages the render target, one optional input
+        /// texture, and issues the draw; it knows nothing about what a
+        /// specific effect's parameters mean.
+        ///
+        /// <paramref name="inputTexture"/> (optional — many fullscreen
+        /// effects have none) is bound to texture slot 0 AFTER
+        /// <c>pass.Apply()</c>, not before — the same GOTCHA
+        /// <see cref="Rendering.GeometryBatch.Flush"/> already documents on
+        /// this KNI DesktopGL target: Apply() resets texture/sampler
+        /// bindings for an effect with its own declared <c>sampler</c>
+        /// object, so binding earlier silently samples fully transparent.
+        ///
+        /// <paramref name="target"/> is set as the render target for the
+        /// duration of this call and the PREVIOUS target is restored
+        /// afterward — null draws to whatever was already bound (typically
+        /// the backbuffer during normal DrawLoop traversal), a real
+        /// RenderTarget2D redirects there and back (e.g. an intermediate
+        /// pass another effect will sample from as a texture next). No
+        /// explicit Clear: the triangle covers every pixel of the bound
+        /// viewport, so the pixel shader's own output already replaces the
+        /// target's entire prior contents.
+        /// </summary>
+        public void DrawFullScreenEffect(Effect effect, RenderTarget2D target, Texture2D inputTexture = null, Texture2D inputTexture2 = null)
+        {
+            Ensure.IsTrue(IsInBatch, "IsInBatch");
+            End();
+
+            GraphicsDevice device = Resources.StaticResources.GraphicsDevice;
+            RenderTarget2D previousTarget = currentTarget;
+            SetRenderTarget(target);
+            device.BlendState = BlendState.Opaque;
+            device.RasterizerState = RasterizerState.CullNone;
+            device.DepthStencilState = DepthStencilState.None;
+
+            foreach (EffectPass pass in effect.CurrentTechnique.Passes)
+            {
+                pass.Apply();
+                if (inputTexture != null)
+                {
+                    device.Textures[0] = inputTexture;
+                    device.SamplerStates[0] = SamplerState.LinearClamp;
+                }
+                if (inputTexture2 != null)
+                {
+                    device.Textures[1] = inputTexture2;
+                    device.SamplerStates[1] = SamplerState.LinearClamp;
+                }
+
+                device.DrawUserPrimitives(PrimitiveType.TriangleList, fullScreenTriangle, 0, 1);
+            }
+
+            SetRenderTarget(previousTarget);
+            Begin();
+        }
+
         private Effect sdfEffect;
 
         /// <summary>Border-free overload — see the full overload below.</summary>
@@ -687,32 +872,42 @@ namespace GustUI.Managers
             }
 
             // AA band width, in normalized (0..1) distance-fraction units —
-            // sized so the transition spans ~1 REAL screen pixel regardless
-            // of how much the atlas is being magnified/minified for this
-            // particular draw — see SdfText.fx's header for why this can't
-            // just be a shader constant (no derivatives at the Reach/9.1
-            // feature level, so there's no ddx/ddy to derive it on-GPU).
-            // The literal "1 physical pixel" band that formula alone produces
-            // reads visibly THINNER/softer than the retired bitmap path at
-            // typical UI text sizes (found 2026-08-12, direct SDF-vs-bitmap
-            // screenshot comparison at UiFontSmall=16 over EmSize=64's heavy
-            // ~4x minification): a full-pixel-wide linear ramp swallows most
-            // of a thin stroke's own width before any of it reaches full
-            // opacity. The 0.35 factor is an empirically-tuned correction,
-            // not a re-derivation — chosen by comparing crops against the
-            // bitmap reference until stroke weight matched, then re-checked
-            // at UiFontLarge=32 (near-native, minimal minification) to
-            // confirm it doesn't introduce visible aliasing there either.
+            // sized so the transition spans a fixed PHYSICAL pixel count
+            // regardless of how much the atlas is being magnified/minified
+            // for this particular draw — see SdfText.fx's header for why
+            // this can't just be a shader constant (no derivatives at the
+            // Reach/9.1 feature level, so there's no ddx/ddy to derive it
+            // on-GPU). Working through the unit conversion (normalized
+            // distance-fraction -> bake texels via OnEdgeValue/Padding ->
+            // physical pixels via finalScale) shows every scale-dependent
+            // term cancels exactly: the full ramp's PHYSICAL pixel width
+            // reduces to precisely AaBandPhysicalPixels below, independent
+            // of pixelSize/EmSize/RenderScale. That constant was 1.0 when
+            // this formula was first written ("spans ~1 REAL screen pixel"),
+            // then cut to 0.35 (2026-08-12) after a side-by-side against the
+            // since-retired bitmap path found a 1px band left thin strokes
+            // never reaching full opacity ("washed out"). 0.35 physical
+            // pixels is sub-pixel, though — confirmed by direct pixel
+            // sampling of a rendered title in ezmuze-studio (0/255 ->
+            // 255/255 with ZERO intermediate value, at UiFontLarge=32 on a
+            // real 150%-DPI display): the ramp is narrower than a single
+            // pixel's sampling footprint, so it's essentially always missed
+            // — hard-edged, aliased text, not "soft but sharpened" text.
+            // Currently back at the original 1.0 — the 2026-08-12 "washed
+            // out" call was re-examined and preferred full-pixel softness
+            // over that risk; revisit toward 0.6-0.8 if thin strokes read
+            // grey/faint at small sizes instead.
+            const float AaBandPhysicalPixels = 1.0f;
             float finalScale = (pixelSize / sdfFont.EmSize) * RenderScale;
             float pixelToNormalized = 0.5f * SdfFontBaker.OnEdgeValue / (255f * SdfFontBaker.Padding * finalScale);
-            float smoothing = MathHelper.Clamp(pixelToNormalized * 0.35f, 0.005f, 0.25f);
+            float smoothing = MathHelper.Clamp(pixelToNormalized * AaBandPhysicalPixels, 0.005f, 0.25f);
 
             // Border width uses the SAME base pixel-to-normalized-distance
-            // conversion Smoothing derives from, but WITHOUT that 0.35
-            // correction — 0.35 was tuned specifically to match the retired
-            // bitmap path's ANTIALIASING weight, not a literal stroke width,
-            // and a border's whole point is to BE the literal pixel width
-            // the caller asked for.
+            // conversion Smoothing derives from, but WITHOUT the
+            // AaBandPhysicalPixels correction — that constant tunes
+            // ANTIALIASING weight, not a literal stroke width, and a
+            // border's whole point is to BE the literal pixel width the
+            // caller asked for.
             float borderWidth = borderSize > 0 ? borderSize * pixelToNormalized : 0f;
             // BorderFade = 0.1, matching SpriteBatchExtensions.DrawString's
             // own default outline dimming — alpha forced to exactly 0 when

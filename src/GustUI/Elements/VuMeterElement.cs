@@ -29,8 +29,6 @@ namespace GustUI.Elements;
 [ElementTraits(typeof(PositionTrait), typeof(SizeTrait))]
 public class VuMeterElement : Element
 {
-    private static Texture2D pixel;
-
     public Color BackColor { get; set; } = new Color(12, 12, 16);
 
     /// <summary>Bar color when <see cref="UseLevelColor"/> is false.</summary>
@@ -138,56 +136,44 @@ public class VuMeterElement : Element
         if (w >= 3 && h >= 4)
         {
             var manager = Resources.StaticResources.DrawManager;
-            Texture2D px = Pixel();
 
-            manager.Draw(px, new Rectangle((int)pos.X, (int)pos.Y, w, h), BackColor);
+            manager.DrawFilledRectangle(new Rectangle((int)pos.X, (int)pos.Y, w, h), BackColor);
 
             int gap = Math.Min(BarGap, w - 2);
             int barW = (w - gap) / 2;
             int rightX = (int)pos.X + barW + gap;
 
-            DrawBar(manager, px, (int)pos.X, (int)pos.Y, barW, h, shownL, holdL, now < clipLitUntilL);
-            DrawBar(manager, px, rightX, (int)pos.Y, barW, h, shownR, holdR, now < clipLitUntilR);
+            DrawBar(manager, (int)pos.X, (int)pos.Y, barW, h, shownL, holdL, now < clipLitUntilL);
+            DrawBar(manager, rightX, (int)pos.Y, barW, h, shownR, holdR, now < clipLitUntilR);
         }
 
         base.Draw();
     }
 
-    private void DrawBar(Managers.DrawManager manager, Texture2D px, int x, int top, int barW, int h, float level, float hold, bool clipped)
+    private void DrawBar(Managers.DrawManager manager, int x, int top, int barW, int h, float level, float hold, bool clipped)
     {
         int barH = (int)(h * level);
         if (barH > 0)
         {
-            manager.Draw(px, new Rectangle(x, top + h - barH, barW, barH), LevelColor(level));
+            manager.DrawFilledRectangle(new Rectangle(x, top + h - barH, barW, barH), LevelColor(level));
         }
 
         int tickH = Math.Min(HoldTickHeight, h);
         int tickY = top + h - (int)(h * hold) - tickH;
         if (hold > 0.004f)
         {
-            manager.Draw(px, new Rectangle(x, Math.Max(top, tickY), barW, tickH), LevelColor(hold));
+            manager.DrawFilledRectangle(new Rectangle(x, Math.Max(top, tickY), barW, tickH), LevelColor(hold));
         }
 
         if (clipped)
         {
             int clipH = Math.Min(ClipTickHeight, h);
-            manager.Draw(px, new Rectangle(x, top, barW, clipH), Resources.StaticResources.Theme.AccentMuteOn);
+            manager.DrawFilledRectangle(new Rectangle(x, top, barW, clipH), Resources.StaticResources.Theme.AccentMuteOn);
         }
     }
 
     private Color LevelColor(float v)
     {
         return UseLevelColor ? new Color(v, 1f - v, 0f) : BarColor;
-    }
-
-    private static Texture2D Pixel()
-    {
-        if (pixel == null)
-        {
-            pixel = new Texture2D(Resources.StaticResources.GraphicsDevice, 1, 1);
-            pixel.SetData(new[] { Color.White });
-        }
-
-        return pixel;
     }
 }

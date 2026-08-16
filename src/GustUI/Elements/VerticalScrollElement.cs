@@ -20,6 +20,17 @@ namespace GustUI.Elements
         /// <summary>Content pixels scrolled per wheel notch (120 raw delta).</summary>
         public float WheelStep { get; set; } = 48f;
 
+        /// <summary>Current scroll offset in content pixels, clamped to
+        /// [0, max]. Setting it moves the viewport programmatically (e.g.
+        /// "scroll to top" when repopulating) without going through the
+        /// wheel/thumb-drag gesture path — same clamp <see cref="VerticalScrollbarElement.ScrollPosition"/>
+        /// already enforces.</summary>
+        public float ScrollPosition
+        {
+            get => scrollBar.ScrollPosition;
+            set { scrollBar.ScrollPosition = value; ApplyScroll(scrollBar.ScrollPosition); }
+        }
+
         private readonly RectangleElement container = new RectangleElement();
         private readonly VerticalScrollbarElement scrollBar;
 
@@ -70,9 +81,22 @@ namespace GustUI.Elements
             var size = this.GetSize();
             var position = this.GetActualPosition();
             var rect = new Rectangle((int)position.X, (int)position.Y, (int)size.X, (int)size.Y);
-            Resources.StaticResources.DrawManager.SetScissor(rect);
+
+            // PushScissor/PopScissor, not the raw SetScissor this used to
+            // call directly: since the geometry-renderer migration, geometry
+            // draws (the vast majority of the UI now) clip against
+            // DrawManager's scissorStack (GetClipRectForGeometry()), which
+            // only PushScissor writes to — GraphicsDevice.ScissorRectangle
+            // (what a bare SetScissor sets) is left unused by that backend.
+            // A raw SetScissor here meant scrolled-out content never
+            // actually got clipped for anything geometry-rendered — only
+            // whatever was still SpriteBatch'd (chiefly text) respected it.
+            // PushScissor also intersects with any enclosing clip and
+            // applies RenderScale, matching how Element.ClipChildren does
+            // this everywhere else in GustUI (Element.cs's DrawChildren).
+            Resources.StaticResources.DrawManager.PushScissor(rect);
             base.Draw();
-            Resources.StaticResources.DrawManager.SetScissor(null);
+            Resources.StaticResources.DrawManager.PopScissor();
         }
 
         public override void AddChildElement(Element element, string overrideName = null)

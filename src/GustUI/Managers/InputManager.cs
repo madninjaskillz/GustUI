@@ -97,6 +97,25 @@ namespace GustUI.Managers
 
         public void CapturePointer(Element element) => CapturedPointerElement = element;
 
+        // ---- synthetic input override -------------------------------------
+        // Lets an external driver (e.g. an in-process remote-control server)
+        // author authoritative MouseState/KeyboardState for a frame instead
+        // of the real OS poll. Unlike PushPointerEdge (which REPLAYS an extra
+        // pass before the real poll, which still runs last and wins), this
+        // REPLACES the poll's source outright, so the synthetic state is what
+        // Update() actually dispatches. Null (the default) is a no-op —
+        // behavior is unchanged from a real OS poll.
+        private MouseState? syntheticMouseState;
+        private KeyboardState? syntheticKeyboardState;
+
+        /// <summary>Set to make this frame's mouse state synthetic instead of
+        /// Mouse.GetState(); pass null to resume real OS polling.</summary>
+        public void SetSyntheticMouseState(MouseState? state) => syntheticMouseState = state;
+
+        /// <summary>Set to make this frame's keyboard state synthetic instead
+        /// of Keyboard.GetState(); pass null to resume real OS polling.</summary>
+        public void SetSyntheticKeyboardState(KeyboardState? state) => syntheticKeyboardState = state;
+
         /// <summary>Drops keyboard focus (e.g. when a dialog holding a text
         /// field closes — a focused element would keep suppressing shortcut
         /// hooks forever otherwise).</summary>
@@ -256,9 +275,12 @@ namespace GustUI.Managers
 
         public void Update()
         {
-            MouseState polledState = Mouse.GetState();
-            if (MouseScale != 1f && MouseScale > 0f)
+            MouseState polledState = syntheticMouseState ?? Mouse.GetState();
+            if (!syntheticMouseState.HasValue && MouseScale != 1f && MouseScale > 0f)
             {
+                // Scale correction only makes sense for real, physical-pixel
+                // OS coordinates — synthetic state is already authored in
+                // the same (divided) space element bounds live in.
                 polledState = new MouseState(
                     (int)(polledState.X / MouseScale),
                     (int)(polledState.Y / MouseScale),
@@ -269,7 +291,7 @@ namespace GustUI.Managers
                     polledState.XButton1, polledState.XButton2);
             }
 
-            KeyboardState keyboardState = Keyboard.GetState();
+            KeyboardState keyboardState = syntheticKeyboardState ?? Keyboard.GetState();
 
             // While a text-input element is focused, newly pressed keys go to
             // it and keyboard SHORTCUT hooks are suppressed (typing "z" must

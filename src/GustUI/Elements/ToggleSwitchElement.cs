@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using GustUI.Attributes;
 using GustUI.Extensions;
 using GustUI.Managers;
@@ -62,6 +63,25 @@ namespace GustUI.Elements
         private float maxDelta;
         private float liveT; // 0 = off/left, 1 = on/right — live thumb position while dragging
 
+        // ---- flip animation (design-guide.md §5: ~100-150ms chrome easing,
+        // same idiom ModalWindowElement's open/close transition uses) — a
+        // plain click or a drag-release snap now SLIDES the thumb and LERPS
+        // the track color instead of jumping instantly. Frame-rate-
+        // independent exponential ease toward the target rather than a
+        // fixed-duration tween: it always eases from wherever the thumb
+        // CURRENTLY is, so re-toggling mid-animation (a fast double-click)
+        // reverses smoothly instead of snapping to a stale start point —
+        // no separate from/start-time bookkeeping needed. Suspended entirely
+        // while a drag is actively tracking the pointer (t = liveT then,
+        // unchanged) — easing a drag would read as laggy/rubber-banded,
+        // exactly the opposite of what a direct-manipulation drag should
+        // feel like.
+        private readonly Stopwatch animClock = Stopwatch.StartNew();
+        private double lastDrawSeconds = -1;
+        private float displayedT;
+        private bool displayedTInitialized;
+        private const float TransitionSeconds = 0.15f;
+
         public ToggleSwitchElement()
         {
             // Default on/off colors track the live theme (design-guide.md §1)
@@ -76,7 +96,10 @@ namespace GustUI.Elements
                 pressX = args.MouseState.X;
                 pressY = args.MouseState.Y;
                 maxDelta = 0f;
-                liveT = value ? 1f : 0f;
+                // Grab wherever the thumb is VISUALLY right now (mid-flip-
+                // animation, most of the time) rather than snapping it to
+                // the discrete committed value first.
+                liveT = displayedTInitialized ? displayedT : (value ? 1f : 0f);
                 CapturePointer();
             }));
 
@@ -115,73 +138,49 @@ namespace GustUI.Elements
             Vector2 pos = this.GetActualXnaPosition();
             Vector2 size = this.GetSize().AsXna;
 
+            double now = animClock.Elapsed.TotalSeconds;
+            float dt = lastDrawSeconds < 0 ? 0f : (float)Math.Min(now - lastDrawSeconds, 0.25);
+            lastDrawSeconds = now;
+
+            if (!displayedTInitialized)
+            {
+                displayedT = value ? 1f : 0f;
+                displayedTInitialized = true;
+            }
+
+            float t;
+            if (pressActive && maxDelta > ClickThresholdPixels)
+            {
+                // Actively dragging: follow the pointer 1:1, no ease — keep
+                // displayedT in sync so a release resumes easing from here,
+                // not from a stale pre-drag point.
+                t = liveT;
+                displayedT = liveT;
+            }
+            else
+            {
+                displayedT = Ease.Toward(displayedT, value ? 1f : 0f, dt, TransitionSeconds);
+                t = displayedT;
+            }
+
             int w = (int)size.X;
             int h = (int)size.Y;
             if (w >= 6 && h >= 4)
             {
-                float t = pressActive && maxDelta > ClickThresholdPixels ? liveT : (value ? 1f : 0f);
                 Color trackColor = Color.Lerp(OffColor, OnColor, t);
 
                 var dest = new Rectangle((int)pos.X, (int)pos.Y, w, h);
-                AtlasRegion pill = GetPillTexture(w, h);
-                manager.Draw(pill.Texture, dest, pill.Pixels, trackColor);
+                manager.DrawFilledCapsule(dest, trackColor);
 
                 int diameter = Math.Max(2, h - 4);
                 float travel = Math.Max(0, w - diameter - 4);
                 float thumbX = pos.X + 2 + t * travel;
                 float thumbY = pos.Y + (h - diameter) / 2f;
-                var thumbDest = new Rectangle((int)thumbX, (int)thumbY, diameter, diameter);
-                AtlasRegion thumb = GetThumbTexture(diameter);
-                manager.Draw(thumb.Texture, thumbDest, thumb.Pixels, ThumbColor);
+                Vector2 thumbCenter = new Vector2(thumbX + diameter / 2f, thumbY + diameter / 2f);
+                manager.DrawFilledCircle(thumbCenter, diameter / 2f, ThumbColor);
             }
 
             base.Draw();
-        }
-
-        /// <summary>Antialiased rounded-rect (radius = height/2, a true pill
-        /// for the track), baked once per (width, height) into the shared
-        /// TextureAtlas.</summary>
-        private static AtlasRegion GetPillTexture(int w, int h)
-        {
-            return Resources.StaticResources.DrawManager.GeometryAtlas.GetOrBake($"togglePill{w}x{h}", w, h, data =>
-            {
-                float r = h / 2f;
-                for (int y = 0; y < h; y++)
-                {
-                    for (int x = 0; x < w; x++)
-                    {
-                        // Distance to the nearest point of the pill's medial
-                        // segment [r, r+w-2r] at height r — i.e. a capsule SDF.
-                        float cx = MathHelper.Clamp(x + 0.5f, r, w - r);
-                        float dx = x + 0.5f - cx;
-                        float dy = y + 0.5f - r;
-                        float dist = (float)Math.Sqrt(dx * dx + dy * dy);
-                        float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
-                        data[y * w + x] = Color.White * alpha;
-                    }
-                }
-            });
-        }
-
-        /// <summary>Antialiased filled disc — the sliding thumb, baked once
-        /// per diameter into the shared TextureAtlas.</summary>
-        private static AtlasRegion GetThumbTexture(int diameter)
-        {
-            return Resources.StaticResources.DrawManager.GeometryAtlas.GetOrBake($"toggleThumb{diameter}", diameter, diameter, data =>
-            {
-                float r = diameter / 2f;
-                for (int y = 0; y < diameter; y++)
-                {
-                    for (int x = 0; x < diameter; x++)
-                    {
-                        float dx = x - r + 0.5f;
-                        float dy = y - r + 0.5f;
-                        float dist = (float)Math.Sqrt(dx * dx + dy * dy);
-                        float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
-                        data[y * diameter + x] = Color.White * alpha;
-                    }
-                }
-            });
         }
     }
 }

@@ -1,7 +1,7 @@
 using System;
-using System.Collections.Generic;
 using GustUI.Attributes;
 using GustUI.Extensions;
+using GustUI.Managers;
 using GustUI.Traits;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
@@ -19,8 +19,6 @@ namespace GustUI.Elements;
 [ElementTraits(typeof(PositionTrait), typeof(SizeTrait), typeof(OnMousePress), typeof(OnMouseButtonHeldDown), typeof(OnMouseRelease))]
 public class SliderElement : Element
 {
-    private static readonly Dictionary<int, Texture2D> ThumbCache = new Dictionary<int, Texture2D>();
-
     public Color TrackColor { get; set; } = new Color(52, 52, 63);
     public Color FillColor { get; set; } = new Color(110, 145, 235);
     public Color ThumbColor { get; set; } = new Color(232, 232, 236);
@@ -141,8 +139,7 @@ public class SliderElement : Element
             int d = Math.Min(ThumbDiameter, (int)size.Y);
             if (d >= 4)
             {
-                var dest = new Rectangle((int)(thumbCenterX - d / 2f), (int)(centerY - d / 2f), d, d);
-                manager.Draw(GetThumbTexture(d), dest, ThumbColor);
+                manager.DrawFilledCircle(new Vector2(thumbCenterX, centerY), d / 2f, ThumbColor);
             }
 
             if (LiveValue.HasValue)
@@ -151,42 +148,12 @@ public class SliderElement : Element
                 // thumb itself) so base position and live automated position
                 // read as two independent marks.
                 float liveX = pos.X + ThumbDiameter / 2f + MathHelper.Clamp(LiveValue.Value, 0f, 1f) * (size.X - ThumbDiameter);
-                int ld = Math.Max(4, (int)(d * 0.7f));
+                float ld = Math.Max(4f, d * 0.7f);
                 float liveY = trackTop - ld * 0.5f - 1f;
-                var liveDest = new Rectangle((int)(liveX - ld / 2f), (int)liveY, ld, ld);
-                manager.Draw(GetThumbTexture(ld), liveDest, LiveColor);
+                manager.DrawFilledCircle(new Vector2(liveX, liveY + ld / 2f), ld / 2f, LiveColor);
             }
         }
 
         base.Draw();
-    }
-
-    /// <summary>Antialiased filled disc, baked once per diameter, tinted by ThumbColor.</summary>
-    private static Texture2D GetThumbTexture(int diameter)
-    {
-        if (ThumbCache.TryGetValue(diameter, out Texture2D cached))
-        {
-            return cached;
-        }
-
-        var data = new Color[diameter * diameter];
-        float r = diameter / 2f;
-
-        for (int y = 0; y < diameter; y++)
-        {
-            for (int x = 0; x < diameter; x++)
-            {
-                float dx = x - r + 0.5f;
-                float dy = y - r + 0.5f;
-                float dist = (float)Math.Sqrt(dx * dx + dy * dy);
-                float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
-                data[y * diameter + x] = alpha <= 0f ? Color.Transparent : Color.White * alpha;
-            }
-        }
-
-        var texture = new Texture2D(Resources.StaticResources.GraphicsDevice, diameter, diameter);
-        texture.SetData(data);
-        ThumbCache[diameter] = texture;
-        return texture;
     }
 }

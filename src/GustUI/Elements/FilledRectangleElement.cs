@@ -48,18 +48,10 @@ public class FilledRectangleElement : RectangleElement
 
         if (fillType is TVSmartFill smartFill)
         {
-            switch (Resources.StaticResources.InputManager.GetElementState(this))
-            {
-                case ElementState.Hovered:
-                    fillType = smartFill.States.HoveredFill;
-                    break;
-                case ElementState.Pressed:
-                    fillType = smartFill.States.PressedFill;
-                    break;
-                default:
-                    fillType = smartFill.States.NormalFill;
-                    break;
-            }
+            // TVSmartFill.Resolve eases the hover/press crossfade itself
+            // (design-guide.md §5) when all three states are gradients —
+            // falls back to this same instant switch otherwise.
+            fillType = smartFill.Resolve(Resources.StaticResources.InputManager.GetElementState(this));
         }
 
         if (fillType is TVBlurFill blurFill)
@@ -96,8 +88,9 @@ public class FilledRectangleElement : RectangleElement
             case TVFillImage image:
                 Resources.StaticResources.DrawManager.Draw(image.Texture, rect, image.Tint * image.Opacity);
                 break;
-            case TVFillSimpleGradient image:
-                Resources.StaticResources.DrawManager.Draw(image.Texture, rect, Color.White * image.Opacity);
+            case TVFillSimpleGradient gradient:
+                Resources.StaticResources.DrawManager.DrawFilledRectangleGradient(
+                    rect, gradient.PrimaryColor * gradient.Opacity, gradient.SecondaryColor * gradient.Opacity, gradient.Direction);
                 break;
             case TVVideoFill video:
                 var texture = video.GetTexture();

@@ -232,6 +232,37 @@ namespace GustUI.Rendering
         }
 
         /// <summary>
+        /// Appends an axis-aligned quad with a PER-CORNER color instead of
+        /// one flat color — the vertex-color equivalent of what
+        /// TVFillSimpleGradient used to bake into a throwaway 256x1
+        /// Texture2D. Callers pass the shared white texel as texture/srcRect
+        /// (same convention as AppendQuad), so a gradient costs no extra
+        /// texture upload and no extra segment over an ordinary flat-color
+        /// quad — the GPU already interpolates vertex color across the quad
+        /// for free.
+        /// </summary>
+        public void AppendQuadGradient(Texture2D texture, Rectangle destRect, Rectangle srcRect, Color colorTopLeft, Color colorTopRight, Color colorBottomRight, Color colorBottomLeft, Vector4 clipRect, BlendState blend)
+        {
+            if (destRect.Width == 0 || destRect.Height == 0)
+            {
+                return;
+            }
+
+            BeginSegmentIfNeeded(texture, blend, 4);
+            EnsureCapacity(4, 6);
+
+            UVRect(texture, srcRect, out float u0, out float v0, out float u1, out float v1);
+
+            int vBase = vertexCount;
+            vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Left, destRect.Top), colorTopLeft, new Vector2(u0, v0), clipRect);
+            vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Top), colorTopRight, new Vector2(u1, v0), clipRect);
+            vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Bottom), colorBottomRight, new Vector2(u1, v1), clipRect);
+            vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Left, destRect.Bottom), colorBottomLeft, new Vector2(u0, v1), clipRect);
+
+            AppendQuadIndices(vBase);
+        }
+
+        /// <summary>
         /// Appends a quad rotated by <paramref name="angle"/> radians around
         /// <paramref name="origin"/> (in the unrotated rect's own local
         /// space, top-left = 0,0) — the DrawLine/DrawThickLine rotated-rect

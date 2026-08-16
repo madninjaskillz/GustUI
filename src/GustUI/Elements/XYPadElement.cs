@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using GustUI.Attributes;
 using GustUI.Extensions;
 using GustUI.Managers;
@@ -23,8 +22,6 @@ namespace GustUI.Elements;
 [ElementTraits(typeof(PositionTrait), typeof(SizeTrait), typeof(OnMousePress), typeof(OnMouseButtonHeldDown), typeof(OnMouseRelease))]
 public class XYPadElement : Element
 {
-    private static readonly Dictionary<int, Texture2D> HandleCache = new Dictionary<int, Texture2D>();
-
     public Color PadColor { get; set; } = new Color(38, 38, 47);
 
     public Color BorderColor { get; set; } = new Color(90, 90, 104);
@@ -157,37 +154,6 @@ public class XYPadElement : Element
 
     private void DrawHandle(DrawManager manager, Vector2 centre, int diameter, Color color)
     {
-        Texture2D handle = GetHandleTexture(diameter);
-        var dest = new Rectangle((int)(centre.X - diameter / 2f), (int)(centre.Y - diameter / 2f), diameter, diameter);
-        manager.Draw(handle, dest, color);
-    }
-
-    /// <summary>Antialiased filled disc, baked once per diameter — the same
-    /// SDF-style bake <see cref="KnobElement.GetLiveDotTexture"/> uses.</summary>
-    private static Texture2D GetHandleTexture(int diameter)
-    {
-        if (HandleCache.TryGetValue(diameter, out Texture2D cached))
-        {
-            return cached;
-        }
-
-        var data = new Color[diameter * diameter];
-        float r = diameter / 2f;
-        for (int y = 0; y < diameter; y++)
-        {
-            for (int x = 0; x < diameter; x++)
-            {
-                float dx = x - r + 0.5f;
-                float dy = y - r + 0.5f;
-                float dist = (float)Math.Sqrt(dx * dx + dy * dy);
-                float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
-                data[y * diameter + x] = alpha <= 0f ? Color.Transparent : Color.White * alpha;
-            }
-        }
-
-        var texture = new Texture2D(Resources.StaticResources.GraphicsDevice, diameter, diameter);
-        texture.SetData(data);
-        HandleCache[diameter] = texture;
-        return texture;
+        manager.DrawFilledCircle(centre, diameter / 2f, color);
     }
 }

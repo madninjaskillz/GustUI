@@ -17,8 +17,70 @@ namespace GustUI.TraitValues
 
     public class TVSmartFill : TVFill
     {
-        private ButtonStates buttonStates;
         public ButtonStates States { get; set; }
+
+        // ---- hover/press ease (design-guide.md §5, locked 2026-08-13: the
+        // ~150ms discrete-state-transition treatment, previously only
+        // implemented for ToggleSwitchElement's flip) — three independent
+        // weights (one per state) rather than a single 0..1 scalar, so ANY
+        // transition path (Normal->Hovered->Pressed, or a fast click that
+        // skips straight Normal->Pressed) blends smoothly with no special-
+        // casing. Each TVSmartFill instance is already per-element (every
+        // real call site does `new TVSmartFill{States=...}` per button, even
+        // though the underlying ButtonStates/fills are often shared theme
+        // singletons — see design-guide.md's own §1.1 button spec) so owning
+        // this mutable animation state directly on the instance is safe: two
+        // buttons sharing the same ButtonStates never share the same
+        // TVSmartFill wrapper, so never fight over the same weights.
+        private float weightNormal = 1f;
+        private float weightHovered;
+        private float weightPressed;
+        private double lastSeconds = -1;
+        private readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+
+        /// <summary>
+        /// The fill to actually draw for <paramref name="state"/> right now.
+        /// Only animates when all three states are <see cref="TVFillSimpleGradient"/>
+        /// (every stock button per Theme.cs's Positive/Negative/Neutral
+        /// states) — crossfading an arbitrary mix of TVFill subtypes (a
+        /// gradient hover state over an image normal state, say) has no
+        /// single well-defined blend, so anything outside the common case
+        /// falls back to the pre-existing instant snap rather than a wrong
+        /// or partial animation.
+        /// </summary>
+        public TVFill Resolve(Managers.InputManager.ElementState state)
+        {
+            if (!(States.NormalFill is TVFillSimpleGradient normalG
+                && States.HoveredFill is TVFillSimpleGradient hoverG
+                && States.PressedFill is TVFillSimpleGradient pressG))
+            {
+                return state switch
+                {
+                    Managers.InputManager.ElementState.Hovered => States.HoveredFill,
+                    Managers.InputManager.ElementState.Pressed => States.PressedFill,
+                    _ => States.NormalFill,
+                };
+            }
+
+            double now = clock.Elapsed.TotalSeconds;
+            float dt = lastSeconds < 0 ? 0f : (float)Math.Min(now - lastSeconds, 0.25);
+            lastSeconds = now;
+
+            weightNormal = Ease.Toward(weightNormal, state == Managers.InputManager.ElementState.Normal ? 1f : 0f, dt);
+            weightHovered = Ease.Toward(weightHovered, state == Managers.InputManager.ElementState.Hovered ? 1f : 0f, dt);
+            weightPressed = Ease.Toward(weightPressed, state == Managers.InputManager.ElementState.Pressed ? 1f : 0f, dt);
+
+            float sum = Math.Max(0.0001f, weightNormal + weightHovered + weightPressed);
+            Color primary = BlendColor(normalG.PrimaryColor, hoverG.PrimaryColor, pressG.PrimaryColor, sum);
+            Color secondary = BlendColor(normalG.SecondaryColor, hoverG.SecondaryColor, pressG.SecondaryColor, sum);
+            return new TVFillSimpleGradient(primary, secondary, normalG.Direction);
+
+            Color BlendColor(Color a, Color b, Color c, float weightSum)
+            {
+                Vector4 blended = (a.ToVector4() * weightNormal + b.ToVector4() * weightHovered + c.ToVector4() * weightPressed) / weightSum;
+                return new Color(blended);
+            }
+        }
     }
 
     public class TVFillImage : TVFill
@@ -184,6 +246,13 @@ namespace GustUI.TraitValues
         public TVFill OverlayFill { get; set; }
     }
 
+    /// <summary>
+    /// A linear 2-color gradient fill, drawn via per-vertex color
+    /// interpolation on the shared white atlas texel (FilledRectangleElement/
+    /// SpriteBatchExtensions.DrawFilledRectangleGradient) — no texture is
+    /// baked or owned here; PrimaryColor/SecondaryColor/Direction are plain
+    /// data the draw call reads fresh each frame.
+    /// </summary>
     public class TVFillSimpleGradient : TVFill
     {
         public Color PrimaryColor { get; }
@@ -192,29 +261,6 @@ namespace GustUI.TraitValues
 
         public TVFillSimpleGradient(Color primary, Color secondary, Direction direction)
         {
-            int w = 1;
-            int h = 1;
-            if (direction == Direction.Horizontally)
-            {
-                w = 256;
-            }
-            else
-            {
-                h = 256;
-            }
-
-            Texture2D result = new Texture2D(Resources.StaticResources.GraphicsDevice, w, h);
-            Color[] c = new Color[256];
-
-            Color col = primary;
-            for (int i = 0; i < 256; i++)
-            {
-                c[i] = col;
-                col = Color.Lerp(primary, secondary, i / 255f);
-            }
-
-            result.SetData(c);
-            this.Texture = result;
             PrimaryColor = primary;
             SecondaryColor = secondary;
             Direction = direction;

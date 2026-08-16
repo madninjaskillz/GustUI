@@ -18,8 +18,6 @@ namespace GustUI.Elements;
 [ElementTraits(typeof(PositionTrait), typeof(SizeTrait), typeof(OnMousePress), typeof(OnMouseButtonHeldDown), typeof(OnMouseRelease))]
 public class KnobElement : Element
 {
-    private static Texture2D pixel;
-
     public float DragRangePixels { get; set; } = 150f;
     public Color RingColor { get; set; } = new Color(180, 180, 190);
     public Color FaceColor { get; set; } = new Color(38, 38, 47);
@@ -274,10 +272,11 @@ public class KnobElement : Element
         int diameter = (int)Math.Min(size.X, size.Y);
         if (diameter >= 8)
         {
-            AtlasRegion dial = GetDialTexture(diameter);
             var center = new Vector2(pos.X + size.X / 2f, pos.Y + size.Y / 2f);
             var dest = new Rectangle(
                 (int)(center.X - diameter / 2f), (int)(center.Y - diameter / 2f), diameter, diameter);
+            float outerRadius = diameter / 2f;
+            float ringInner = outerRadius - 2.5f;
 
             if (FaceTexture != null)
             {
@@ -287,7 +286,11 @@ public class KnobElement : Element
             }
             else
             {
-                manager.Draw(dial.Texture, dest, dial.Pixels, FaceColor);
+                // Face fills only to ringInner (the ring band itself is
+                // drawn separately below, over this) — real vector geometry
+                // now, so this edge is antialiased in its own right rather
+                // than relying on the ring's inner AA to hide a hard cut.
+                manager.DrawFilledCircle(center, ringInner, FaceColor);
             }
 
             // A running lane warms the ring toward LiveColor — a passive,
@@ -296,8 +299,7 @@ public class KnobElement : Element
             if (ShowRing && (FaceTexture == null || ShowRingWithSkin))
             {
                 Color ringColor = LiveValue.HasValue ? Color.Lerp(RingColor, LiveColor, 0.35f) : RingColor;
-                AtlasRegion ring = GetRingTexture(diameter);
-                manager.Draw(ring.Texture, dest, ring.Pixels, ringColor);
+                manager.DrawRing(center, ringInner, outerRadius, ringColor);
             }
 
             // Modulation arc, UNDER the pointer so the pointer stays the
@@ -325,8 +327,7 @@ public class KnobElement : Element
                     float rad = MathHelper.ToRadians(deg);
                     var dir = new Vector2(-(float)Math.Sin(rad), (float)Math.Cos(rad));
                     Vector2 p = center + dir * arcRadius;
-                    manager.Draw(
-                        Pixel(),
+                    manager.DrawFilledRectangle(
                         new Rectangle((int)(p.X - thickness / 2f), (int)(p.Y - thickness / 2f), thickness, thickness),
                         arcColor);
                 }
@@ -340,7 +341,7 @@ public class KnobElement : Element
             float angle = MathHelper.ToRadians(45f + value * SweepDegrees);
             int length = (int)(diameter * PointerLength);
             var pointerRect = new Rectangle((int)center.X, (int)center.Y, 3, length);
-            manager.Draw(Pixel(), pointerRect, null, PointerColor, angle, new Vector2(0.5f, 0f), SpriteEffects.None, 0);
+            manager.DrawRotatedFilledRectangle(pointerRect, PointerColor, angle, new Vector2(0.5f, 0f));
 
             if (LiveValue.HasValue)
             {
@@ -354,103 +355,10 @@ public class KnobElement : Element
                 float dotDiameterF = Math.Max(4f, diameter * 0.16f);
                 float rim = diameter / 2f - dotDiameterF / 2f - 1f;
                 Vector2 dotCenter = center + dir * rim;
-                int dotDiameter = (int)dotDiameterF;
-                var dotRect = new Rectangle(
-                    (int)(dotCenter.X - dotDiameter / 2f), (int)(dotCenter.Y - dotDiameter / 2f), dotDiameter, dotDiameter);
-                AtlasRegion liveDot = GetLiveDotTexture(dotDiameter);
-                manager.Draw(liveDot.Texture, dotRect, liveDot.Pixels, LiveColor);
+                manager.DrawFilledCircle(dotCenter, dotDiameterF / 2f, LiveColor);
             }
         }
 
         base.Draw();
-    }
-
-    private Texture2D Pixel()
-    {
-        if (pixel == null)
-        {
-            pixel = new Texture2D(Resources.StaticResources.GraphicsDevice, 1, 1);
-            pixel.SetData(new[] { Color.White });
-        }
-
-        return pixel;
-    }
-
-    /// <summary>Antialiased 2px ring annulus, baked once per diameter into the
-    /// shared TextureAtlas, tinted by RingColor.</summary>
-    private static AtlasRegion GetRingTexture(int diameter)
-    {
-        return Resources.StaticResources.DrawManager.GeometryAtlas.GetOrBake($"knobRing{diameter}", diameter, diameter, data =>
-        {
-            float r = diameter / 2f;
-            float ringInner = r - 2.5f;
-
-            for (int y = 0; y < diameter; y++)
-            {
-                for (int x = 0; x < diameter; x++)
-                {
-                    float dx = x - r + 0.5f;
-                    float dy = y - r + 0.5f;
-                    float dist = (float)Math.Sqrt(dx * dx + dy * dy);
-
-                    float outer = MathHelper.Clamp(r - dist, 0f, 1f);
-                    float inner = MathHelper.Clamp(dist - ringInner + 1f, 0f, 1f);
-                    data[y * diameter + x] = Color.White * (outer * inner);
-                }
-            }
-        });
-    }
-
-    /// <summary>Antialiased filled disc — the <see cref="LiveValue"/> rim marker — baked once per diameter into the shared TextureAtlas.</summary>
-    private static AtlasRegion GetLiveDotTexture(int diameter)
-    {
-        return Resources.StaticResources.DrawManager.GeometryAtlas.GetOrBake($"knobLiveDot{diameter}", diameter, diameter, data =>
-        {
-            float r = diameter / 2f;
-            for (int y = 0; y < diameter; y++)
-            {
-                for (int x = 0; x < diameter; x++)
-                {
-                    float dx = x - r + 0.5f;
-                    float dy = y - r + 0.5f;
-                    float dist = (float)Math.Sqrt(dx * dx + dy * dy);
-                    float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
-                    data[y * diameter + x] = alpha <= 0f ? Color.Transparent : Color.White * alpha;
-                }
-            }
-        });
-    }
-
-    /// <summary>Antialiased filled disc (face only; ring drawn separately), baked once per diameter into the shared TextureAtlas.</summary>
-    private static AtlasRegion GetDialTexture(int diameter)
-    {
-        return Resources.StaticResources.DrawManager.GeometryAtlas.GetOrBake($"knobDial{diameter}", diameter, diameter, data =>
-        {
-            float r = diameter / 2f;
-            float ringInner = r - 2.5f;
-
-            for (int y = 0; y < diameter; y++)
-            {
-                for (int x = 0; x < diameter; x++)
-                {
-                    float dx = x - r + 0.5f;
-                    float dy = y - r + 0.5f;
-                    float dist = (float)Math.Sqrt(dx * dx + dy * dy);
-
-                    float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
-                    if (alpha <= 0f)
-                    {
-                        data[y * diameter + x] = Color.Transparent;
-                        continue;
-                    }
-
-                    // Face is opaque white (tinted by FaceColor at draw time); the
-                    // ring band is transparent here and drawn from RingTexture so
-                    // RingColor tints it independently.
-                    bool ring = dist >= ringInner;
-                    data[y * diameter + x] = ring ? Color.Transparent : Color.White * alpha;
-                }
-            }
-        });
     }
 }

@@ -19,6 +19,41 @@ namespace GustUI.Elements
         private List<BasicButtonElement> buttons = new List<BasicButtonElement>();
         private FilledRectangleElement buttonBackgroundElement;
 
+        // ---- height cap + scroll (2026-08-13): a modal whose natural
+        // content is taller than the window used to just run off the
+        // bottom of the screen (footer buttons included — genuinely
+        // unreachable, not just visually cramped). When content.GetSize().Y
+        // at construction exceeds MaxModalHeight(), content is wrapped in a
+        // VerticalScrollElement instead of added to this modal directly, and
+        // the modal's own height is capped to that same max — title bar and
+        // footer buttons always stay on-screen with BottomScreenMargin of
+        // breathing room below, and the body scrolls (wheel or its own
+        // scrollbar) for the rest. A modal whose content already fits keeps
+        // the exact old behavior (no wrapper, no scrollbar rail at all) —
+        // this only ever engages for the overflow case.
+        private VerticalScrollElement scrollViewport;
+        private bool contentScrolls;
+
+        /// <summary>Matches VerticalScrollElement's own hardcoded scrollbar
+        /// width — reserved as EXTRA width beyond the content's own natural
+        /// width when scrolling, so the rail doesn't overlap the rightmost
+        /// slice of the actual content.</summary>
+        private const float ScrollbarAllowance = 12f;
+
+        /// <summary>Bottom breathing room below a height-capped modal, so
+        /// its footer buttons sit clear of the window edge rather than
+        /// flush against it.</summary>
+        private const float BottomScreenMargin = 32f;
+
+        /// <summary>Scroll offset (content pixels) of the body, when it's
+        /// overflowing and therefore wrapped in a scroll viewport; a no-op
+        /// read/write of 0 when it isn't (nothing to scroll).</summary>
+        public float ContentScrollPosition
+        {
+            get => scrollViewport?.ScrollPosition ?? 0f;
+            set { if (scrollViewport != null) { scrollViewport.ScrollPosition = value; } }
+        }
+
 
         public bool FitModalToContent { get; private set; } = true;
 
@@ -116,7 +151,30 @@ namespace GustUI.Elements
             AddChildElement(titleBarElement);
 
             this.content = body;
-            this.AddChild(this.content, "content");
+
+            // Decide once, now, whether this instance needs to scroll: the
+            // body's own SizeTrait is already final at this point (stack-
+            // style containers like VerticalStackElement recompute it
+            // synchronously as children are added, before ever reaching
+            // here) — see the scrollViewport field's doc comment for why a
+            // one-time decision is enough for how this app actually uses
+            // modals (built fresh per open, content set doesn't change
+            // afterward).
+            float buttonHeightForCap = this.buttons.Count > 0 ? 80 : ContentMargin;
+            float naturalModalHeight = 40 + ContentMargin + NaturalContentHeight() + ContentMargin + buttonHeightForCap;
+            contentScrolls = naturalModalHeight > MaxModalHeight();
+
+            if (contentScrolls)
+            {
+                scrollViewport = new VerticalScrollElement();
+                scrollViewport.Set<SizeTrait>(new TVVector(EffectiveContentWidth(), EffectiveContentHeight()));
+                AddChildElement(scrollViewport);
+                scrollViewport.AddChild(body, "content");
+            }
+            else
+            {
+                this.AddChild(this.content, "content");
+            }
 
             content.Set<PositionTrait>(new TVVector(0, 0));
 
@@ -161,6 +219,27 @@ namespace GustUI.Elements
         private static float EaseOutCubic(float t) => 1f - (float)Math.Pow(1f - t, 3);
         private static float EaseInCubic(float t) => t * t * t;
 
+        /// <summary>Y below which a modal (or its content) may never sit —
+        /// the fruit-menu bar's height, or 0 if there isn't one (e.g. very
+        /// early boot frames before it's added).</summary>
+        private static float TopLimit()
+        {
+            if (Resources.StaticResources.RootWindow.Children.Items.Any(x => x is FruitMenuElement))
+            {
+                return Resources.StaticResources.RootWindow.Children.Items.First(x => x is FruitMenuElement).GetSize().Y;
+            }
+
+            return 0f;
+        }
+
+        /// <summary>Tallest this modal may grow to and still leave
+        /// BottomScreenMargin of clearance above the window's bottom edge —
+        /// the cap Setup()/Update() enforce once content overflows it.
+        /// Floored so a tiny/short window still gets a usable modal instead
+        /// of a negative or near-zero one.</summary>
+        private static float MaxModalHeight() =>
+            Math.Max(200f, Resources.StaticResources.RootWindow.GetSize().Y - TopLimit() - BottomScreenMargin);
+
         /// <summary>Centered-in-window position (design-guide.md §9), Y
         /// floored at the fruit-menu bar like the pre-existing screen-clamp
         /// logic below — a modal taller than the window shouldn't compute a
@@ -170,14 +249,49 @@ namespace GustUI.Elements
             TVVector windowSize = Resources.StaticResources.RootWindow.GetSize();
             TVVector modalSize = ElementTrait<SizeTrait>().Value();
 
-            float topLimit = 0;
-            if (Resources.StaticResources.RootWindow.Children.Items.Any(x => x is FruitMenuElement))
+            float y = Math.Max(TopLimit(), (windowSize.Y - modalSize.Y) / 2f);
+            return new TVVector((windowSize.X - modalSize.X) / 2f, y);
+        }
+
+        /// <summary>Natural (uncapped) content height/width — CalculatedSize
+        /// for a plain TextElement body (word-wrap aware), else the body's
+        /// own live GetSize(). The shared read Setup()/Update() both used
+        /// inline before the scroll-cap pass; factored out so both call
+        /// sites and EffectiveContentHeight/ContentWidth agree.</summary>
+        private float NaturalContentHeight() =>
+            content is TextElement textElement ? textElement.CalculatedSize().Y : content.GetSize().Y;
+
+        private float NaturalContentWidth() =>
+            content is TextElement tx ? tx.CalculatedSize().X : content.GetSize().X;
+
+        /// <summary>What Setup()/Update() should size the modal's content
+        /// area to: the natural height when it already fits, or the capped
+        /// height (MaxModalHeight() minus chrome) once <see cref="contentScrolls"/>
+        /// is set — re-derived from the CURRENT window size every call, so
+        /// a scrolling modal's visible cap still tracks a live window
+        /// resize even though whether it scrolls at all was decided once,
+        /// at construction.</summary>
+        private float EffectiveContentHeight()
+        {
+            float natural = NaturalContentHeight();
+            if (!contentScrolls)
             {
-                topLimit = Resources.StaticResources.RootWindow.Children.Items.First(x => x is FruitMenuElement).GetSize().Y;
+                return natural;
             }
 
-            float y = Math.Max(topLimit, (windowSize.Y - modalSize.Y) / 2f);
-            return new TVVector((windowSize.X - modalSize.X) / 2f, y);
+            float buttonHeight = this.buttons.Count > 0 ? 80 : ContentMargin;
+            float cappedContent = MaxModalHeight() - 40 - ContentMargin - ContentMargin - buttonHeight;
+            return Math.Max(80f, cappedContent);
+        }
+
+        /// <summary>Content width the MODAL should size itself to — the
+        /// content's own natural width, plus room for the scrollbar rail
+        /// when scrolling (so the rail sits clear of the content instead of
+        /// overlapping its rightmost slice).</summary>
+        private float EffectiveContentWidth()
+        {
+            float natural = NaturalContentWidth();
+            return contentScrolls ? natural + ScrollbarAllowance : natural;
         }
 
         /// <summary>Intercepts EVERY removal path (the X button routes here
@@ -223,9 +337,14 @@ namespace GustUI.Elements
             Set<BorderFillTrait>(new TVBorder9Grid());
             restPosition = ElementTrait<PositionTrait>().Value();
 
-            float contentHeight = content is TextElement textElement ? textElement.CalculatedSize().Y : content.GetSize().Y;
-            float contentWidth = content is TextElement tx ? tx.CalculatedSize().X : content.GetSize().X;
+            float contentHeight = EffectiveContentHeight();
+            float contentWidth = EffectiveContentWidth();
             float buttonHeight = (this.buttons.Count > 0 ? 80 : ContentMargin);
+
+            if (contentScrolls)
+            {
+                scrollViewport.Set<SizeTrait>(new TVVector(contentWidth, contentHeight));
+            }
 
             float calcHeight = 40 + ContentMargin + contentHeight + ContentMargin + buttonHeight;
             float calcWidth = contentWidth + ContentMargin * 2;
@@ -268,9 +387,14 @@ namespace GustUI.Elements
 
             if (FitModalToContent)
             {
-                float contentHeight = content is TextElement textElement ? textElement.CalculatedSize().Y : content.GetSize().Y;
-                float contentWidth = content is TextElement tx ? tx.CalculatedSize().X : content.GetSize().X;
+                float contentHeight = EffectiveContentHeight();
+                float contentWidth = EffectiveContentWidth();
                 float buttonHeight = (this.buttons.Count > 0 ? 80 : ContentMargin);
+
+                if (contentScrolls)
+                {
+                    scrollViewport.Set<SizeTrait>(new TVVector(contentWidth, contentHeight));
+                }
 
                 this.Set<SizeTrait>(new TVVector(
                     contentWidth + ContentMargin * 2,
@@ -468,8 +592,13 @@ namespace GustUI.Elements
             // X centering falls out of the size calc above already including
             // ContentMargin on both sides (design-guide.md §3): size.X is
             // contentWidth + 2*margin, so (size.X/2) - (contentWidth/2)
-            // resolves to exactly margin either side.
-            content.Set<PositionTrait>(new TVVector((size.X / 2f) - (content.GetSize().X / 2f), 40 + ContentMargin));
+            // resolves to exactly margin either side. Positions scrollViewport
+            // instead of content directly once contentScrolls — content
+            // itself then just sits at (0,0) inside it (set once, at wrap
+            // time in the constructor) while the viewport is what's actually
+            // placed/clipped/sized within the modal's chrome.
+            Element positioned = contentScrolls ? (Element)scrollViewport : content;
+            positioned.Set<PositionTrait>(new TVVector((size.X / 2f) - (positioned.GetSize().X / 2f), 40 + ContentMargin));
 
         }
 

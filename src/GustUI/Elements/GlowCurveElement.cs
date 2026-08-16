@@ -4,6 +4,7 @@ using GustUI.Attributes;
 using GustUI.Extensions;
 using GustUI.Managers;
 using GustUI.Traits;
+using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -94,15 +95,13 @@ namespace GustUI.Elements
 
         /// <summary>Column-fill area under the curve (the same "one 1px rect
         /// per x-column" idiom <see cref="WaveformElement"/>.DrawColumns
-        /// established), sampling a FIXED per-element-height gradient
-        /// texture at each column's ABSOLUTE row range rather than
-        /// stretching a small texture per column — a column re-stretching
-        /// the same 0..1 gradient over its own (varying) height would make a
-        /// short, quiet column look just as saturated near its own bottom as
-        /// a tall, loud column does near ITS bottom, which reads as visually
-        /// inconsistent once both are on screen together. Sampling fixed
-        /// absolute rows instead means opacity at a given panel height is
-        /// the same no matter which column reads it.</summary>
+        /// established), each column a 2-color vertical vertex-color
+        /// gradient (<see cref="SpriteBatchExtensions.DrawFilledRectangleGradient"/>)
+        /// sampling the SAME fixed absolute-row alpha curve
+        /// (<see cref="FillAlphaAt"/>) at its own y0/baseline — real GPU
+        /// interpolation, not a texture slice, so a short quiet column
+        /// reads the same opacity-at-a-given-panel-height as a tall loud
+        /// one, with no bake/DPI mismatch to go soft on.</summary>
         private void DrawFill(Managers.DrawManager manager, Vector2 origin, Vector2 size)
         {
             int width = (int)size.X;
@@ -113,7 +112,6 @@ namespace GustUI.Elements
             }
 
             float baselineY = Math.Clamp(Baseline ?? size.Y, 0f, size.Y);
-            AtlasRegion gradient = GetFillGradientTexture(height);
 
             for (int x = 0; x < width; x++)
             {
@@ -126,9 +124,21 @@ namespace GustUI.Elements
                 }
 
                 var dest = new Rectangle((int)origin.X + x, (int)origin.Y + y0, 1, fillHeight);
-                var source = new Rectangle(gradient.Pixels.X, gradient.Pixels.Y + y0, 1, fillHeight);
-                manager.Draw(gradient.Texture, dest, source, FillColor);
+                Color top = FillColor * FillAlphaAt(y0, height);
+                Color bottom = FillColor * FillAlphaAt(y0 + fillHeight, height);
+                manager.DrawFilledRectangleGradient(dest, top, bottom, Direction.Vertically);
             }
+        }
+
+        /// <summary>Fixed opaque-top/transparent-bottom alpha curve over the
+        /// element's absolute row range — the same fade
+        /// <see cref="GetFillGradientTexture"/> used to bake into a texture,
+        /// now evaluated directly per column endpoint.</summary>
+        private static float FillAlphaAt(int y, int height)
+        {
+            return height <= 1
+                ? 0.55f
+                : MathHelper.Lerp(0.55f, 0f, MathHelper.Clamp(y, 0, height - 1) / (float)(height - 1));
         }
 
         /// <summary>Linear-interpolated curve Y at element-relative X (points
@@ -185,63 +195,12 @@ namespace GustUI.Elements
             if (Glow)
             {
                 int haloDiameter = LiveMarkerDiameter * 2;
-                var haloRect = new Rectangle(
-                    (int)(center.X - haloDiameter / 2f), (int)(center.Y - haloDiameter / 2f), haloDiameter, haloDiameter);
-                AtlasRegion halo = GetLiveDotTexture(haloDiameter);
                 manager.BeginAdditive();
-                manager.Draw(halo.Texture, haloRect, halo.Pixels, LiveMarkerColor * 0.35f);
+                manager.DrawFilledCircle(center, haloDiameter / 2f, LiveMarkerColor * 0.35f);
                 manager.EndAdditive();
             }
 
-            int diameter = LiveMarkerDiameter;
-            var dotRect = new Rectangle(
-                (int)(center.X - diameter / 2f), (int)(center.Y - diameter / 2f), diameter, diameter);
-            AtlasRegion dot = GetLiveDotTexture(diameter);
-            manager.Draw(dot.Texture, dotRect, dot.Pixels, LiveMarkerColor);
-        }
-
-        /// <summary>1px-wide, element-height-tall alpha ramp (opaque top,
-        /// transparent bottom), baked once per height into the shared
-        /// TextureAtlas — the fixed texture <see cref="DrawFill"/> slices per
-        /// column. White so the caller's tint color fully controls hue, same
-        /// as every other baked-mask texture in this library (KnobElement's
-        /// disc/ring, the rounded-rect corner atlas).</summary>
-        private static AtlasRegion GetFillGradientTexture(int height)
-        {
-            return Resources.StaticResources.DrawManager.GeometryAtlas.GetOrBake($"glowFill{height}", 1, height, data =>
-            {
-                for (int y = 0; y < height; y++)
-                {
-                    float alpha = height <= 1 ? 0.55f : MathHelper.Lerp(0.55f, 0f, y / (float)(height - 1));
-                    data[y] = Color.White * alpha;
-                }
-            });
-        }
-
-        /// <summary>Antialiased filled disc, baked once per diameter into the
-        /// shared TextureAtlas — same technique as <see cref="KnobElement"/>'s
-        /// LiveValue rim marker (kept as an independently-keyed atlas bake
-        /// rather than a shared helper: KnobElement's is private and the two
-        /// libraries' baking idioms are meant to be copy-and-adapt per
-        /// element, not centralized — only the STORAGE is now shared via
-        /// TextureAtlas, not the generation code).</summary>
-        private static AtlasRegion GetLiveDotTexture(int diameter)
-        {
-            return Resources.StaticResources.DrawManager.GeometryAtlas.GetOrBake($"glowLiveDot{diameter}", diameter, diameter, data =>
-            {
-                float r = diameter / 2f;
-                for (int y = 0; y < diameter; y++)
-                {
-                    for (int x = 0; x < diameter; x++)
-                    {
-                        float dx = x - r + 0.5f;
-                        float dy = y - r + 0.5f;
-                        float dist = (float)Math.Sqrt(dx * dx + dy * dy);
-                        float alpha = MathHelper.Clamp(r - dist, 0f, 1f);
-                        data[y * diameter + x] = alpha <= 0f ? Color.Transparent : Color.White * alpha;
-                    }
-                }
-            });
+            manager.DrawFilledCircle(center, LiveMarkerDiameter / 2f, LiveMarkerColor);
         }
     }
 }

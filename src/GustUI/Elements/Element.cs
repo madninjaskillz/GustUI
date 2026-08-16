@@ -42,6 +42,13 @@ public class Element : IDisposable
     public string ElementName { get => elementName ?? this.ToString(); set => elementName = value; }
     private Dictionary<Type, object> traits = new Dictionary<Type, object>();
 
+    /// <summary>Read-only view of this element's traits, keyed by trait type
+    /// — for generic tooling (e.g. a tree/DOM dump) that needs to enumerate
+    /// whatever traits are present without a hardcoded switch over known
+    /// trait types.</summary>
+    [JsonIgnore]
+    public IReadOnlyDictionary<Type, object> AllTraits => traits;
+
     private int depth = 0;
     public int Depth
     {

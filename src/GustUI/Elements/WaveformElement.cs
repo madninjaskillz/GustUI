@@ -32,8 +32,6 @@ namespace GustUI.Elements;
 [ElementTraits(typeof(PositionTrait), typeof(SizeTrait))]
 public class WaveformElement : Element
 {
-    private static Texture2D pixel;
-
     /// <summary>Waveform to draw; null draws nothing.</summary>
     public WaveformData Data { get; set; }
 
@@ -94,7 +92,7 @@ public class WaveformElement : Element
                 var manager = Resources.StaticResources.DrawManager;
                 if (ShowCenterLine)
                 {
-                    manager.Draw(Pixel(), new Rectangle((int)pos.X, (int)pos.Y + height / 2, totalWidth, 1), CenterLineColor);
+                    manager.DrawFilledRectangle(new Rectangle((int)pos.X, (int)pos.Y + height / 2, totalWidth, 1), CenterLineColor);
                 }
 
                 int tiles = Math.Max(1, TileCount);
@@ -175,7 +173,6 @@ public class WaveformElement : Element
 
     private void DrawColumns(Managers.DrawManager manager, float[] minMax, Rectangle rect, Color tint)
     {
-        Texture2D px = Pixel();
         int columns = minMax.Length / 2;
         int height = rect.Height;
 
@@ -187,19 +184,8 @@ public class WaveformElement : Element
 
             int y0 = (int)top;
             int y1 = Math.Max(y0 + 1, (int)Math.Ceiling(bottom)); // ≥1px so silence stays visible
-            manager.Draw(px, new Rectangle(rect.X + x, rect.Y + y0, 1, Math.Min(y1, height) - y0), tint);
+            manager.DrawFilledRectangle(new Rectangle(rect.X + x, rect.Y + y0, 1, Math.Min(y1, height) - y0), tint);
         }
-    }
-
-    private static Texture2D Pixel()
-    {
-        if (pixel == null)
-        {
-            pixel = new Texture2D(Resources.StaticResources.GraphicsDevice, 1, 1);
-            pixel.SetData(new[] { Color.White });
-        }
-
-        return pixel;
     }
 }
 
