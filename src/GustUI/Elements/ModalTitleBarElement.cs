@@ -29,10 +29,15 @@ namespace GustUI.Elements
         // below it reads as "not there" (the "modal title bars have become
         // somewhat invisible" regression) — a subtle top-lit gradient plus
         // an accent underline gives the bar its own presence without going
-        // back to the old saturated-primary-color look.
+        // back to the old saturated-primary-color look. A faint accent wash
+        // (2026-08-16, design-guide.md §9) blended into that same neutral
+        // gradient — 8% at the top fading to nothing by the bottom, where
+        // the underline already carries the full-strength accent — nudges
+        // the bar a little further from "not there" without reintroducing
+        // a colored bar.
         // Live Theme reads (not cached), so a title bar built after a theme
         // switch (design-guide.md §1) picks up the current palette.
-        private static Color BarFillTop => Resources.StaticResources.Theme.SurfaceRaised;
+        private static Color BarFillTop => Color.Lerp(Resources.StaticResources.Theme.SurfaceRaised, Resources.StaticResources.Theme.AccentSelection, 0.08f);
         private static Color BarFillBottom => Resources.StaticResources.Theme.SurfaceHeader;
         private static Color AccentUnderline => Resources.StaticResources.Theme.AccentSelection;
         private static Color TitleText => Resources.StaticResources.Theme.BodyText;
