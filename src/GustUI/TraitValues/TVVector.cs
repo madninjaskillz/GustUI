@@ -6,8 +6,17 @@ namespace GustUI.TraitValues;
 
 public class TVVector : TraitValue
 {
-    public float X { get; set; }    
-    public float Y { get; set; }
+    // init-only (not set): PositionTrait/SizeTrait's change event
+    // (Trait<T>.Set -> ValueChangedEventHandler) only fires when Set()
+    // replaces the stored instance — TVVector being a mutable reference
+    // type meant `var p = trait.Value(); p.X = ...;` silently mutated the
+    // trait's own stored object in place, bypassing Set() and the change
+    // event entirely (found 2026-08-20 designing a Draw-time visibility
+    // cache keyed on that event). init blocks that pattern at compile
+    // time: every call site must go through Set(new TVVector(...)) to
+    // change a position/size, which is what makes the event reliable.
+    public float X { get; init; }
+    public float Y { get; init; }
     public TVVector()
     {
         X = 0f;

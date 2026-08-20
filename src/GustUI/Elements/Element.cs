@@ -898,8 +898,8 @@ public class Element : IDisposable
         {
             var delta = mouseState.Position.ToVector2() - dragOffset;
             dragOffset = mouseState.Position.ToVector2();
-            ElementTrait<PositionTrait>().Value().X += (int)delta.X;
-            ElementTrait<PositionTrait>().Value().Y += (int)delta.Y;
+            TVVector current = ElementTrait<PositionTrait>().Value();
+            Set<PositionTrait>(new TVVector(current.X + (int)delta.X, current.Y + (int)delta.Y));
         }
 
         if (sizeTransition)
