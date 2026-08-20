@@ -17,8 +17,13 @@ namespace GustUI.Elements
         public BackdropElement()
         {
 
-            Set<SizeTrait>(new TVVector(Resources.StaticResources.RootWindow.GetSize().X, Resources.StaticResources.RootWindow.GetSize().Y - 40));
-            Set<PositionTrait>(new TVVector(0, 40));
+            // Full window, no top offset (2026-08-18 fix): was (0,40)/height-40,
+            // a leftover reservation for the old global FruitMenuElement's
+            // 40px bar, removed 2026-08-17. There's no more window-root top
+            // chrome to sit below — left as-is this covered the whole window
+            // except a permanent 40px strip that never darkened.
+            Set<SizeTrait>(new TVVector(Resources.StaticResources.RootWindow.GetSize().X, Resources.StaticResources.RootWindow.GetSize().Y));
+            Set<PositionTrait>(new TVVector(0, 0));
             Set<BackgroundFillTrait>(new TVFillSolidColor(Microsoft.Xna.Framework.Color.Black * 0.75f));
             Set<OnHoverTrait>(new TVEvent<ClickEventArgs>((x) =>
             {
@@ -44,8 +49,8 @@ namespace GustUI.Elements
         public override void Update(Element parent = null)
         {
             base.Update(parent);
-            Set<SizeTrait>(new TVVector(Resources.StaticResources.RootWindow.GetSize().X, Resources.StaticResources.RootWindow.GetSize().Y - 40));
-            Set<PositionTrait>(new TVVector(0, 40));
+            Set<SizeTrait>(new TVVector(Resources.StaticResources.RootWindow.GetSize().X, Resources.StaticResources.RootWindow.GetSize().Y));
+            Set<PositionTrait>(new TVVector(0, 0));
 
             if (timeout > 0)
             {

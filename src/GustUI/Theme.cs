@@ -286,6 +286,18 @@ namespace GustUI
         /// rather than a bare literal so a future deliberate change is one
         /// edit instead of a repo-wide find/replace.</summary>
         public const int ChipRadius = 0;
+
+        /// <summary>Opacity for every full-screen view's own base background
+        /// fill (the sequencer's and every <see cref="FullScreenModalElement"/>
+        /// editor's) — multiply the fill color by this instead of using it at
+        /// full opacity, e.g. <c>new TVFillSolidColor(color * Theme.
+        /// ModalBackgroundAlpha)</c>. 2026-08-16: the decorative
+        /// WindowElement background video's own draw cost dropped ~89% (see
+        /// docs/video-playback-optimization.md), making it cheap enough to
+        /// leave running behind every view instead of only the welcome
+        /// screen — this is the shared "how much should subtly show
+        /// through" knob, not a per-view judgment call.</summary>
+        public const float ModalBackgroundAlpha = 0.93f;
     }
 
     public class ButtonStates

@@ -156,32 +156,6 @@ namespace GustUI.Managers
             this.spriteBatch = spriteBatch;
         }
 
-        private readonly List<Action> pendingBakes = new List<Action>();
-
-        /// <summary>
-        /// Defers a render-target bake (anything that calls SetRenderTarget,
-        /// e.g. BakeTrianglesToTexture) to the next safe point — right here
-        /// in DrawLoop, BEFORE SetRenderTarget(null)/Clear sets up the
-        /// backbuffer for the frame. Queuing a bake instead of running it
-        /// immediately, mid-scene, is not an optimization: GraphicsDevice
-        /// discards a render target's contents when you switch away from it
-        /// (the default RenderTargetUsage.DiscardContents), and that
-        /// includes the BACKBUFFER — a bake triggered mid-traversal (e.g. a
-        /// waveform block's lazy cache miss, discovered while drawing this
-        /// frame's UI to the backbuffer) steals the render target out from
-        /// under the frame already in progress and corrupts it (observed as
-        /// a solid/garbage-colored flash — "purple screen" — for that
-        /// frame). Queuing means: this frame, the caller keeps drawing
-        /// whatever it already had (stale texture or nothing); the bake
-        /// itself runs at the very start of the NEXT frame, before the
-        /// backbuffer has been touched at all, so there is nothing to
-        /// corrupt. One frame of staleness, never a corrupted frame.
-        /// </summary>
-        public void QueuePendingBake(Action bake)
-        {
-            pendingBakes.Add(bake);
-        }
-
         private RenderTarget2D GetRT()
         {
             var sz = Resources.StaticResources.RootWindow.ElementTrait<SizeTrait>().Value();
@@ -199,20 +173,6 @@ namespace GustUI.Managers
             var deltaTime = (float)gameTime.ElapsedGameTime.TotalSeconds;
 
             _frameCounter.Update(deltaTime);
-
-            if (pendingBakes.Count > 0)
-            {
-                // Snapshot + clear BEFORE running: a bake can itself queue
-                // another one (e.g. a still-settling resize drag re-misses
-                // the moment its own bake lands), which must wait for the
-                // NEXT frame, not re-enter this same pass.
-                var bakes = pendingBakes.ToArray();
-                pendingBakes.Clear();
-                foreach (Action bake in bakes)
-                {
-                    bake();
-                }
-            }
 
             GeometryBatch.BeginFrame();
 
@@ -950,105 +910,79 @@ namespace GustUI.Managers
         }
 
         /// <summary>
-        /// Renders indexed triangle geometry to a FRESH offscreen texture
-        /// at EXACTLY (width, height) — the "bake once, blit every frame
-        /// after" upgrade to <see cref="DrawTriangles"/>'s "pay the flush
-        /// cost every single frame" one. After this call the shape is a
-        /// normal Texture2D: draw it with the ordinary Draw(texture, rect,
-        /// tint) sprite path (batches, tints, everything the existing
-        /// baked-texture render mode already does) for as long as the
-        /// caller's own cache says the size hasn't changed — panning,
-        /// scrolling, and clipping never need a fresh bake, only a real
-        /// (width, height) change does. Vertex positions must already be
-        /// in the TARGET's own local space (0,0 top-left to width, height
-        /// bottom-right), not screen position and not RenderScale-adjusted
-        /// — this bakes a SIZE, not a placement; RenderScale (if any)
-        /// still applies naturally when the resulting texture is later
-        /// drawn through the normal sprite path.
-        ///
-        /// Mirrors <see cref="GetTargetClone"/>'s render-target save/
-        /// restore shape (bypasses the tracked <c>currentTarget</c> field
-        /// on purpose — this is a nested, transient target swap, not a
-        /// frame-level one) rather than <see cref="DrawTriangles"/>'s
-        /// "caller must already be mid-batch" assumption, since a bake is
-        /// naturally a rarer, cache-driven call that shouldn't have to
-        /// happen only from inside the middle of the main draw pass.
+        /// Appends previously-triangulated, LOCAL-space geometry (vertex
+        /// positions relative to origin (0,0) — see
+        /// <see cref="WaveformData.GetGeometryVertices"/>, the caller this
+        /// exists for) into the shared <see cref="GeometryBatch"/> at
+        /// <paramref name="offset"/>, tinted by <paramref name="tint"/>.
+        /// Replaces the old bake-to-RenderTarget2D path (BakeTrianglesToTexture,
+        /// removed 2026-08-19): the expensive part was never the texture,
+        /// it was re-running the triangulation math every frame — caching
+        /// the vertex/index ARRAYS gets the same "pay once, reuse many
+        /// frames" win without ever touching SetRenderTarget, so none of
+        /// the render-target-timing hazards that method's own doc comment
+        /// (and the QueuePendingBake machinery built around it) had to
+        /// guard against exist here at all. Costs no flush either — this
+        /// is exactly as batchable as any other GeometryBatch Append* call,
+        /// sharing a segment with surrounding flat-color content whenever
+        /// blend state matches. The translate/tint/UV-stamp work happens
+        /// directly inside GeometryBatch.AppendCachedTriangles as it copies
+        /// into the batch's OWN vertex array — no intermediate array here,
+        /// this would otherwise be a fresh allocation every visible
+        /// waveform block, every frame.
         /// </summary>
-        public Texture2D BakeTrianglesToTexture(VertexPositionColor[] vertices, short[] indices, int primitiveCount, int width, int height)
+        public void DrawCachedTriangles(GeometryVertex[] localVerts, short[] indices, int primitiveCount, Vector2 offset, Color tint)
         {
-            if (width <= 0 || height <= 0)
-            {
-                return null;
-            }
+            AtlasRegion white = GeometryAtlas.WhiteRegion;
+            // Same half-texel-inset collapse-to-center trick GeometryBatch's
+            // own UVRect uses for the reserved 1x1 white region — always
+            // the exact texel center, so any triangle samples pure opaque
+            // white regardless of size.
+            Vector2 uv = new Vector2(
+                (white.Pixels.X + 0.5f) / white.Texture.Width,
+                (white.Pixels.Y + 0.5f) / white.Texture.Height);
 
-            bool wasInBatch = IsInBatch;
-            if (wasInBatch)
-            {
-                End();
-            }
-
-            GraphicsDevice device = Resources.StaticResources.GraphicsDevice;
-            var preTarget = currentTarget;
-            var target = new RenderTarget2D(device, width, height, false, SurfaceFormat.Color, DepthFormat.None);
-            device.SetRenderTarget(target);
-            device.Clear(Color.Transparent);
-
-            if (primitiveCount > 0)
-            {
-                if (geometryEffect == null)
-                {
-                    geometryEffect = new BasicEffect(device) { VertexColorEnabled = true, World = Matrix.Identity };
-                }
-
-                geometryEffect.View = Matrix.Identity;
-                geometryEffect.Projection = Matrix.CreateOrthographicOffCenter(0, width, height, 0, 0, 1);
-
-                device.BlendState = BlendState.AlphaBlend;
-                device.RasterizerState = rasterizerState;
-                device.DepthStencilState = DepthStencilState.None;
-
-                foreach (EffectPass pass in geometryEffect.CurrentTechnique.Passes)
-                {
-                    pass.Apply();
-                    device.DrawUserIndexedPrimitives(PrimitiveType.TriangleList, vertices, 0, vertices.Length, indices, 0, primitiveCount);
-                }
-            }
-
-            device.SetRenderTarget(preTarget);
-
-            if (wasInBatch)
-            {
-                Begin();
-            }
-
-            return target;
+            GeometryBatch.AppendCachedTriangles(white.Texture, localVerts, indices, primitiveCount, offset, tint, uv, GetClipRectForGeometry(), null);
         }
 
         public void SetScissor(Rectangle? rect)
         {
             // Deliberately the GENERAL End()/Begin() pair (flushes geometry
             // too), NOT the sprite-only BeginSprite/EndSprite split defined
-            // above — measured via FrameProfiler on a busy scenario
-            // (--scenario deepzoom) that decoupling geometry from scissor
-            // flushes does NOT reduce total flush count at this stage of
-            // the migration (368 decoupled vs 370 coupled, on ~296 baseline
-            // sprite-only flushes) — worse than that, it ADDS flushes
-            // relative to baseline either way. Root cause: SetScissor's own
-            // real GraphicsDevice.ScissorRectangle update is still fully
-            // required for whatever remains on SpriteBatch (chiefly text —
-            // ubiquitous inside these exact ClipChildren regions, e.g.
-            // every timeline run label), so decoupling geometry from it
-            // doesn't remove any of the ORIGINAL scissor-flush cost — it
-            // only splits what used to be one combined sprite flush
-            // (background rect + its own label, both sprite-batched) into
-            // two (one geometry DrawIndexedPrimitives + one sprite flush),
-            // since they're now on different backends. The real elimination
-            // of scissor-driven flush cost is deferred until enough of what
-            // still draws inside these regions (text — Phase 7, baked
-            // shapes — Phase 4/5) is ALSO on the geometry backend that
-            // SpriteBatch stops needing real GPU scissor here at all —
-            // revisit decoupling then, when it can be measured to actually
-            // help instead of just adding complexity for no gain.
+            // above.
+            //
+            // 2026-08-20: reattempted the sprite-only split after fixing
+            // GeometryBatch.CloseSegment's absolute-vBase/baseVertex-always-0
+            // bug (the corruption the 2026-08-19 attempt below hit) — this
+            // time it didn't corrupt, but crashed hard: a native access
+            // violation (0xc0000005, unknown faulting module — not a managed
+            // exception, nothing in Console) after a frame with a 1.16s
+            // spike and heavy GC during a fast horizontal-scrollbar sweep
+            // over a maximized, GeometryBaked-mode timeline. Letting
+            // geometry accumulate across scissor changes means the
+            // vertex/index arrays can grow far larger before a flush than
+            // they ever did coupled — consistent with something in the
+            // Array.Resize / DynamicVertexBuffer-upload path (GeometryBatch.
+            // EnsureCapacity/Flush) not tolerating a much bigger single
+            // upload, though that's not yet root-caused. Reverted again;
+            // don't retry without root-causing THIS failure first (get a
+            // native crash dump / repro the buffer-growth path in
+            // isolation) — it's a worse failure mode than the visual
+            // corruption that blocked the first attempt.
+            //
+            // 2026-08-19: dropping the End()/Begin() pair here corrupted the
+            // Sequencer view's rendering — root-caused 2026-08-20 as
+            // GeometryBatch.CloseSegment's indexing bug (see its own doc).
+            // Also measured via FrameProfiler on a busy scenario
+            // (--scenario deepzoom) that decoupling did NOT reduce total
+            // flush count at that stage of the migration (368 decoupled vs
+            // 370 coupled, ~296 baseline sprite-only flushes) — text was
+            // still on SpriteBatch then and needed a real GPU scissor rect
+            // here regardless, so decoupling geometry from it didn't remove
+            // any of the original scissor-flush cost. Text has since moved
+            // onto the geometry backend (SDF glyphs, Phase 7), so that
+            // particular blocker no longer applies — but the crash above
+            // means this still isn't safe to flip.
             if (rect.HasValue)
             {
                 End();

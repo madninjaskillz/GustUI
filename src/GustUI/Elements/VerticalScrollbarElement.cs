@@ -73,6 +73,10 @@ public class VerticalScrollbarElement : Element
 
     public float MaxScroll => Math.Max(0f, contentSize - viewportSize);
 
+    /// <summary>See HorizontalScrollbarElement.IsNeeded's matching doc
+    /// comment — same fix, same reasoning.</summary>
+    public bool IsNeeded => contentSize > viewportSize;
+
     private float dragGrabOffset;      // pointer y - thumb top at grab time
     private bool paging;
     private int pageDirection;
@@ -201,7 +205,7 @@ public class VerticalScrollbarElement : Element
         var manager = Resources.StaticResources.DrawManager;
         Vector2 pos = this.GetActualXnaPosition();
         Vector2 size = this.GetSize().AsXna;
-        if (size.Y >= 1f && size.X >= 2f)
+        if (IsNeeded && size.Y >= 1f && size.X >= 2f)
         {
             manager.DrawFilledRectangle(new Rectangle((int)pos.X, (int)pos.Y, (int)size.X, (int)size.Y), TrackColor);
 

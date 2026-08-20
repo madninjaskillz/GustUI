@@ -93,11 +93,29 @@ public class FilledRectangleElement : RectangleElement
                     rect, gradient.PrimaryColor * gradient.Opacity, gradient.SecondaryColor * gradient.Opacity, gradient.Direction);
                 break;
             case TVVideoFill video:
-                var texture = video.GetTexture();
-                if (texture != null)
+                // Tagged (not just inline) because there's no occlusion
+                // culling anywhere in this Draw() call chain — an Element
+                // draws unconditionally every frame regardless of whether
+                // something fully opaque is on top of it, so the decorative
+                // WindowElement background video keeps decoding and drawing
+                // for the life of the session, sequencer open or not. Split
+                // into two tags (found 2026-08-16) to separate the actual
+                // question: is the cost in GetTexture() (frame decode +
+                // texture upload) or in the draw call itself?
+                Texture2D videoTexture;
+                using (Managers.Telemetry.Scope("Draw.VideoBackground.GetTexture"))
                 {
-                    Resources.StaticResources.DrawManager.Draw(texture, rect, Color.White * video.Opacity);
+                    videoTexture = video.GetTexture();
                 }
+
+                if (videoTexture != null)
+                {
+                    using (Managers.Telemetry.Scope("Draw.VideoBackground.Blit"))
+                    {
+                        Resources.StaticResources.DrawManager.Draw(videoTexture, rect, Color.White * video.Opacity);
+                    }
+                }
+
                 break;
         }
 

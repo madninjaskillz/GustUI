@@ -61,6 +61,7 @@ namespace GustUI.Rendering
             public BlendState Blend;
             public int IndexStart;
             public int IndexCount;
+            public int VertexStart;
             public bool IsText;
             public TextParams TextParams;
         }
@@ -148,6 +149,27 @@ namespace GustUI.Rendering
             }
         }
 
+        /// <summary>
+        /// Closes the open segment, recording <see cref="Segment.VertexStart"/>
+        /// (<c>currentSegmentVertexStart</c>) so <see cref="Flush"/> can pass
+        /// it as <c>DrawIndexedPrimitives</c>' <c>baseVertex</c> — every
+        /// Append* method's own <c>vBase</c> is relative to that same value
+        /// (<c>vertexCount - currentSegmentVertexStart</c>), NOT the
+        /// accumulator's absolute <c>vertexCount</c>. That distinction
+        /// matters because the index buffer is 16-bit: <c>MaxVerticesPerSegment</c>
+        /// only bounds one segment's OWN vertex span, but segments only
+        /// close on a texture/blend change or that cap — and per-vertex
+        /// ClipRect means a scissor change no longer forces one either (see
+        /// this class's own doc comment) — so many segments can still
+        /// accumulate well past 65536 vertices total between two
+        /// <see cref="Flush"/> calls. Indices computed against the absolute
+        /// vertexCount would silently wrap past that point, referencing an
+        /// unrelated vertex written earlier in the same flush — found
+        /// 2026-08-19 as a large stray triangle spanning unrelated on-screen
+        /// elements once a maximized window + GeometryBaked-mode waveforms
+        /// (far denser per-block than a baked-texture quad) pushed a single
+        /// flush's total past that threshold.
+        /// </summary>
         private void CloseSegment()
         {
             if (hasOpenSegment && indexCount > currentSegmentIndexStart)
@@ -158,6 +180,7 @@ namespace GustUI.Rendering
                     Blend = currentBlend,
                     IndexStart = currentSegmentIndexStart,
                     IndexCount = indexCount - currentSegmentIndexStart,
+                    VertexStart = currentSegmentVertexStart,
                     IsText = currentIsText,
                     TextParams = currentTextParams,
                 });
@@ -222,7 +245,8 @@ namespace GustUI.Rendering
 
             UVRect(texture, srcRect, out float u0, out float v0, out float u1, out float v1);
 
-            int vBase = vertexCount;
+            // Segment-relative — see CloseSegment's doc for why.
+            int vBase = vertexCount - currentSegmentVertexStart;
             vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Left, destRect.Top), color, new Vector2(u0, v0), clipRect);
             vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Top), color, new Vector2(u1, v0), clipRect);
             vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Bottom), color, new Vector2(u1, v1), clipRect);
@@ -253,7 +277,8 @@ namespace GustUI.Rendering
 
             UVRect(texture, srcRect, out float u0, out float v0, out float u1, out float v1);
 
-            int vBase = vertexCount;
+            // Segment-relative — see CloseSegment's doc for why.
+            int vBase = vertexCount - currentSegmentVertexStart;
             vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Left, destRect.Top), colorTopLeft, new Vector2(u0, v0), clipRect);
             vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Top), colorTopRight, new Vector2(u1, v0), clipRect);
             vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Bottom), colorBottomRight, new Vector2(u1, v1), clipRect);
@@ -292,7 +317,8 @@ namespace GustUI.Rendering
                 return new Vector2(pos.X + (dx * cos) - (dy * sin), pos.Y + (dx * sin) + (dy * cos));
             }
 
-            int vBase = vertexCount;
+            // Segment-relative — see CloseSegment's doc for why.
+            int vBase = vertexCount - currentSegmentVertexStart;
             vertices[vertexCount++] = new GeometryVertex(Corner(0, 0), color, new Vector2(u0, v0), clipRect);
             vertices[vertexCount++] = new GeometryVertex(Corner(destRect.Width, 0), color, new Vector2(u1, v0), clipRect);
             vertices[vertexCount++] = new GeometryVertex(Corner(destRect.Width, destRect.Height), color, new Vector2(u1, v1), clipRect);
@@ -334,7 +360,8 @@ namespace GustUI.Rendering
             float u1 = (float)(srcRect.X + srcRect.Width) / atlas.Width;
             float v1 = (float)(srcRect.Y + srcRect.Height) / atlas.Height;
 
-            int vBase = vertexCount;
+            // Segment-relative — see CloseSegment's doc for why.
+            int vBase = vertexCount - currentSegmentVertexStart;
             vertices[vertexCount++] = new GeometryVertex(destPos, color, new Vector2(u0, v0), clipRect);
             vertices[vertexCount++] = new GeometryVertex(new Vector2(destPos.X + destSize.X, destPos.Y), color, new Vector2(u1, v0), clipRect);
             vertices[vertexCount++] = new GeometryVertex(new Vector2(destPos.X + destSize.X, destPos.Y + destSize.Y), color, new Vector2(u1, v1), clipRect);
@@ -364,12 +391,60 @@ namespace GustUI.Rendering
             BeginSegmentIfNeeded(texture, blend, addVertices);
             EnsureCapacity(addVertices, addIndices);
 
-            int vBase = vertexCount;
+            // Segment-relative — see CloseSegment's doc for why.
+            int vBase = vertexCount - currentSegmentVertexStart;
             for (int i = 0; i < addVertices; i++)
             {
                 GeometryVertex v = verts[i];
                 v.ClipRect = clipRect;
                 vertices[vertexCount++] = v;
+            }
+
+            for (int i = 0; i < addIndices; i++)
+            {
+                indices[indexCount++] = (short)(vBase + idx[i]);
+            }
+        }
+
+        /// <summary>
+        /// Same shape as <see cref="AppendTriangles"/>, for one specific
+        /// caller (WaveformData's cached-array "Geometry (Baked)" mode,
+        /// DrawManager.DrawCachedTriangles): <paramref name="localVerts"/>
+        /// is LOCAL-space (relative to (0,0)) and gets translated by
+        /// <paramref name="offset"/> and multiplied by <paramref name="tint"/>
+        /// WHILE copying into this batch's own vertex array, instead of the
+        /// caller building a separate translated array first — that array
+        /// would otherwise be a fresh per-call allocation (this runs once
+        /// per visible waveform block, every frame), pure GC churn for data
+        /// that only ever needed to exist inside this buffer anyway. UV is
+        /// stamped fresh here too (not read from <paramref name="localVerts"/>)
+        /// since a long-lived cache can outlive an atlas grow/rebuild that
+        /// relocates the white region this samples.
+        /// </summary>
+        public void AppendCachedTriangles(Texture2D texture, GeometryVertex[] localVerts, short[] idx, int primitiveCount, Vector2 offset, Color tint, Vector2 uv, Vector4 clipRect, BlendState blend)
+        {
+            if (primitiveCount <= 0 || localVerts == null || localVerts.Length == 0)
+            {
+                return;
+            }
+
+            int addVertices = localVerts.Length;
+            int addIndices = primitiveCount * 3;
+
+            BeginSegmentIfNeeded(texture, blend, addVertices);
+            EnsureCapacity(addVertices, addIndices);
+
+            Vector4 tintVec = tint.ToVector4();
+            // Segment-relative — see CloseSegment's doc for why.
+            int vBase = vertexCount - currentSegmentVertexStart;
+            for (int i = 0; i < addVertices; i++)
+            {
+                GeometryVertex src = localVerts[i];
+                vertices[vertexCount++] = new GeometryVertex(
+                    new Vector2(src.Position.X + offset.X, src.Position.Y + offset.Y),
+                    new Color(src.Color.ToVector4() * tintVec),
+                    uv,
+                    clipRect);
             }
 
             for (int i = 0; i < addIndices; i++)
@@ -464,7 +539,7 @@ namespace GustUI.Rendering
                     pass.Apply();
                     device.Textures[0] = segment.Texture;
                     device.SamplerStates[0] = SamplerState.LinearClamp;
-                    device.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, segment.IndexStart, segment.IndexCount / 3);
+                    device.DrawIndexedPrimitives(PrimitiveType.TriangleList, segment.VertexStart, segment.IndexStart, segment.IndexCount / 3);
                 }
             }
 

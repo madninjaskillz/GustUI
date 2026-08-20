@@ -1,6 +1,7 @@
 using System;
 using GustUI.Attributes;
 using GustUI.Extensions;
+using GustUI.Rendering;
 using GustUI.Traits;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -164,11 +165,8 @@ public class WaveformElement : Element
 
     private static void DrawGeometryBaked(Managers.DrawManager manager, WaveformData data, int level, Rectangle rect, Color tint)
     {
-        Texture2D baked = data.GetGeometryBakedTexture(level, rect.Width, rect.Height);
-        if (baked != null)
-        {
-            manager.Draw(baked, rect, tint);
-        }
+        (GeometryVertex[] vertices, short[] indices, int primitiveCount) = data.GetGeometryVertices(level, rect.Width, rect.Height);
+        manager.DrawCachedTriangles(vertices, indices, primitiveCount, new Vector2(rect.X, rect.Y), tint);
     }
 
     private void DrawColumns(Managers.DrawManager manager, float[] minMax, Rectangle rect, Color tint)
@@ -205,13 +203,16 @@ public enum WaveformRenderMode
     /// couple of frames at the same size (i.e. basically everything).</summary>
     Geometry,
 
-    /// <summary>Same triangle geometry as <see cref="Geometry"/>, but
-    /// rendered to an offscreen texture ONCE per distinct size
-    /// (WaveformData.GetGeometryBakedTexture) and reused as an ordinary
-    /// tinted sprite on every later frame — BakedTexture's draw-time cost
-    /// (batches normally) with Geometry's crispness (no CPU-rasterize-then-
-    /// stretch blur), for as long as the caller's own width/height doesn't
-    /// change. The practical choice over bare Geometry for anything
-    /// scrolling/static rather than actively resizing every frame.</summary>
+    /// <summary>Same triangle geometry as <see cref="Geometry"/>, but the
+    /// TRIANGULATION (WaveformData.GetGeometryVertices) runs ONCE per
+    /// distinct size and the resulting vertex/index arrays are cached and
+    /// reused every later frame — DrawManager.DrawCachedTriangles just
+    /// translates + tints them into the shared geometry batch, no
+    /// re-triangulation, no texture/RenderTarget2D. Geometry's crispness
+    /// (no CPU-rasterize-then-stretch blur) at close to BakedTexture's
+    /// draw-time cost, for as long as the caller's own width/height
+    /// doesn't change. The practical choice over bare Geometry for
+    /// anything scrolling/static rather than actively resizing every
+    /// frame.</summary>
     GeometryBaked,
 }

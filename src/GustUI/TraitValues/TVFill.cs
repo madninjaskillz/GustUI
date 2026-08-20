@@ -190,7 +190,16 @@ namespace GustUI.TraitValues
         {
             this.video = video;
             player = new VideoPlayer();
-
+            // Set once, not every GetTexture() call (found 2026-08-16
+            // profiling the decorative background video's draw cost
+            // alongside the GetTexture()-itself fix in KNI's WMS
+            // VideoPlayer): both setters unconditionally make a real COM
+            // call down into Media Foundation (SetChannelVolumes(), even
+            // when the value hasn't actually changed) - doing that on
+            // every one of GetTexture()'s ~140Hz calls, for a value that's
+            // always the same, was pure waste.
+            player.Volume = 0.0f;
+            player.IsMuted = true;
         }
 
         private bool stopped;
@@ -217,8 +226,6 @@ namespace GustUI.TraitValues
                     return null;
                 }
 
-                player.Volume = 0.0f;
-                player.IsMuted = true;
                 if (player.State == MediaState.Stopped)
                 {
                     player.Play(video);

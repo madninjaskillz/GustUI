@@ -52,6 +52,20 @@ namespace GustUI.Managers
         private MouseState previousMouseState;
         private KeyboardState previousKeyboardState;
         private int previousScrollWheelValue;
+
+        /// <summary>Resyncs the scroll-delta baseline to <paramref name="value"/>
+        /// WITHOUT firing an OnScroll/OnScrollWheelChanged event — for a
+        /// caller that just drove one or more synthetic scroll frames (e.g.
+        /// the desktop remote-control API's /scroll endpoint) and is about
+        /// to hand control back to real mouse polling. Real hardware scroll
+        /// state never moved during the synthetic override, so the next
+        /// real poll would otherwise read a value that differs from
+        /// whatever the synthetic frames last left <c>previousScrollWheelValue</c>
+        /// at, firing a spurious "correcting" scroll event (in the OPPOSITE
+        /// direction, silently undoing the intended scroll) the instant real
+        /// input resumes. Call this with the real baseline (captured before
+        /// any synthetic override) right before releasing synthetic state.</summary>
+        public void SyncScrollBaseline(int value) => previousScrollWheelValue = value;
         private List<Element> currentlyHovered = new List<Element>();
         private List<Element> currentlyClicked = new List<Element>();
 

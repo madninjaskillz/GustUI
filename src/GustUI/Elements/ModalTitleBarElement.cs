@@ -46,7 +46,30 @@ namespace GustUI.Elements
         private static Color CloseIdleForeground => Color.Lerp(Resources.StaticResources.Theme.BodyText, Resources.StaticResources.Theme.SurfaceBorder, 0.4f);
         private static Color SizeHoverFill => Resources.StaticResources.Theme.SurfaceRaised;
 
+        /// <summary>Inactive-window title bar treatment (2026-08-17): a flat
+        /// neutral wash drawn ON TOP of the whole bar — gradient, accent
+        /// underline, everything — rather than recoloring the gradient/
+        /// underline's own fills. Deliberately NOT implemented by calling
+        /// Set&lt;BackgroundFillTrait&gt; on `this` every frame with a
+        /// desaturated gradient: `this`'s BackgroundFillTrait has dragBarElement/
+        /// closeButton/sizeButton permanently Sync-subscribed to it (see the
+        /// constructor's own Sync(...) calls) — Trait&lt;T&gt;.SyncSubscribe
+        /// is a live event subscription, not a one-time copy, so calling
+        /// Set&lt;BackgroundFillTrait&gt; on `this` on ANY later frame
+        /// re-fires it, stomping those three children's own carefully-set
+        /// Color.Transparent back to whatever `this` was just set to.
+        /// Found the hard way (live user report): re-setting the gradient
+        /// every frame permanently painted dragBarElement/closeButton
+        /// opaque, hiding the accent underline everywhere except the one
+        /// small gap their geometry didn't quite cover. An overlay added
+        /// as its own independent child sidesteps that whole hazard class —
+        /// it isn't Sync-subscribed to anything, so nothing it does can
+        /// cascade sideways onto a sibling.</summary>
+        private static Color InactiveOverlayColor => Resources.StaticResources.Theme.SurfaceBackdrop;
+        private const float InactiveOverlayOpacity = 0.55f;
+
         private FilledRectangleElement accentUnderline;
+        private FilledRectangleElement inactiveOverlay;
 
         /// <summary>What the red X does. Hosts with richer teardown than a
         /// bare Kill (hook scopes, view state) set their own close path here
@@ -57,8 +80,26 @@ namespace GustUI.Elements
         private BasicButtonElement closeButton;
         private BasicButtonElement sizeButton;
         private bool hasMaximimizeButton;
+
+        /// <summary>Whether the close X exists at all (2026-08-16 — added
+        /// for the sequencer's own title bar: it isn't something you close,
+        /// it's the base view every editor modal opens on top of, so a
+        /// close button there would either be a confusing no-op or need
+        /// invented "close to what?" semantics — better to just not have
+        /// one, same as it had no title bar at all before this).</summary>
+        private readonly bool closable;
+
+        /// <summary>Chrome width reserved on the right for whichever of the
+        /// close/maximize buttons actually exist — the single source both
+        /// the constructor and Update() size dragBarElement/position
+        /// sizeButton from, so the two stay in sync as closable/
+        /// hasMaximimizeButton vary per host instead of each hardcoding
+        /// BarHeight/80.</summary>
+        private float RightChromeWidth => (closable ? BarHeight : 0) + (hasMaximimizeButton ? BarHeight : 0);
+
         public ModalTitleBarElement()
         {
+            closable = true;
             dragBarElement = AddChildElement<BasicButtonElement>("drag bar");
             closeButton = AddChildElement<BasicButtonElement>("close button");
             sizeButton = AddChildElement<BasicButtonElement>("size button");
@@ -73,18 +114,40 @@ namespace GustUI.Elements
             Setup();
         }
 
-        public ModalTitleBarElement(string title, Element parent, TVVector position = null, TVVector size = null)
+        /// <summary>Whether this bar's drag-to-move/maximize affordances are
+        /// live at all — false for TabContainerElement's own inert base
+        /// title bar (2026-08-17, found live: GustUI's hit-testing doesn't
+        /// resolve overlaps within a subtree — EVERY element along EVERY
+        /// matching path gets the event regardless of visual z-order — so a
+        /// "fully covered, purely inert" title bar sitting underneath the
+        /// tab strip was never actually inert: its drag bar's OnMousePress/
+        /// OnMouseRelease AND, since fitToContent:false incidentally turns
+        /// hasMaximimizeButton on too, its maximize button, both fired
+        /// ALONGSIDE whatever the tab strip/tab button on top was supposed
+        /// to handle for the exact same click — the container itself would
+        /// start "being dragged" as a window and/or swallow pointer capture
+        /// on every single tab click. TabContainerElement's own tabStrip
+        /// already wires the identical HandleTitleBarPress/Release pair
+        /// itself ("the tab bar allows dragging this new container in
+        /// blank areas") — so the base title bar's copy is pure redundant
+        /// surface area once tabs exist, never load-bearing.</summary>
+        private readonly bool interactive;
+
+        public ModalTitleBarElement(string title, Element parent, TVVector position = null, TVVector size = null, bool closable = true, bool interactive = true)
         {
 
             this.Parent = parent;
+            this.closable = closable;
+            this.interactive = interactive;
 
             dragBarElement = AddChildElement<BasicButtonElement>("drag bar");
-            closeButton = AddChildElement<BasicButtonElement>("close button");
-            
+            if (closable)
+            {
+                closeButton = AddChildElement<BasicButtonElement>("close button");
+                Sync(closeButton);
+            }
 
-            Sync(closeButton);
-
-            hasMaximimizeButton = Parent is ModalWindowElement modalWindowElement && !modalWindowElement.FitModalToContent;
+            hasMaximimizeButton = interactive && Parent is ModalWindowElement modalWindowElement && !modalWindowElement.FitModalToContent;
 
             if (hasMaximimizeButton)
             {
@@ -97,40 +160,87 @@ namespace GustUI.Elements
 
             Set<BackgroundFillTrait>(new TVFillSimpleGradient(BarFillTop, BarFillBottom, Direction.Vertically));
             Set<BorderSizeTrait>(new TVInt(0));
-            Set<FontTrait>(Resources.StaticResources.Theme.UiFontBold);
+            Set<FontTrait>(Resources.StaticResources.Theme.UiFontSubtitle);
             Set<PositionTrait>(position ?? new TVVector(0, 0));
             Set<SizeTrait>(size ?? new TVVector(0, 0));
 
             accentUnderline = new FilledRectangleElement(0, (int)size.Y - 2, (int)size.X, 2, new TVFillSolidColor(AccentUnderline));
             AddChild(accentUnderline, "accent-underline");
 
-            closeButton.Set<SizeTrait>(new TVVector(size.Y, size.Y));
-            closeButton.Set<TextTrait>(Resources.StaticResources.Theme.Icons.CloseIcon.ToTextTrait());
-            closeButton.Set<FontTrait>(Resources.StaticResources.Theme.AltSymbolFont);
-            closeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
-            closeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
-            closeButton.Set<PositionTrait>(new TVVector(size.X - size.Y, 0));
-            closeButton.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => RequestClose()));
-            closeButton.Set<OnEnterTrait>(new TVEvent<ClickEventArgs>((x) =>
+            // Not Sync()'d to anything, not synced FROM anything — see its
+            // own doc comment. Explicit high Depth (not just "added last")
+            // so it draws above dragBarElement/closeButton/sizeButton/
+            // accentUnderline with no dependence on insertion-order
+            // assumptions — this is the one element in this file that
+            // genuinely needs to win every z-order tie.
+            inactiveOverlay = new FilledRectangleElement(0, 0, (int)size.X, (int)size.Y, new TVFillSolidColor(InactiveOverlayColor));
+            inactiveOverlay.Depth = 50;
+            if (inactiveOverlay.ElementTrait<BackgroundFillTrait>().Value() is TVFill overlayFill)
             {
-                closeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(CloseHoverFill));
-                closeButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
-            }));
-            closeButton.Set<OnExitTrait>(new TVEvent<ClickEventArgs>((x) =>
+                overlayFill.Opacity = InactiveOverlayOpacity;
+            }
+
+            AddChild(inactiveOverlay, "inactive-overlay");
+
+            if (closable)
             {
+                closeButton.Set<SizeTrait>(new TVVector(size.Y, size.Y));
+                closeButton.Set<TextTrait>(Resources.StaticResources.Theme.Icons.CloseIcon.ToTextTrait());
+                closeButton.Set<FontTrait>(Resources.StaticResources.Theme.AltSymbolFont);
                 closeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
                 closeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
-            }));
+                closeButton.Set<PositionTrait>(new TVVector(size.X - size.Y, 0));
+                closeButton.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => RequestClose()));
+                closeButton.Set<OnEnterTrait>(new TVEvent<ClickEventArgs>((x) =>
+                {
+                    closeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(CloseHoverFill));
+                    closeButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
+                }));
+                closeButton.Set<OnExitTrait>(new TVEvent<ClickEventArgs>((x) =>
+                {
+                    closeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
+                    closeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
+                }));
+            }
 
             if (hasMaximimizeButton)
             {
                 sizeButton.Set<SizeTrait>(new TVVector(size.Y, size.Y));
 
-                sizeButton.Set<FontTrait>(Resources.StaticResources.Theme.AltSymbolFont);
+                // Theme.SymbolFont (segmdl2.ttf), not AltSymbolFont
+                // (SegoeIcons.ttf) — 2026-08-17, found from the user's own
+                // test: AltSymbolFont's SDF bake only ever included the two
+                // codepoints this app was previously confirmed to actually
+                // ask it for (Cancel/FullScreen — see FontManager.cs's own
+                // IconRangesFor comment), so MinimizeIcon (BackToWindow,
+                // shown once actually maximized) rendered as nothing at
+                // all — blank button. SymbolFont's own bake is
+                // comprehensive (every UIFont.Symbol codepoint except the
+                // two confirmed SDF-unsafe ones, neither of which is this),
+                // so it already safely covers BackToWindow. Both maximize/
+                // minimize states now render from the same font rather
+                // than one working and the other silently blank.
+                sizeButton.Set<FontTrait>(Resources.StaticResources.Theme.SymbolFont);
                 sizeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
                 sizeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
-                sizeButton.Set<PositionTrait>(new TVVector(size.X - (80), 0));
-                sizeButton.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => ((ModalWindowElement)Parent).ToggleFullScreen()));
+                sizeButton.Set<PositionTrait>(new TVVector(size.X - RightChromeWidth, 0));
+                sizeButton.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) =>
+                {
+                    // Docked geometry is owned entirely by DockTo/LayoutDocked
+                    // (2026-08-17) — toggling isFullScreen while docked has no
+                    // visible effect (LayoutDocked overwrites Position/Size
+                    // again next frame regardless) AND leaves isFullScreen
+                    // stuck true for whenever the panel is later undocked,
+                    // which would then snap it to fullscreen out of nowhere
+                    // the very next frame. No-op instead — same treatment
+                    // ResizeHandlesElement now gives its own handles while
+                    // docked.
+                    var modalWindow = (ModalWindowElement)Parent;
+                    if (modalWindow.DockedSide == DockSide.None)
+                    {
+                        modalWindow.ToggleFullScreen();
+                    }
+                }));
                 sizeButton.Set<OnEnterTrait>(new TVEvent<ClickEventArgs>((x) =>
                 {
                     sizeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(SizeHoverFill));
@@ -143,19 +253,25 @@ namespace GustUI.Elements
                 }));
             }
 
-            dragBarElement.Set<SizeTrait>(new TVVector(size.X - size.Y, size.Y));
+            dragBarElement.Set<SizeTrait>(new TVVector(size.X - RightChromeWidth, size.Y));
             dragBarElement.Set<PositionTrait>(new TVVector(0, 0));
             dragBarElement.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
             dragBarElement.Set<TextTrait>(new TVText(title));
-            dragBarElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFontBold);
+            dragBarElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFontSubtitle);
             dragBarElement.Set<ForegroundColorTrait>(new TVColor(TitleText));
 
             // Drag-to-move is a ModalWindowElement behavior; other hosts
-            // (full-screen modals) get a static title strip.
-            if (Parent is ModalWindowElement dragHost)
+            // (full-screen modals) get a static title strip. Routed through
+            // HandleTitleBarPress/Release rather than handleStartDrag/
+            // handleStopDrag directly (2026-08-16, docked-modal feature) —
+            // those wrappers handle undock-on-grab and commit-dock-on-
+            // release; a non-dockable ModalWindowElement (DockedSide always
+            // None) behaves identically to before, since both wrappers just
+            // fall through to the same base drag calls in that case.
+            if (interactive && Parent is ModalWindowElement dragHost)
             {
-                dragBarElement.Set<OnMousePress>(new TVEvent<ClickEventArgs>((x) => dragHost.handleStartDrag(x)));
-                dragBarElement.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => dragHost.handleStopDrag(x)));
+                dragBarElement.Set<OnMousePress>(new TVEvent<ClickEventArgs>((x) => dragHost.HandleTitleBarPress(x)));
+                dragBarElement.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => dragHost.HandleTitleBarRelease(x)));
             }
 
             Setup();
@@ -184,17 +300,34 @@ namespace GustUI.Elements
             base.Update(parent);
             var size = parent.GetSize();
             Set<SizeTrait>(new TVVector(size.X, BarHeight));
+
+            // Inactive-window overlay (2026-08-17) — re-sized every frame,
+            // same "no dirty-checking" idiom the rest of this method already
+            // uses for position/size (Depth/FrontSequence, what "active" is
+            // keyed off, can change any frame a window is clicked/dragged).
+            // Zero size when active — "hide via zero size," the same idiom
+            // DockPreviewOverlay/TabMergePreviewOverlay already use, rather
+            // than a visibility trait GustUI doesn't have.
+            bool active = ModalWindowElement.IsFrontmostWindow(parent);
+            inactiveOverlay?.Set<SizeTrait>(active ? new TVVector(0, 0) : new TVVector(size.X, BarHeight));
+            inactiveOverlay?.Set<PositionTrait>(new TVVector(0, 0));
+
             accentUnderline?.Set<SizeTrait>(new TVVector(size.X, 2));
             accentUnderline?.Set<PositionTrait>(new TVVector(0, BarHeight - 2));
-            closeButton.Set<PositionTrait>(new TVVector(size.X - BarHeight, 0));
-            closeButton.Set<SizeTrait>(new TVVector(BarHeight, BarHeight));
+            if (closable)
+            {
+                closeButton.Set<PositionTrait>(new TVVector(size.X - BarHeight, 0));
+                closeButton.Set<SizeTrait>(new TVVector(BarHeight, BarHeight));
+            }
+
             if (hasMaximimizeButton)
             {
-                sizeButton.Set<PositionTrait>(new TVVector(size.X - 80, 0));
+                sizeButton.Set<PositionTrait>(new TVVector(size.X - RightChromeWidth, 0));
                 sizeButton.Set<SizeTrait>(new TVVector(BarHeight, BarHeight));
                 sizeButton.Set<TextTrait>(((ModalWindowElement)Parent).isFullScreen ? Resources.StaticResources.Theme.Icons.MinimizeIcon.ToTextTrait() : Resources.StaticResources.Theme.Icons.MaximizeIcon.ToTextTrait());
             }
-            dragBarElement.Set<SizeTrait>(new TVVector(size.X - (hasMaximimizeButton ? 80 : BarHeight), BarHeight));
+
+            dragBarElement.Set<SizeTrait>(new TVVector(size.X - RightChromeWidth, BarHeight));
         }
 
 
@@ -202,7 +335,11 @@ namespace GustUI.Elements
         {
             Set<BorderSizeTrait, TVInt>(new TVInt(0));
 
-            this.AddChild(closeButton, "closeButton");
+            if (closable)
+            {
+                this.AddChild(closeButton, "closeButton");
+            }
+
             this.AddChild(dragBarElement, "titleText");
         }
     }

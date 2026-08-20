@@ -132,6 +132,25 @@ public class Element : IDisposable
 
     private Vector2 desired_position;
     private Vector2 desired_size = Vector2.Zero;
+
+    /// <summary>Top-left corner a maximized window should occupy. Default is
+    /// the raw window origin; <see cref="ModalWindowElement"/> overrides this
+    /// to respect <see cref="Managers.DockLayout"/>'s live insets, so
+    /// maximizing while something is docked elsewhere fills only the space
+    /// docking leaves free instead of the whole screen.</summary>
+    protected virtual Vector2 FullScreenTargetPosition() => Vector2.Zero;
+
+    /// <summary>Size a maximized window should occupy — see
+    /// <see cref="FullScreenTargetPosition"/>.</summary>
+    protected virtual Vector2 FullScreenTargetSize() => Resources.StaticResources.RootWindow.GetSize().AsXna;
+
+    /// <summary>Below this many px of difference on either axis, a captured
+    /// "previous size" counts as "the same as fullscreen" — floats from a
+    /// lerped transition rarely land on an exact integer, and a handful of
+    /// px of drift shouldn't be treated as a real distinct size the user
+    /// meant to return to.</summary>
+    private const float FullScreenSizeEqualityToleragePx = 4f;
+
     internal void ToggleFullScreen()
     {
         isFullScreen = !isFullScreen;
@@ -139,14 +158,50 @@ public class Element : IDisposable
         {
             fs_prepos = ElementTrait<PositionTrait>().Value();
             fs_presize = ElementTrait<SizeTrait>().Value();
-            desired_position = new Vector2(0, 40);
-            desired_size = new Vector2(Resources.StaticResources.RootWindow.GetSize().X, Resources.StaticResources.RootWindow.GetSize().Y - 40);
+            desired_position = FullScreenTargetPosition();
+            desired_size = FullScreenTargetSize();
             sizeTransition = true;
         }
         else
         {
-            desired_size = fs_presize.AsXna;
-            desired_position = fs_prepos.AsXna;
+            // The size/position we're leaving — reliable to read right now
+            // because Update()'s own `if (isFullScreen)` block force-set
+            // both to exactly this every frame while isFullScreen was true.
+            Vector2 fullSize = ElementTrait<SizeTrait>().Value().AsXna;
+            Vector2 fullCenter = ElementTrait<PositionTrait>().Value().AsXna + fullSize / 2f;
+
+            // Found 2026-08-17 (live user test): "un-fullscreening a modal
+            // doesn't shrink". Root cause — fs_presize/fs_prepos are only a
+            // USEFUL restore target when they genuinely differ from the
+            // fullscreen rect; a modal that was already filling its
+            // available space (the common case: the sequencer's default
+            // open size, or any panel maximized right after opening, with
+            // no resize in between) captures a "previous" size that's
+            // identical to fullscreen, so restoring it was an invisible
+            // no-op — the modal visibly stayed full. fs_presize can also be
+            // null outright (isFullScreen set directly via the public
+            // IsFullScreen property, e.g. preserving the sequencer's
+            // maximized state across a rebuild — see ModalWindowElement.cs
+            // — never goes through the `if (isFullScreen)` capture branch
+            // above). Both cases are "no real previous size to return to",
+            // so both fall through to the same explicit fallback: shrink to
+            // 70% of the fullscreen size, keeping the same center point,
+            // rather than silently doing nothing.
+            bool hasDistinctPreviousSize = fs_presize != null && fs_prepos != null
+                && (Math.Abs(fs_presize.AsXna.X - fullSize.X) > FullScreenSizeEqualityToleragePx
+                    || Math.Abs(fs_presize.AsXna.Y - fullSize.Y) > FullScreenSizeEqualityToleragePx);
+
+            if (hasDistinctPreviousSize)
+            {
+                desired_size = fs_presize.AsXna;
+                desired_position = fs_prepos.AsXna;
+            }
+            else
+            {
+                desired_size = fullSize * 0.7f;
+                desired_position = fullCenter - desired_size / 2f;
+            }
+
             sizeTransition = true;
         }
     }
@@ -329,8 +384,9 @@ public class Element : IDisposable
         // (status bar, tooltip) existed. Depth is now authoritative:
         // equal-depth siblings draw in insertion order (TVElements' OrderBy
         // is stable), so "added later = on top" still holds within a tier,
-        // and explicit tiers (tooltip 1000000 > popup 500000 > status bar
-        // 100000 > loading 90000 > side panels 50000 > content 0) behave as
+        // and explicit tiers (tooltip 1,000,000 > dock preview 700,000 >
+        // popup 500,000 > status bar 100,000 > loading 90,000 > modal
+        // 60,000 > side panels 50,000 > content 0) behave as
         // written. Click-to-front for modal windows still calls
         // MoveToFront() explicitly on press.
     }
@@ -379,6 +435,35 @@ public class Element : IDisposable
 
     public void ReleasePointer() => Resources.StaticResources.InputManager.ReleasePointer(this);
 
+    /// <summary>Logical-space (unscaled — same units as PositionTrait/
+    /// SizeTrait) stack of the currently-visible region, mirroring
+    /// DrawManager's own (physical-pixel, RenderScale-applied) scissorStack
+    /// one level behind it: pushed/popped at the exact same ClipChildren
+    /// boundaries, just kept in the element tree's own coordinate space so
+    /// <see cref="IsPotentiallyVisible"/> can test a child's bounds without
+    /// any RenderScale conversion. Static/single-threaded, matching every
+    /// other per-frame traversal state in this class (FrameProfiler et al).</summary>
+    private static readonly Stack<Rectangle> visibleClipStack = new Stack<Rectangle>();
+
+    /// <summary>Cheap AABB reject: false only when this element has real
+    /// bounds (Position+SizeTrait, the same guard <see cref="IsMouseOver"/>
+    /// uses) AND those bounds provably don't overlap <paramref name="clip"/>.
+    /// Elements without resolvable bounds (e.g. SizeFitsChildren containers
+    /// that never write SizeTrait) always report visible — safe default,
+    /// never culls something we can't actually measure.</summary>
+    private bool IsPotentiallyVisible(Rectangle clip)
+    {
+        if (CachedPositionTrait == null || CachedSizeTrait == null)
+        {
+            return true;
+        }
+
+        Vector2 pos = this.GetActualXnaPosition();
+        TVVector size = SizeFitsChildren ? this.GetSize() : CachedSizeTrait.Value();
+        Rectangle bounds = new Rectangle((int)pos.X, (int)pos.Y, size.X.AsInt(), size.Y.AsInt());
+        return bounds.Intersects(clip);
+    }
+
     public virtual void Draw()
     {
         FrameProfiler.CountElementDraw();
@@ -386,23 +471,51 @@ public class Element : IDisposable
         if (childrenTrait != null)
         {
             bool clip = ClipChildren && CachedPositionTrait != null && CachedSizeTrait != null;
+            bool pushedVisibleClip = false;
             if (clip)
             {
                 Vector2 clipPos = this.GetActualXnaPosition();
                 TVVector clipSize = this.GetSize();
-                Resources.StaticResources.DrawManager.PushScissor(
-                    new Rectangle((int)clipPos.X, (int)clipPos.Y, clipSize.X.AsInt(), clipSize.Y.AsInt()));
+                Rectangle logicalClipRect = new Rectangle((int)clipPos.X, (int)clipPos.Y, clipSize.X.AsInt(), clipSize.Y.AsInt());
+                Resources.StaticResources.DrawManager.PushScissor(logicalClipRect);
+
+                visibleClipStack.Push(visibleClipStack.Count > 0
+                    ? Rectangle.Intersect(visibleClipStack.Peek(), logicalClipRect)
+                    : logicalClipRect);
+                pushedVisibleClip = true;
             }
 
             List<Element> items = childrenTrait.Value().Items;
-            for (int i = 0; i < items.Count; i++)
+            // Cull against the nearest ClipChildren ancestor's region (not
+            // just this element's own) — a non-clipping passthrough
+            // container's children still sit inside whatever ancestor
+            // region is active, e.g. a row inside a scrolled panel.
+            if (visibleClipStack.Count > 0)
             {
-                items[i].Draw();
+                Rectangle activeClip = visibleClipStack.Peek();
+                for (int i = 0; i < items.Count; i++)
+                {
+                    if (items[i].IsPotentiallyVisible(activeClip))
+                    {
+                        items[i].Draw();
+                    }
+                }
+            }
+            else
+            {
+                for (int i = 0; i < items.Count; i++)
+                {
+                    items[i].Draw();
+                }
             }
 
             if (clip)
             {
                 Resources.StaticResources.DrawManager.PopScissor();
+            }
+            if (pushedVisibleClip)
+            {
+                visibleClipStack.Pop();
             }
         }
     }
@@ -535,14 +648,37 @@ public class Element : IDisposable
         if (isFullScreen)
         {
             ToggleFullScreen();
-            desired_position = new Vector2(fs_prepos.AsXna.X,40);
-            //this.Set<PositionTrait>(new TVVector(this.ElementTrait<PositionTrait>().Value().X, 20));
+            desired_position = new Vector2(fs_prepos.AsXna.X, FullScreenTargetPosition().Y);
         }
 
         BeingDragged = true;
         if (x is ClickEventArgs clickEventArgs)
         {
             dragOffset = clickEventArgs.GlobalMousePosition.AsXna;
+
+            // Found 2026-08-17 (user report): dragging a modal's title bar
+            // never captured the pointer — unlike ResizeHandlesElement,
+            // which needed the exact same fix earlier this session for the
+            // exact same reason (see its own BeginResize doc comment).
+            // Continuation itself doesn't depend on this (the delta-move
+            // below, in Update()'s own `if (BeingDragged)` block, is an
+            // unconditional per-frame poll of raw mouse state, hover-
+            // independent) — this is purely to stop OTHER elements from
+            // reacting to OnMouseButtonHeldDown while the cursor sweeps
+            // over them mid-drag, which is exactly what happens whenever
+            // the window itself can't actually follow the cursor (clamped
+            // by a min-size, FillsAvailableSpace re-asserting its own
+            // position, a screen-edge clamp) — the drag keeps running, so
+            // the cursor drifts arbitrarily far from the window's own
+            // (stuck) position, sweeping over whatever's underneath.
+            // Capturing clickEventArgs.Element (the drag bar itself, the
+            // SAME element OnMouseRelease is wired to below in
+            // ModalTitleBarElement's constructor) rather than `this` (the
+            // modal) matters: InputManager's captured-pointer dispatch
+            // delivers release hover-independently ONLY to the captured
+            // element, so capturing anything else would silently swallow
+            // the release DockTo/tab-merge commit depends on.
+            clickEventArgs.Element.CapturePointer();
         }
 
         this.Set<OnExitTrait>(new TVEvent<ClickEventArgs>((x) =>
@@ -569,8 +705,51 @@ public class Element : IDisposable
         // popups behind itself, since those draw at the fixed PopupDepth
         // rather than via MoveToFront.
         var candidates = Resources.StaticResources.RootWindow.Children.Items.Where(x => !(x is TooltipElement));
-        this.Depth = candidates.Any() ? candidates.Max(x => x.Depth) + 1 : 0;
+
+        // Same poisoning class as the TooltipElement exclusion above, just
+        // from the OTHER direction: any other permanently-present, fixed-
+        // tier root-window child (a status bar, a persistent transport bar
+        // — both app-level types GustUI can't name here) sitting ABOVE the
+        // modal tier by design would otherwise get treated as a legitimate
+        // "current front" to leapfrog past. Found 2026-08-17: a resizable
+        // ModalWindowElement's own justSpawned->MoveToFront() picked up
+        // such a bar's depth as the pool max and jumped itself to
+        // (that bar's depth)+1 — comfortably above FullScreenModalElement's
+        // own fixed 60,000 tier — so every full-screen editor opened "over"
+        // it afterward silently rendered (and hit-tested) BEHIND it
+        // instead, with no exception anywhere to reveal why. MoveToFront is
+        // only ever used to reorder PEERS within the base content/floating-
+        // window layer (regular drag-to-front, ModalWindowElement spawn/
+        // dock) — never called on a tier singleton itself — so clamping the
+        // result just below the modal tier is safe for every current
+        // caller and keeps the documented tier ordering (tooltip > dock
+        // preview > popup > status bar > loading > MODAL > side panels >
+        // content) intact no matter what else happens to be alive when a
+        // floating window is brought to front.
+        int ceiling = FullScreenModalElement.ModalDepth - 1;
+        this.Depth = candidates.Any() ? Math.Min(candidates.Max(x => x.Depth) + 1, ceiling) : 0;
+
+        // 2026-08-17 (inactive-title-bar-desaturation feature): Depth alone
+        // can't answer "which window was brought to front most recently"
+        // once two or more windows are both clamped to the same `ceiling`
+        // above — found live, via the control API, the very first time
+        // ModalWindowElement.IsFrontmostWindow tried to use Depth for
+        // exactly that: it ties, so both windows read as active. A separate,
+        // never-clamped, always-increasing sequence number — bumped here,
+        // the one place "this window is now the front one" is decided —
+        // has no ceiling to saturate against.
+        this.FrontSequence = ++frontSequenceCounter;
     }
+
+    private static long frontSequenceCounter = 0;
+
+    /// <summary>Monotonically increasing — bumped by <see cref="MoveToFront"/>,
+    /// never reset, never clamped. The highest value among a set of
+    /// siblings is unambiguously "whichever was brought to front most
+    /// recently," unlike <see cref="Depth"/> once several of them share the
+    /// same clamped ceiling. internal: <see cref="ModalWindowElement.IsFrontmostWindow"/>
+    /// is the one reader.</summary>
+    internal long FrontSequence { get; private set; }
 
     internal void handleStopDrag(TVEventArgs x)
     {
@@ -667,10 +846,51 @@ public class Element : IDisposable
 
         if (CachedChildrenTrait != null)
         {
-            List<Element> items = CachedChildrenTrait.Value().Items;
-            for (int i = 0; i < items.Count; i++)
+            // Same logical-clip cull as Draw() (visibleClipStack is shared
+            // between the two passes — safe since a frame's Update sweep
+            // always fully unwinds before that frame's Draw sweep starts,
+            // never interleaved). An off-screen element skipping Update
+            // just means its own animation/drag state holds for one frame
+            // rather than progressing unseen — same "one frame of
+            // staleness" tradeoff QueuePendingBake already makes. Input
+            // hit-testing is unaffected: InputManager.CollectHovered walks
+            // the tree independently of Update/Draw.
+            bool clip = ClipChildren && CachedPositionTrait != null && CachedSizeTrait != null;
+            bool pushedVisibleClip = false;
+            if (clip)
             {
-                items[i].Update(this);
+                Vector2 clipPos = this.GetActualXnaPosition();
+                TVVector clipSize = this.GetSize();
+                Rectangle logicalClipRect = new Rectangle((int)clipPos.X, (int)clipPos.Y, clipSize.X.AsInt(), clipSize.Y.AsInt());
+                visibleClipStack.Push(visibleClipStack.Count > 0
+                    ? Rectangle.Intersect(visibleClipStack.Peek(), logicalClipRect)
+                    : logicalClipRect);
+                pushedVisibleClip = true;
+            }
+
+            List<Element> items = CachedChildrenTrait.Value().Items;
+            if (visibleClipStack.Count > 0)
+            {
+                Rectangle activeClip = visibleClipStack.Peek();
+                for (int i = 0; i < items.Count; i++)
+                {
+                    if (items[i].IsPotentiallyVisible(activeClip))
+                    {
+                        items[i].Update(this);
+                    }
+                }
+            }
+            else
+            {
+                for (int i = 0; i < items.Count; i++)
+                {
+                    items[i].Update(this);
+                }
+            }
+
+            if (pushedVisibleClip)
+            {
+                visibleClipStack.Pop();
             }
         }
 
@@ -700,15 +920,35 @@ public class Element : IDisposable
 
         if (isFullScreen)
         {
-            float topLimit = 0;
-            if (Resources.StaticResources.RootWindow.Children.Items.Any(x => x is FruitMenuElement))
+            // Found 2026-08-17 (user report): maximize never animated while
+            // unmaximize did, and maximize ignored docked panels. Root cause
+            // of the first half — this block used to force Size/Position
+            // straight to the target every frame, UNCONDITIONALLY, right
+            // after the sizeTransition lerp above computed a partial step
+            // toward that same target; the lerp's intermediate frames were
+            // therefore always immediately overwritten, so entering
+            // fullscreen visibly snapped instead of animating. Exiting
+            // fullscreen never hit this (isFullScreen is already false by
+            // then), which is why only that direction ever animated.
+            //
+            // Fix: only retarget (and only via the SAME lerp everything else
+            // uses) when the target actually moved — from a window resize or
+            // a dock/undock elsewhere changing FullScreenTargetPosition/Size
+            // — rather than force-setting the traits directly every frame.
+            // This also fixes the second half of the report for free: since
+            // ModalWindowElement overrides those two methods to route through
+            // Managers.DockLayout's live insets (see FillsAvailableSpace's
+            // identical formula), a maximized window now continuously tracks
+            // whatever space docking currently leaves available, animating
+            // smoothly to the new size if that changes while it's maximized.
+            Vector2 target = FullScreenTargetSize();
+            Vector2 targetPos = FullScreenTargetPosition();
+            if (Vector2.DistanceSquared(desired_size, target) > 1f || Vector2.DistanceSquared(desired_position, targetPos) > 1f)
             {
-                topLimit = Resources.StaticResources.RootWindow.Children.Items.First(x => x is FruitMenuElement).GetSize().Y;
+                desired_size = target;
+                desired_position = targetPos;
+                sizeTransition = true;
             }
-
-
-            Set<SizeTrait>(new TVVector(Resources.StaticResources.RootWindow.GetSize().X, Resources.StaticResources.RootWindow.GetSize().Y - topLimit));
-            Set<PositionTrait>(new TVVector(0, topLimit));
         }
 
         previousMouseState = mouseState;

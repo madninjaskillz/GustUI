@@ -74,6 +74,18 @@ public class HorizontalScrollbarElement : Element
 
     public float MaxScroll => Math.Max(0f, contentSize - viewportSize);
 
+    /// <summary>False once ContentSize fits within ViewportSize with
+    /// nothing to scroll — Draw() skips rendering entirely in that case
+    /// (2026-08-17: previously always drew a full-length, permanently
+    /// "disabled-looking" track+thumb even with nothing to scroll — dead
+    /// chrome, not an intentional design). Press handling was already
+    /// inert then (HandlePress's own MaxScroll &lt;= 0f early-return); this
+    /// just stops it from drawing too. A caller that also wants to reclaim
+    /// the bar's own reserved layout space when hidden should check this
+    /// too — GustUI can't do that part itself, it doesn't own the
+    /// caller's layout.</summary>
+    public bool IsNeeded => contentSize > viewportSize;
+
     private float dragGrabOffset;      // pointer x - thumb left at grab time
     private bool paging;
     private int pageDirection;
@@ -202,7 +214,7 @@ public class HorizontalScrollbarElement : Element
         var manager = Resources.StaticResources.DrawManager;
         Vector2 pos = this.GetActualXnaPosition();
         Vector2 size = this.GetSize().AsXna;
-        if (size.X >= 1f && size.Y >= 2f)
+        if (IsNeeded && size.X >= 1f && size.Y >= 2f)
         {
             manager.DrawFilledRectangle(new Rectangle((int)pos.X, (int)pos.Y, (int)size.X, (int)size.Y), TrackColor);
 

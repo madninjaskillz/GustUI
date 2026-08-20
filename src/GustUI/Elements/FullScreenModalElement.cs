@@ -1,16 +1,18 @@
 using GustUI.Extensions;
+using GustUI.Models;
 using GustUI.Traits;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
-using System.Linq;
+using System.Collections.Generic;
 
 namespace GustUI.Elements
 {
     /// <summary>
     /// A full-screen MODAL surface: an opaque panel that fills the window
-    /// between the top chrome (a <see cref="FruitMenuElement"/>, when one is
-    /// present) and an app-declared <see cref="BottomInset"/> (e.g. a status
-    /// bar) — chrome is never covered. Content views host their elements as
+    /// between whatever <see cref="Managers.DockLayout"/> reserves on each
+    /// edge (docked panels — the loop browser, wave bank, Stack) and an
+    /// app-declared <see cref="BottomInset"/> (e.g. a status bar) — chrome
+    /// is never covered. Content views host their elements as
     /// children of the modal; whatever lies beneath stays alive and untouched
     /// and is simply revealed again when the modal closes.
     ///
@@ -38,8 +40,10 @@ namespace GustUI.Elements
     public class FullScreenModalElement : FilledRectangleElement
     {
         /// <summary>Depth tier for full-screen modals. The documented root
-        /// tiers: tooltip 1000000 &gt; popup 500000 &gt; status bar 100000 &gt;
-        /// loading 90000 &gt; MODAL 60000 &gt; side panels 50000 &gt; content 0.</summary>
+        /// tiers: tooltip 1000000 &gt; dock preview 700000 (see
+        /// <see cref="DockPreviewOverlay"/>) &gt; popup 500000 &gt; status bar
+        /// 100000 &gt; loading 90000 &gt; MODAL 60000 &gt; side panels 50000 &gt;
+        /// content 0.</summary>
         public const int ModalDepth = 60000;
 
         /// <summary>Window-bottom pixels left uncovered (the app's bottom
@@ -60,10 +64,24 @@ namespace GustUI.Elements
 
         private readonly int hookScopeToken;
         private Vector2 lastWindowSize = Vector2.Zero;
+        private float lastLeftInset = -1f;
+        private float lastRightInset = -1f;
+        private float lastTopInset = -1f;
+        private float lastBottomInset = -1f;
         private bool closed;
         private ModalTitleBarElement titleBar;
         private string title;
         private System.Action onCloseRequested;
+        private MenuBarElement menuBar;
+        private ToolbarElement toolbar;
+
+        /// <summary>See ModalWindowElement's identically-named/-purposed
+        /// fields (including toolbarSlot's own doc comment on why toolbar
+        /// isn't itself a chromeRow child) — same wrapping-row mechanism,
+        /// this is the FullScreenModalElement counterpart.</summary>
+        private HorizontalStackElement chromeRow;
+        private FilledRectangleElement menuSpacer;
+        private FilledRectangleElement toolbarSlot;
 
         /// <summary>
         /// The modal's window-chrome title (the welcome/About-modal look:
@@ -103,12 +121,85 @@ namespace GustUI.Elements
             }
         }
 
+        /// <summary>Height of the chrome row(s) directly below the title
+        /// bar — see ModalWindowElement.ChromeRowHeight's identical doc
+        /// comment for the wrap-aware reasoning.</summary>
+        private int ChromeRowHeight => chromeRow != null
+            ? (int)chromeRow.GetSize().Y
+            : (menuBar != null ? MenuBarElement.BarHeight : 0);
+
         /// <summary>Y (modal-relative) where hosted content starts: below the
-        /// title-bar chrome when one exists, else 0.</summary>
-        public int ContentTop => titleBar != null ? ModalTitleBarElement.BarHeight : 0;
+        /// title-bar chrome when one exists (else 0), plus the shared menu/
+        /// toolbar row (see <see cref="ChromeRowHeight"/>).</summary>
+        public int ContentTop => (titleBar != null ? ModalTitleBarElement.BarHeight : 0) + ChromeRowHeight;
 
         /// <summary>The composed chrome (null until a <see cref="Title"/> is set).</summary>
         public ModalTitleBarElement TitleBar => titleBar;
+
+        /// <summary>
+        /// Shows (or replaces) this modal's own menu strip, directly below
+        /// its title bar — the per-modal replacement for the old global
+        /// FruitMenuElement (2026-08-17 rework: no global menu bar; views
+        /// that implement IViewMenuContext call this with their own
+        /// MenuSections() right after setting Title). No-op if
+        /// <paramref name="sections"/> is null/empty — a view with nothing
+        /// to contribute (Preferences, About, etc.) simply never calls this
+        /// and gets no menu row, same as before.
+        /// </summary>
+        public void SetMenu(List<MenuItemModel> sections)
+        {
+            if (sections == null || sections.Count == 0)
+            {
+                return;
+            }
+
+            if (menuBar == null)
+            {
+                menuBar = new MenuBarElement(this, sections);
+                menuBar.Set<PositionTrait>(new TVVector(0, titleBar != null ? ModalTitleBarElement.BarHeight : 0));
+                AddChild(menuBar, "modal-menu-bar");
+            }
+            else
+            {
+                menuBar.SetItems(sections);
+            }
+        }
+
+        /// <summary>Lazily builds (or returns the existing) toolbar strip —
+        /// see ModalWindowElement.EnsureToolbar's identical doc comment
+        /// (wrap-below-the-menu-bar included); this is the
+        /// FullScreenModalElement counterpart. Call AFTER SetMenu if this
+        /// modal also has a menu, so the reserved space matches what's
+        /// actually there.</summary>
+        public ToolbarElement EnsureToolbar()
+        {
+            if (toolbar == null)
+            {
+                // toolbar itself stays a direct child of `this`, not of
+                // chromeRow — see ModalWindowElement.toolbarSlot's doc
+                // comment for why.
+                toolbar = new ToolbarElement(this);
+                AddChild(toolbar, "modal-toolbar");
+
+                float y = titleBar != null ? ModalTitleBarElement.BarHeight : 0;
+                chromeRow = new HorizontalStackElement { WrapWidth = this.GetSize().X };
+                chromeRow.Set<PositionTrait>(new TVVector(0, y));
+                AddChild(chromeRow, "chrome-row");
+
+                if (menuBar != null)
+                {
+                    menuSpacer = new FilledRectangleElement(0, 0, (int)menuBar.ContentWidth, MenuBarElement.BarHeight,
+                        new TVFillSolidColor(Color.Transparent));
+                    chromeRow.AddChild(menuSpacer, "menu-spacer");
+                }
+
+                toolbarSlot = new FilledRectangleElement(0, 0, (int)toolbar.ContentWidth, ToolbarElement.BarHeight,
+                    new TVFillSolidColor(Color.Transparent));
+                chromeRow.AddChild(toolbarSlot, "toolbar-slot");
+            }
+
+            return toolbar;
+        }
 
         private void EnsureTitleBar()
         {
@@ -130,7 +221,15 @@ namespace GustUI.Elements
         {
             IsChrome = true;
             Depth = ModalDepth;
-            Set<BackgroundFillTrait>(new TVFillSolidColor(Resources.StaticResources.Theme.SurfaceBackdrop));
+            // Theme.ModalBackgroundAlpha (see its own doc comment): every
+            // full-screen view's base background is now a subtly
+            // translucent wash of its own color rather than fully opaque,
+            // so the decorative WindowElement background video shows
+            // through faintly instead of being fully hidden the instant
+            // any view opens. Callers that override this (see e.g.
+            // PianoRollView/ModuleEditorView) should multiply by the same
+            // constant rather than going back to full opacity.
+            Set<BackgroundFillTrait>(new TVFillSolidColor(() => Resources.StaticResources.Theme.SurfaceBackdrop * Theme.ModalBackgroundAlpha));
             hookScopeToken = Resources.StaticResources.InputManager.PushHookScope();
             Layout();
         }
@@ -153,26 +252,61 @@ namespace GustUI.Elements
         {
             base.Update(parent);
 
+            // Keeps the toolbar/menu wrap decision live across a resize —
+            // see ModalWindowElement.Update's identical block.
+            if (chromeRow != null)
+            {
+                chromeRow.WrapWidth = this.GetSize().X;
+                if (menuSpacer != null)
+                {
+                    menuSpacer.Set<SizeTrait>(new TVVector(menuBar.ContentWidth, MenuBarElement.BarHeight));
+                }
+
+                toolbarSlot.Set<SizeTrait>(new TVVector(toolbar.ContentWidth, ToolbarElement.BarHeight));
+                float rowTop = titleBar != null ? ModalTitleBarElement.BarHeight : 0;
+                TVVector slotPosition = toolbarSlot.ElementTrait<PositionTrait>().Value();
+                toolbar.Set<PositionTrait>(new TVVector(slotPosition.X, rowTop + slotPosition.Y));
+            }
+
             Vector2 windowSize = Resources.StaticResources.RootWindow.GetSize().AsXna;
-            if (windowSize != lastWindowSize && windowSize.X > 0 && windowSize.Y > 0)
+            // DockLayout insets (2026-08-16 docked-modal feature) change
+            // independent of the window's own size — a panel docking/
+            // undocking elsewhere doesn't resize the window at all — so
+            // they need their own poll-and-compare here, same idiom as
+            // windowSize itself already uses; there's no push/event path
+            // from DockLayout to notify every open modal a dock changed.
+            bool sizeChanged = windowSize != lastWindowSize && windowSize.X > 0 && windowSize.Y > 0;
+            // All four sides, not just Left/Right (2026-08-17 — found live:
+            // Top/Bottom docking was added specifically for the Stack, which
+            // docks Bottom, but this check never looked at Top/BottomInset —
+            // opening/closing the Stack while a FullScreenModalElement view
+            // was open silently failed to resize it unless something else
+            // ALSO changed that same frame).
+            bool insetsChanged = Managers.DockLayout.LeftInset != lastLeftInset
+                || Managers.DockLayout.RightInset != lastRightInset
+                || Managers.DockLayout.TopInset != lastTopInset
+                || Managers.DockLayout.BottomInset != lastBottomInset;
+            if (sizeChanged || insetsChanged)
             {
                 lastWindowSize = windowSize;
+                lastLeftInset = Managers.DockLayout.LeftInset;
+                lastRightInset = Managers.DockLayout.RightInset;
+                lastTopInset = Managers.DockLayout.TopInset;
+                lastBottomInset = Managers.DockLayout.BottomInset;
                 Layout();
             }
         }
 
+        // No more window-root chrome to inset below (the global fruit menu
+        // was removed entirely in the 2026-08-17 per-modal menu rework) —
+        // top/left/right/bottom insets now come purely from whatever's
+        // docked (Managers.DockLayout, Top/Bottom added same day) plus this
+        // instance's own app-declared BottomInset (status bar).
         private void Layout()
         {
-            Vector2 windowSize = Resources.StaticResources.RootWindow.GetSize().AsXna;
-            float top = 0;
-            Element menu = Resources.StaticResources.RootWindow.Children?.Items.FirstOrDefault(x => x is FruitMenuElement);
-            if (menu != null)
-            {
-                top = menu.GetSize().Y;
-            }
-
-            Set<PositionTrait>(new TVVector(0, top));
-            Set<SizeTrait>(new TVVector(windowSize.X, System.Math.Max(0, windowSize.Y - top - BottomInset)));
+            var available = Managers.DockLayout.AvailableRect(BottomInset);
+            Set<PositionTrait>(new TVVector(available.Position));
+            Set<SizeTrait>(new TVVector(available.Size));
         }
     }
 }

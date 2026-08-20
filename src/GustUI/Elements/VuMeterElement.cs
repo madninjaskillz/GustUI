@@ -101,28 +101,42 @@ public class VuMeterElement : Element
 
     public override void Draw()
     {
-        // Display dynamics on wall-clock dt so decay feel survives any frame
-        // rate (legacy tuned at 60fps).
         double now = clock.Elapsed.TotalSeconds;
-        float dt = (float)Math.Min(now - lastDrawSeconds, 0.25);
+
+        // Fast path: silence with nothing left to decay (the common idle/
+        // stopped-transport case — SequencerView.UpdateRowMeters polls
+        // SetLevels(0,0) on every row every frame regardless of playback
+        // state). Skip the wall-clock dt/Math.Pow decay work entirely when
+        // there's provably nothing to animate; still need `now` above for
+        // the clip-latch comparison below, but that's a cheap Stopwatch
+        // read, not the per-meter transcendental math this skips.
+        bool atRest = shownL == 0f && shownR == 0f && holdL == 0f && holdR == 0f
+            && targetL == 0f && targetR == 0f;
+        if (!atRest)
+        {
+            // Display dynamics on wall-clock dt so decay feel survives any
+            // frame rate (legacy tuned at 60fps).
+            float dt = (float)Math.Min(now - lastDrawSeconds, 0.25);
+
+            float fall = FallPerSecond * dt;
+            shownL = Math.Max(targetL, shownL - fall);
+            shownR = Math.Max(targetR, shownR - fall);
+
+            float holdDecay = (float)Math.Pow(HoldDecayPerFrame, dt * 60.0);
+            holdL *= holdDecay;
+            holdR *= holdDecay;
+            if (shownL > holdL)
+            {
+                holdL = shownL;
+            }
+
+            if (shownR > holdR)
+            {
+                holdR = shownR;
+            }
+        }
+
         lastDrawSeconds = now;
-
-        float fall = FallPerSecond * dt;
-        shownL = Math.Max(targetL, shownL - fall);
-        shownR = Math.Max(targetR, shownR - fall);
-
-        float holdDecay = (float)Math.Pow(HoldDecayPerFrame, dt * 60.0);
-        holdL *= holdDecay;
-        holdR *= holdDecay;
-        if (shownL > holdL)
-        {
-            holdL = shownL;
-        }
-
-        if (shownR > holdR)
-        {
-            holdR = shownR;
-        }
 
         // Clip-latch (design-guide.md §7.2): a hit re-arms the hold window;
         // auto-resets ClipHoldSeconds after the LAST clip, not the first.

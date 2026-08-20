@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GustUI.Rendering;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -315,80 +316,63 @@ namespace GustUI
             return (vertices, indices, Math.Max(0, columns - 1) * 2);
         }
 
-        private Texture2D geometryBakeTexture;
-        private int geometryBakeLevel = -1;
-        private int geometryBakeWidth = -1;
-        private int geometryBakeHeight = -1;
-        private bool geometryBakePending;
+        private GeometryVertex[] geometryVertsCache;
+        private short[] geometryIndicesCache;
+        private int geometryPrimitiveCountCache;
+        private int geometryVertsLevel = -1;
+        private int geometryVertsWidth = -1;
+        private int geometryVertsHeight = -1;
 
         /// <summary>
-        /// GPU-baked-once-then-cached alternative to <see cref="GetTexture"/>:
-        /// renders this waveform's geometry (<see cref="BuildGeometry"/>) to
-        /// an offscreen texture at EXACTLY (width, height) via
-        /// <see cref="Managers.DrawManager.BakeTrianglesToTexture"/>, once,
-        /// and reuses that texture on every later call with the SAME
-        /// (level, width, height) — the crispness of real GPU geometry (no
-        /// CPU rasterization, no bake-resolution-vs-blur tradeoff GetTexture
-        /// has to balance) at GetTexture's OWN draw-time cost (one cheap
-        /// tinted sprite blit that batches normally), for as long as
-        /// nothing actually resizes. Baked WHITE (alpha = loudness
-        /// brightness) — GetTexture's "bake once, tint every frame"
-        /// contract unchanged; callers still supply their own tint at draw
-        /// time via the normal Draw(texture, rect, tint). Scrolling and
-        /// clipping never touch this cache — only a genuine (level, width,
-        /// height) change (zoom, row resize) does, exactly the input this
-        /// method's own cache key already is.
+        /// Triangulated-once-then-cached alternative to <see cref="GetTexture"/>:
+        /// runs this waveform's geometry (<see cref="BuildGeometry"/>) through
+        /// the triangulation math ONCE per (level, width, height) and caches
+        /// the resulting vertex/index arrays (in LOCAL space, origin at
+        /// (0,0)) — reused on every later call with the same key via
+        /// <see cref="Managers.DrawManager.DrawCachedTriangles"/>, which
+        /// translates + tints them into the shared geometry batch. Gets
+        /// GetTexture's "pay the expensive part once" property and
+        /// BuildGeometry/DrawTriangles's crispness (real geometry, no
+        /// bake-resolution-vs-blur tradeoff) with neither's downside: no
+        /// texture/RenderTarget2D at all (2026-08-19 — this used to render
+        /// to an offscreen RenderTarget2D via BakeTrianglesToTexture, which
+        /// meant SetRenderTarget-timing hazards, VRAM churn, and a queued-
+        /// to-next-frame bake to dodge those hazards; the triangulation
+        /// math was always the actual cost, not the texture, so caching
+        /// just the arrays is strictly simpler and needs none of that —
+        /// this can compute synchronously, right here, on a cache miss).
+        /// Baked WHITE (color already carries per-column loudness
+        /// brightness) — callers still supply their own tint at draw time,
+        /// applied by DrawCachedTriangles. Scrolling and clipping never
+        /// touch this cache — only a genuine (level, width, height) change
+        /// (zoom, row resize) does, exactly the input this method's own
+        /// cache key already is.
         /// </summary>
-        public Texture2D GetGeometryBakedTexture(int level, int width, int height)
+        public (GeometryVertex[] Vertices, short[] Indices, int PrimitiveCount) GetGeometryVertices(int level, int width, int height)
         {
-            bool hit = geometryBakeTexture != null && geometryBakeLevel == level && geometryBakeWidth == width && geometryBakeHeight == height;
-
-            // On a miss, the bake is QUEUED (DrawManager.QueuePendingBake),
-            // not run here — this is called mid-scene-traversal, from deep
-            // inside the current frame's backbuffer draw, and baking (a
-            // SetRenderTarget away from the backbuffer and back) right here
-            // corrupts that same frame's backbuffer (see QueuePendingBake's
-            // doc for why). geometryBakePending guards against re-queuing
-            // the same bake every remaining call this frame (multiple
-            // blocks, ghost-tail draws, etc. can all miss on the same
-            // instance) — it clears itself once the queued action actually
-            // runs, at the START of next frame.
-            //
-            // Meanwhile this returns whatever was baked LAST (possibly the
-            // wrong size, sprite-stretched onto the caller's current rect,
-            // or null if nothing has ever baked) rather than nothing —
-            // during a continuous resize/zoom drag, every frame is a "miss"
-            // (the target size keeps changing), and blanking the waveform
-            // for the drag's entire duration would be a worse regression
-            // than one stretched frame; the real bake catches up to
-            // whatever size the drag settles on within a frame of it
-            // stopping.
-            if (!hit && !geometryBakePending)
+            bool hit = geometryVertsCache != null && geometryVertsLevel == level && geometryVertsWidth == width && geometryVertsHeight == height;
+            if (!hit)
             {
-                geometryBakePending = true;
-                int reqLevel = level, reqWidth = width, reqHeight = height;
-                Resources.StaticResources.DrawManager.QueuePendingBake(() =>
+                (VertexPositionColor[] raw, short[] indices, int primitiveCount) = BuildGeometry(level, new Rectangle(0, 0, width, height), Color.White);
+                var verts = new GeometryVertex[raw.Length];
+                for (int i = 0; i < raw.Length; i++)
                 {
-                    (VertexPositionColor[] vertices, short[] indices, int primitiveCount) = BuildGeometry(reqLevel, new Rectangle(0, 0, reqWidth, reqHeight), Color.White);
-                    Texture2D previous = geometryBakeTexture;
-                    geometryBakeTexture = Resources.StaticResources.DrawManager.BakeTrianglesToTexture(vertices, indices, primitiveCount, reqWidth, reqHeight);
-                    // A RenderTarget2D is a heavier GPU resource than
-                    // GetTexture's plain Texture2D, and a live zoom/resize
-                    // drag can re-bake every single frame — explicit
-                    // Dispose here (unlike GetTexture's own cache, which
-                    // just drops the reference and leaves it to GC
-                    // finalization) keeps that churn from piling up VRAM
-                    // pressure mid-drag instead of trickling it out over
-                    // however long finalization takes.
-                    previous?.Dispose();
-                    geometryBakeLevel = reqLevel;
-                    geometryBakeWidth = reqWidth;
-                    geometryBakeHeight = reqHeight;
-                    geometryBakePending = false;
-                });
+                    // UV/ClipRect are placeholders — DrawCachedTriangles
+                    // overwrites both (UV from the atlas's current white
+                    // region, ClipRect from the current scissor) every time
+                    // it translates this cache into the batch.
+                    verts[i] = new GeometryVertex(new Vector2(raw[i].Position.X, raw[i].Position.Y), raw[i].Color, Vector2.Zero, Vector4.Zero);
+                }
+
+                geometryVertsCache = verts;
+                geometryIndicesCache = indices;
+                geometryPrimitiveCountCache = primitiveCount;
+                geometryVertsLevel = level;
+                geometryVertsWidth = width;
+                geometryVertsHeight = height;
             }
 
-            return geometryBakeTexture;
+            return (geometryVertsCache, geometryIndicesCache, geometryPrimitiveCountCache);
         }
 
         /// <summary>
