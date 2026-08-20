@@ -618,6 +618,38 @@ namespace GustUI.Managers
         }
 
         /// <summary>
+        /// <see cref="GetClipRectForGeometry()"/> further narrowed by
+        /// <paramref name="explicitClip"/> (logical pixel space — the same
+        /// convention <see cref="PushScissor"/> takes, scaled by
+        /// RenderScale the same way here), when provided — see
+        /// <see cref="Elements.TextElement.ClipRectOverride"/>'s doc for
+        /// why this exists as an alternative to a real ClipChildren
+        /// container. Null falls straight through to the ambient clip,
+        /// unchanged.
+        /// </summary>
+        internal Vector4 GetClipRectForGeometry(Rectangle? explicitClip)
+        {
+            Vector4 ambient = GetClipRectForGeometry();
+            if (!explicitClip.HasValue)
+            {
+                return ambient;
+            }
+
+            Rectangle rect = explicitClip.Value;
+            Rectangle scaled = RenderScale != 1f
+                ? new Rectangle(
+                    (int)(rect.X * RenderScale), (int)(rect.Y * RenderScale),
+                    (int)(rect.Width * RenderScale), (int)(rect.Height * RenderScale))
+                : rect;
+
+            return new Vector4(
+                Math.Max(ambient.X, scaled.Left),
+                Math.Max(ambient.Y, scaled.Top),
+                Math.Min(ambient.Z, scaled.Right),
+                Math.Min(ambient.W, scaled.Bottom));
+        }
+
+        /// <summary>
         /// The blend state <see cref="BeginAdditive"/>/<see cref="EndAdditive"/>
         /// last set (null = default alpha blend) — every ShapeDrawExtensions/
         /// DrawManager call into GeometryBatch.Append* must pass this instead
@@ -840,6 +872,20 @@ namespace GustUI.Managers
         /// </summary>
         public void DrawSdfString(SdfFont sdfFont, string text, Vector2 position, float pixelSize, Color color, int borderSize, Color? borderColor)
         {
+            DrawSdfString(sdfFont, text, position, pixelSize, color, borderSize, borderColor, null);
+        }
+
+        /// <summary>
+        /// Same as the overload above, plus an optional
+        /// <paramref name="clipRectOverride"/> (logical pixel space, same
+        /// convention as <see cref="Elements.TextElement.ClipRectOverride"/>
+        /// — see that property's doc for why this exists): intersected with
+        /// whatever ambient ClipChildren clip is already active, entirely
+        /// in per-vertex data — no GPU scissor change, no flush, unlike
+        /// wrapping the caller in its own ClipChildren container.
+        /// </summary>
+        public void DrawSdfString(SdfFont sdfFont, string text, Vector2 position, float pixelSize, Color color, int borderSize, Color? borderColor, Rectangle? clipRectOverride)
+        {
             if (string.IsNullOrEmpty(text) || sdfFont == null || pixelSize <= 0)
             {
                 return;
@@ -891,7 +937,7 @@ namespace GustUI.Managers
 
             float glyphScale = pixelSize / sdfFont.EmSize;
             float cursorX = position.X;
-            Vector4 clipRect = GetClipRectForGeometry();
+            Vector4 clipRect = GetClipRectForGeometry(clipRectOverride);
             foreach (char c in text)
             {
                 if (!sdfFont.TryGetGlyph(c, out SpriteFontPlus.SdfGlyphInfo g))

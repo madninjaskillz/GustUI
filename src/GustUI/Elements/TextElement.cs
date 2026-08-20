@@ -33,6 +33,27 @@ namespace GustUI.Elements
         /// </summary>
         public bool WordWrap { get; set; } = true;
 
+        /// <summary>
+        /// Optional clip, in the SAME logical pixel space as PositionTrait/
+        /// SizeTrait, narrower than whatever ClipChildren ancestor is
+        /// active — WITHOUT the cost of a real ClipChildren container.
+        /// SDF text already renders through GeometryBatch with a per-vertex
+        /// clip rect (DrawManager.DrawSdfString's own doc: "does NOT cost a
+        /// flush per call"); the only reason a text-clip-to-a-narrow-box
+        /// case would normally cost anything is wrapping it in its own
+        /// ClipChildren, which pushes/pops the REAL GPU scissor and forces
+        /// a flush each way (Element.Draw's ClipChildren path) — pure
+        /// overhead for content that was always going to be per-vertex
+        /// clipped anyway. Set this instead: DrawManager intersects it with
+        /// whatever ambient ClipChildren clip is still active (so an actual
+        /// viewport boundary still applies) entirely in vertex data, no GPU
+        /// state change, no flush. Added 2026-08-20 for SequencerView's
+        /// RunLabelView (up to ~1800 flushes/frame across ~460 run labels'
+        /// individual ClipChildren wrappers before this existed — dominant
+        /// cost in App.DrawLoop at a moderate zoom level).
+        /// </summary>
+        public Rectangle? ClipRectOverride { get; set; }
+
         // Hot trait references (resolved once; the trait set never shrinks).
         private readonly FontTrait fontTrait;
         private readonly TextTrait textTrait;
@@ -244,7 +265,7 @@ namespace GustUI.Elements
                         }
 
                         Resources.StaticResources.DrawManager.DrawSdfString(
-                            sdfFont, line, p + offsetVector, fontValue.Size, foreground, border, fontValue.BorderColor);
+                            sdfFont, line, p + offsetVector, fontValue.Size, foreground, border, fontValue.BorderColor, ClipRectOverride);
                         p.Y += lineSize.Y;
                         p.X = pr.X;
                         ySize = ySize+  (int)lineSize.Y;
