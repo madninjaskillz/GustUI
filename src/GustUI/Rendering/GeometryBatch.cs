@@ -507,39 +507,45 @@ namespace GustUI.Rendering
                 indexBuffer = new DynamicIndexBuffer(device, IndexElementSize.SixteenBits, indices.Length, BufferUsage.WriteOnly);
             }
 
-            vertexBuffer.SetData(vertices, 0, vertexCount, SetDataOptions.Discard);
-            indexBuffer.SetData(indices, 0, indexCount, SetDataOptions.Discard);
+            using (Managers.Telemetry.Scope("Draw.GeometryFlush.SetData"))
+            {
+                vertexBuffer.SetData(vertices, 0, vertexCount, SetDataOptions.Discard);
+                indexBuffer.SetData(indices, 0, indexCount, SetDataOptions.Discard);
+            }
 
             device.SetVertexBuffer(vertexBuffer);
             device.Indices = indexBuffer;
             device.DepthStencilState = DepthStencilState.None;
             device.RasterizerState = RasterizerState.CullNone;
 
-            foreach (Segment segment in segments)
+            using (Managers.Telemetry.Scope("Draw.GeometryFlush.Submit"))
             {
-                device.BlendState = segment.Blend ?? BlendState.AlphaBlend;
-                Effect effect = segment.IsText ? textEffect : flatEffect;
-
-                if (segment.IsText)
+                foreach (Segment segment in segments)
                 {
-                    effect.Parameters["Smoothing"].SetValue(segment.TextParams.Smoothing);
-                    effect.Parameters["BorderWidth"].SetValue(segment.TextParams.BorderWidth);
-                    effect.Parameters["BorderColor"].SetValue(segment.TextParams.BorderColor.ToVector4());
-                }
+                    device.BlendState = segment.Blend ?? BlendState.AlphaBlend;
+                    Effect effect = segment.IsText ? textEffect : flatEffect;
 
-                foreach (EffectPass pass in effect.CurrentTechnique.Passes)
-                {
-                    // Texture/sampler MUST be (re-)bound AFTER Apply(), not
-                    // before — see the long GOTCHA comment in GeometryBatch.fx.
-                    // On this KNI DesktopGL target, EffectPass.Apply() resets
-                    // texture/sampler bindings for an Effect with its own
-                    // declared `sampler` object; binding before Apply() runs
-                    // with zero errors but every fragment samples fully
-                    // transparent, silently vanishing every shape.
-                    pass.Apply();
-                    device.Textures[0] = segment.Texture;
-                    device.SamplerStates[0] = SamplerState.LinearClamp;
-                    device.DrawIndexedPrimitives(PrimitiveType.TriangleList, segment.VertexStart, segment.IndexStart, segment.IndexCount / 3);
+                    if (segment.IsText)
+                    {
+                        effect.Parameters["Smoothing"].SetValue(segment.TextParams.Smoothing);
+                        effect.Parameters["BorderWidth"].SetValue(segment.TextParams.BorderWidth);
+                        effect.Parameters["BorderColor"].SetValue(segment.TextParams.BorderColor.ToVector4());
+                    }
+
+                    foreach (EffectPass pass in effect.CurrentTechnique.Passes)
+                    {
+                        // Texture/sampler MUST be (re-)bound AFTER Apply(), not
+                        // before — see the long GOTCHA comment in GeometryBatch.fx.
+                        // On this KNI DesktopGL target, EffectPass.Apply() resets
+                        // texture/sampler bindings for an Effect with its own
+                        // declared `sampler` object; binding before Apply() runs
+                        // with zero errors but every fragment samples fully
+                        // transparent, silently vanishing every shape.
+                        pass.Apply();
+                        device.Textures[0] = segment.Texture;
+                        device.SamplerStates[0] = SamplerState.LinearClamp;
+                        device.DrawIndexedPrimitives(PrimitiveType.TriangleList, segment.VertexStart, segment.IndexStart, segment.IndexCount / 3);
+                    }
                 }
             }
 

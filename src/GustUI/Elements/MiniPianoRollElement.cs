@@ -77,6 +77,14 @@ namespace GustUI.Elements
 
         public override void Draw()
         {
+            using (Managers.Telemetry.Scope("Draw.MiniPianoRoll"))
+            {
+                DrawRoll();
+            }
+        }
+
+        private void DrawRoll()
+        {
             Vector2 pos = this.GetActualXnaPosition();
             Vector2 size = this.GetSize().AsXna;
             int totalWidth = (int)size.X;

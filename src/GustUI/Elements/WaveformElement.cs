@@ -80,6 +80,14 @@ public class WaveformElement : Element
 
     public override void Draw()
     {
+        using (Managers.Telemetry.Scope("Draw.Waveform"))
+        {
+            DrawWaveform();
+        }
+    }
+
+    private void DrawWaveform()
+    {
         WaveformData data = Data;
         if (data != null)
         {

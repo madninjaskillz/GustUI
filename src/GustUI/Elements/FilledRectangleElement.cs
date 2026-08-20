@@ -37,6 +37,16 @@ public class FilledRectangleElement : RectangleElement
     }
     public override void Draw()
     {
+        using (Managers.Telemetry.Scope("Draw.FilledRect"))
+        {
+            DrawFill();
+        }
+
+        base.Draw();
+    }
+
+    private void DrawFill()
+    {
         BackgroundFillTrait fill = backgroundFillTrait;
         Ensure.NotNull(fill, nameof(fill));
 
@@ -118,8 +128,5 @@ public class FilledRectangleElement : RectangleElement
 
                 break;
         }
-
-        
-        base.Draw();
     }
 }

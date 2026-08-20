@@ -214,6 +214,16 @@ namespace GustUI.Elements
         }
         public override void Draw()
         {
+            using (GustUI.Managers.Telemetry.Scope("Draw.Text"))
+            {
+                DrawText();
+            }
+
+            base.Draw();
+        }
+
+        private void DrawText()
+        {
             TVFont fontValue = fontTrait.Value();
             if (fontValue.Family != null)
             {
@@ -281,9 +291,6 @@ namespace GustUI.Elements
                     }
                 }
             }
-
-
-            base.Draw();
         }
 
         public Vector2 CalculatedSize()
