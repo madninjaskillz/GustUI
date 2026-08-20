@@ -585,14 +585,14 @@ public class Element : IDisposable
                 List<Element> visible = GetVisibleChildren(items, activeClip, childrenValue.Version);
                 for (int i = 0; i < visible.Count; i++)
                 {
-                    visible[i].Draw();
+                    DrawChild(visible[i]);
                 }
             }
             else
             {
                 for (int i = 0; i < items.Count; i++)
                 {
-                    items[i].Draw();
+                    DrawChild(items[i]);
                 }
             }
 
@@ -604,6 +604,41 @@ public class Element : IDisposable
             {
                 visibleClipStack.Pop();
             }
+        }
+    }
+
+    /// <summary>
+    /// Marks this element's ENTIRE subtree as needing strict draw-order
+    /// preservation in GeometryBatch's "overlay" stream — see that
+    /// class's own doc comment. Set this on anything positioned (via
+    /// Depth) to render on top of OTHER elements' text, not just its
+    /// own — the two-way non-text/text split is otherwise safe (a
+    /// label already draws after its own container's fill; siblings in
+    /// a non-overlapping layout can reorder freely) but breaks for
+    /// content specifically engineered to sit above someone else's
+    /// label (found via SequencerView's dragDropGhost/dragDropBadge/
+    /// playhead, the only elements placed above DepthRunLabel there).
+    /// Checked once per child in DrawChild below, not per-Append* call.
+    /// </summary>
+    public bool IsOverlay { get; set; }
+
+    /// <summary>Draws one child, wrapping its ENTIRE subtree in
+    /// GeometryBatch's overlay stream when IsOverlay is set — pushed
+    /// before Draw() runs (so even the child's OWN content, drawn by
+    /// its subclass's Draw() override before it calls base.Draw() for
+    /// recursion, lands in the overlay stream) and popped after,
+    /// nesting-safe via GeometryBatch's own depth counter.</summary>
+    private static void DrawChild(Element child)
+    {
+        if (child.IsOverlay)
+        {
+            Resources.StaticResources.DrawManager.GeometryBatch.PushOverlay();
+            child.Draw();
+            Resources.StaticResources.DrawManager.GeometryBatch.PopOverlay();
+        }
+        else
+        {
+            child.Draw();
         }
     }
 

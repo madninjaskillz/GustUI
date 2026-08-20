@@ -27,6 +27,38 @@ namespace GustUI.Rendering
     /// whenever appending would push its vertex count past the 16-bit
     /// index ceiling (65535) — the same hard limit DrawManager.DrawTriangles
     /// already documents; Reach's index buffers are 16-bit only.
+    ///
+    /// THREE PARALLEL STREAMS (2026-08-20): appends route into one of
+    /// nonText/text/overlay instead of one shared stream in strict draw
+    /// order. Found profiling ezmuze-studio's sequencer: ~2000 segments/
+    /// frame at ~4300 visible elements, roughly one per two elements,
+    /// because tree-walk draw order constantly interleaves text (a hard
+    /// shader boundary — SDF glyphs need SdfText.fx, everything else needs
+    /// GeometryBatch.fx, so a text draw ALWAYS closes whatever segment was
+    /// open) with non-text content. Sorting the SEGMENT LIST alone can't
+    /// fix this: a segment is just an index range into a buffer already
+    /// laid out in original append order, so two same-key segments
+    /// separated by a different-key one aren't physically adjacent —
+    /// merging them into one DrawIndexedPrimitives call needs the
+    /// underlying vertex data to actually BE contiguous. Routing appends
+    /// into separate accumulators achieves that for free: each stream's
+    /// own content lands contiguously regardless of how it was interleaved
+    /// in tree order, so within-stream segment count drops to genuine
+    /// texture/blend/border-state changes only.
+    ///
+    /// Flush() draws nonText, then text, then overlay. "nonText before
+    /// text" is safe for ordinary tiled content (a label sits on top of
+    /// its own container's fill, siblings in a grid don't overlap each
+    /// other) but is NOT a general reordering guarantee — anything that
+    /// must render on top of OTHER text breaks it (found via
+    /// SequencerView's own Depth constants: dragDropGhost/dragDropBadge/
+    /// playhead are the only elements placed above DepthRunLabel, i.e. the
+    /// only ones actually relying on rendering over other elements' text).
+    /// Those opt into `overlay` via Element.IsOverlay, which Element.Draw()
+    /// turns into PushOverlay/PopOverlay around that element's ENTIRE
+    /// subtree (see PushOverlay's own doc) — so this is not "GeometryBatch
+    /// decides what's safe to reorder," it's "the app declares what needs
+    /// strict order, GeometryBatch keeps that separate from what doesn't."
     /// </summary>
     public class GeometryBatch
     {
@@ -66,150 +98,172 @@ namespace GustUI.Rendering
             public TextParams TextParams;
         }
 
+        /// <summary>
+        /// One independent append/segment stream — everything GeometryBatch
+        /// used to do with its own top-level fields, now instantiated twice
+        /// (see this class's own doc comment for why). Vertex/index storage
+        /// and GPU buffers are each accumulator's own; nothing is shared.
+        /// </summary>
+        private sealed class Accumulator
+        {
+            public GeometryVertex[] Vertices = new GeometryVertex[4096];
+            public short[] Indices = new short[6144];
+            public int VertexCount;
+            public int IndexCount;
+            public readonly List<Segment> Segments = new List<Segment>();
+
+            public Texture2D CurrentTexture;
+            public BlendState CurrentBlend;
+            public bool CurrentIsText;
+            public TextParams CurrentTextParams;
+            public int CurrentSegmentVertexStart;
+            public int CurrentSegmentIndexStart;
+            public bool HasOpenSegment;
+
+            public DynamicVertexBuffer VertexBuffer;
+            public DynamicIndexBuffer IndexBuffer;
+
+            public bool IsEmpty => IndexCount == 0;
+
+            public void BeginFrame()
+            {
+                VertexCount = 0;
+                IndexCount = 0;
+                Segments.Clear();
+                HasOpenSegment = false;
+                CurrentTexture = null;
+                CurrentBlend = null;
+            }
+
+            public void EnsureCapacity(int addVertices, int addIndices)
+            {
+                if (VertexCount + addVertices > Vertices.Length)
+                {
+                    int newSize = Vertices.Length * 2;
+                    while (newSize < VertexCount + addVertices)
+                    {
+                        newSize *= 2;
+                    }
+                    Array.Resize(ref Vertices, newSize);
+                }
+
+                if (IndexCount + addIndices > Indices.Length)
+                {
+                    int newSize = Indices.Length * 2;
+                    while (newSize < IndexCount + addIndices)
+                    {
+                        newSize *= 2;
+                    }
+                    Array.Resize(ref Indices, newSize);
+                }
+            }
+
+            public void BeginSegmentIfNeeded(Texture2D texture, BlendState blend, int addVertices)
+            {
+                BeginSegmentIfNeeded(texture, blend, addVertices, false, default);
+            }
+
+            public void BeginSegmentIfNeeded(Texture2D texture, BlendState blend, int addVertices, bool isText, TextParams textParams)
+            {
+                bool stateChanged = !HasOpenSegment || texture != CurrentTexture || blend != CurrentBlend
+                    || isText != CurrentIsText || (isText && !textParams.Equals(CurrentTextParams));
+                bool wouldOverflow = HasOpenSegment && (VertexCount - CurrentSegmentVertexStart + addVertices > MaxVerticesPerSegment);
+
+                if (stateChanged || wouldOverflow)
+                {
+                    CloseSegment();
+                    CurrentTexture = texture;
+                    CurrentBlend = blend;
+                    CurrentIsText = isText;
+                    CurrentTextParams = textParams;
+                    CurrentSegmentVertexStart = VertexCount;
+                    CurrentSegmentIndexStart = IndexCount;
+                    HasOpenSegment = true;
+                }
+            }
+
+            // See the original (pre-split) CloseSegment's doc comment,
+            // preserved on GeometryBatch's own Flush below, for why
+            // VertexStart/segment-relative indices exist at all.
+            public void CloseSegment()
+            {
+                if (HasOpenSegment && IndexCount > CurrentSegmentIndexStart)
+                {
+                    Segments.Add(new Segment
+                    {
+                        Texture = CurrentTexture,
+                        Blend = CurrentBlend,
+                        IndexStart = CurrentSegmentIndexStart,
+                        IndexCount = IndexCount - CurrentSegmentIndexStart,
+                        VertexStart = CurrentSegmentVertexStart,
+                        IsText = CurrentIsText,
+                        TextParams = CurrentTextParams,
+                    });
+                }
+
+                HasOpenSegment = false;
+            }
+        }
+
         private readonly GraphicsDevice device;
-        private GeometryVertex[] vertices = new GeometryVertex[4096];
-        private short[] indices = new short[6144];
-        private int vertexCount;
-        private int indexCount;
-        private readonly List<Segment> segments = new List<Segment>();
+        private readonly Accumulator nonText = new Accumulator();
+        private readonly Accumulator text = new Accumulator();
 
-        private Texture2D currentTexture;
-        private BlendState currentBlend;
-        private bool currentIsText;
-        private TextParams currentTextParams;
-        private int currentSegmentVertexStart;
-        private int currentSegmentIndexStart;
-        private bool hasOpenSegment;
-
-        private DynamicVertexBuffer vertexBuffer;
-        private DynamicIndexBuffer indexBuffer;
+        // Third stream for content that must NOT be subject to the
+        // "all non-text, then all text" reordering above — anything whose
+        // Depth places it above DepthRunLabel in SequencerView's own
+        // layering (dragDropGhost, dragDropBadge, playhead: the only
+        // elements there that need to render on top of OTHER text, not
+        // just their own). Draws last, in original append order, exactly
+        // like the single accumulator this class used to be — no reorder
+        // risk, just kept separate so the other two streams stay free to
+        // batch. Toggled by Element.Draw() (see Element.IsOverlay) via
+        // PushOverlay/PopOverlay around one child's whole subtree, so
+        // everything a flagged element draws — including its own children,
+        // e.g. dragDropBadge's label — lands here together, preserving
+        // their OWN relative order (rect under its own text) correctly.
+        private readonly Accumulator overlay = new Accumulator();
+        private int overlayDepth;
 
         public GeometryBatch(GraphicsDevice device)
         {
             this.device = device;
         }
 
-        public bool IsEmpty => indexCount == 0;
+        public bool IsEmpty => nonText.IsEmpty && text.IsEmpty && overlay.IsEmpty;
+
+        public void PushOverlay() => overlayDepth++;
+
+        public void PopOverlay() => overlayDepth--;
+
+        // Segment count (one DrawIndexedPrimitives call each in Flush) is
+        // NOT the same as flush count (FrameProfiler's "flushes") — many
+        // segments can close within one flush purely from texture/blend
+        // churn in draw ORDER (e.g. text interleaved with non-text content
+        // per element), independent of how many real PushScissor-driven
+        // flushes happened. Added 2026-08-20: found ~2000 segments/frame at
+        // ~4300 visible elements on ezmuze-studio's sequencer — roughly one
+        // segment per two elements, meaning draw order rarely groups two
+        // same-texture elements consecutively (the motivation for the
+        // two-accumulator split above). Kept as a standing stat (cheap: one
+        // int increment per Flush) since it's the only visible signal for
+        // this specific cost, which "flushes" alone hides. Accumulated
+        // across every Flush() within a frame (each one clears segment
+        // lists) and reset in BeginFrame, so this is a true per-frame total.
+        public static int SegmentsThisFrame;
 
         /// <summary>Call once at the start of each frame, before any Append* calls.</summary>
         public void BeginFrame()
         {
-            vertexCount = 0;
-            indexCount = 0;
-            segments.Clear();
-            hasOpenSegment = false;
-            currentTexture = null;
-            currentBlend = null;
+            nonText.BeginFrame();
+            text.BeginFrame();
+            overlay.BeginFrame();
+            overlayDepth = 0;
+            SegmentsThisFrame = 0;
         }
 
-        private void EnsureCapacity(int addVertices, int addIndices)
-        {
-            if (vertexCount + addVertices > vertices.Length)
-            {
-                int newSize = vertices.Length * 2;
-                while (newSize < vertexCount + addVertices)
-                {
-                    newSize *= 2;
-                }
-                Array.Resize(ref vertices, newSize);
-            }
+        private Accumulator SelectAccumulator(bool isText) => overlayDepth > 0 ? overlay : (isText ? text : nonText);
 
-            if (indexCount + addIndices > indices.Length)
-            {
-                int newSize = indices.Length * 2;
-                while (newSize < indexCount + addIndices)
-                {
-                    newSize *= 2;
-                }
-                Array.Resize(ref indices, newSize);
-            }
-        }
-
-        private void BeginSegmentIfNeeded(Texture2D texture, BlendState blend, int addVertices)
-        {
-            BeginSegmentIfNeeded(texture, blend, addVertices, false, default);
-        }
-
-        private void BeginSegmentIfNeeded(Texture2D texture, BlendState blend, int addVertices, bool isText, TextParams textParams)
-        {
-            bool stateChanged = !hasOpenSegment || texture != currentTexture || blend != currentBlend
-                || isText != currentIsText || (isText && !textParams.Equals(currentTextParams));
-            bool wouldOverflow = hasOpenSegment && (vertexCount - currentSegmentVertexStart + addVertices > MaxVerticesPerSegment);
-
-            if (stateChanged || wouldOverflow)
-            {
-                CloseSegment();
-                currentTexture = texture;
-                currentBlend = blend;
-                currentIsText = isText;
-                currentTextParams = textParams;
-                currentSegmentVertexStart = vertexCount;
-                currentSegmentIndexStart = indexCount;
-                hasOpenSegment = true;
-            }
-        }
-
-        /// <summary>
-        /// Closes the open segment, recording <see cref="Segment.VertexStart"/>
-        /// (<c>currentSegmentVertexStart</c>) so <see cref="Flush"/> can pass
-        /// it as <c>DrawIndexedPrimitives</c>' <c>baseVertex</c> — every
-        /// Append* method's own <c>vBase</c> is relative to that same value
-        /// (<c>vertexCount - currentSegmentVertexStart</c>), NOT the
-        /// accumulator's absolute <c>vertexCount</c>. That distinction
-        /// matters because the index buffer is 16-bit: <c>MaxVerticesPerSegment</c>
-        /// only bounds one segment's OWN vertex span, but segments only
-        /// close on a texture/blend change or that cap — and per-vertex
-        /// ClipRect means a scissor change no longer forces one either (see
-        /// this class's own doc comment) — so many segments can still
-        /// accumulate well past 65536 vertices total between two
-        /// <see cref="Flush"/> calls. Indices computed against the absolute
-        /// vertexCount would silently wrap past that point, referencing an
-        /// unrelated vertex written earlier in the same flush — found
-        /// 2026-08-19 as a large stray triangle spanning unrelated on-screen
-        /// elements once a maximized window + GeometryBaked-mode waveforms
-        /// (far denser per-block than a baked-texture quad) pushed a single
-        /// flush's total past that threshold.
-        /// </summary>
-        private void CloseSegment()
-        {
-            if (hasOpenSegment && indexCount > currentSegmentIndexStart)
-            {
-                segments.Add(new Segment
-                {
-                    Texture = currentTexture,
-                    Blend = currentBlend,
-                    IndexStart = currentSegmentIndexStart,
-                    IndexCount = indexCount - currentSegmentIndexStart,
-                    VertexStart = currentSegmentVertexStart,
-                    IsText = currentIsText,
-                    TextParams = currentTextParams,
-                });
-            }
-
-            hasOpenSegment = false;
-        }
-
-        /// <summary>
-        /// Maps srcRect to UV, inset by HALF A TEXEL on every edge — not
-        /// the naive texel-boundary mapping. With LinearClamp filtering
-        /// (used for every atlas sample, so shapes bigger than the white
-        /// cell can still magnify smoothly), sampling exactly AT a texel
-        /// edge lands precisely on the 50/50 tie point between that texel
-        /// and its neighbor; for an atlas-packed region, the neighbor past
-        /// the padding is a DIFFERENT (often fully transparent) shape, so
-        /// every quad corner would blend 50% with transparent padding —
-        /// and since the shader outputs PREMULTIPLIED color
-        /// (rgb*alpha, alpha), a low sampled alpha drives rgb toward black
-        /// too, not just toward transparent. Found exactly this way: the
-        /// white 1x1 region rendered as a black/near-invisible checkerboard
-        /// instead of solid color, traced to this exact edge-sampling tie.
-        /// Insetting by 0.5 texel keeps every sample point strictly inside
-        /// the packed pixels — for the reserved 1x1 white region this
-        /// collapses u0==u1 (always the exact texel center, so ANY quad
-        /// size samples pure opaque white); for larger baked shapes
-        /// (Phase 4) it costs half a texel of the outermost antialiasing
-        /// gradient, a standard atlas-packing tradeoff.
-        /// </summary>
         private static void UVRect(Texture2D texture, Rectangle srcRect, out float u0, out float v0, out float u1, out float v1)
         {
             u0 = (srcRect.X + 0.5f) / texture.Width;
@@ -218,14 +272,14 @@ namespace GustUI.Rendering
             v1 = (srcRect.Y + srcRect.Height - 0.5f) / texture.Height;
         }
 
-        private void AppendQuadIndices(int vBase)
+        private static void AppendQuadIndices(Accumulator acc, int vBase)
         {
-            indices[indexCount++] = (short)(vBase + 0);
-            indices[indexCount++] = (short)(vBase + 1);
-            indices[indexCount++] = (short)(vBase + 2);
-            indices[indexCount++] = (short)(vBase + 0);
-            indices[indexCount++] = (short)(vBase + 2);
-            indices[indexCount++] = (short)(vBase + 3);
+            acc.Indices[acc.IndexCount++] = (short)(vBase + 0);
+            acc.Indices[acc.IndexCount++] = (short)(vBase + 1);
+            acc.Indices[acc.IndexCount++] = (short)(vBase + 2);
+            acc.Indices[acc.IndexCount++] = (short)(vBase + 0);
+            acc.Indices[acc.IndexCount++] = (short)(vBase + 2);
+            acc.Indices[acc.IndexCount++] = (short)(vBase + 3);
         }
 
         /// <summary>
@@ -240,19 +294,20 @@ namespace GustUI.Rendering
                 return;
             }
 
-            BeginSegmentIfNeeded(texture, blend, 4);
-            EnsureCapacity(4, 6);
+            Accumulator acc = SelectAccumulator(false);
+            acc.BeginSegmentIfNeeded(texture, blend, 4);
+            acc.EnsureCapacity(4, 6);
 
             UVRect(texture, srcRect, out float u0, out float v0, out float u1, out float v1);
 
             // Segment-relative — see CloseSegment's doc for why.
-            int vBase = vertexCount - currentSegmentVertexStart;
-            vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Left, destRect.Top), color, new Vector2(u0, v0), clipRect);
-            vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Top), color, new Vector2(u1, v0), clipRect);
-            vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Bottom), color, new Vector2(u1, v1), clipRect);
-            vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Left, destRect.Bottom), color, new Vector2(u0, v1), clipRect);
+            int vBase = acc.VertexCount - acc.CurrentSegmentVertexStart;
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destRect.Left, destRect.Top), color, new Vector2(u0, v0), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Top), color, new Vector2(u1, v0), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Bottom), color, new Vector2(u1, v1), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destRect.Left, destRect.Bottom), color, new Vector2(u0, v1), clipRect);
 
-            AppendQuadIndices(vBase);
+            AppendQuadIndices(acc, vBase);
         }
 
         /// <summary>
@@ -272,19 +327,20 @@ namespace GustUI.Rendering
                 return;
             }
 
-            BeginSegmentIfNeeded(texture, blend, 4);
-            EnsureCapacity(4, 6);
+            Accumulator acc = SelectAccumulator(false);
+            acc.BeginSegmentIfNeeded(texture, blend, 4);
+            acc.EnsureCapacity(4, 6);
 
             UVRect(texture, srcRect, out float u0, out float v0, out float u1, out float v1);
 
             // Segment-relative — see CloseSegment's doc for why.
-            int vBase = vertexCount - currentSegmentVertexStart;
-            vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Left, destRect.Top), colorTopLeft, new Vector2(u0, v0), clipRect);
-            vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Top), colorTopRight, new Vector2(u1, v0), clipRect);
-            vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Bottom), colorBottomRight, new Vector2(u1, v1), clipRect);
-            vertices[vertexCount++] = new GeometryVertex(new Vector2(destRect.Left, destRect.Bottom), colorBottomLeft, new Vector2(u0, v1), clipRect);
+            int vBase = acc.VertexCount - acc.CurrentSegmentVertexStart;
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destRect.Left, destRect.Top), colorTopLeft, new Vector2(u0, v0), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Top), colorTopRight, new Vector2(u1, v0), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Bottom), colorBottomRight, new Vector2(u1, v1), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destRect.Left, destRect.Bottom), colorBottomLeft, new Vector2(u0, v1), clipRect);
 
-            AppendQuadIndices(vBase);
+            AppendQuadIndices(acc, vBase);
         }
 
         /// <summary>
@@ -301,8 +357,9 @@ namespace GustUI.Rendering
                 return;
             }
 
-            BeginSegmentIfNeeded(texture, blend, 4);
-            EnsureCapacity(4, 6);
+            Accumulator acc = SelectAccumulator(false);
+            acc.BeginSegmentIfNeeded(texture, blend, 4);
+            acc.EnsureCapacity(4, 6);
 
             UVRect(texture, srcRect, out float u0, out float v0, out float u1, out float v1);
 
@@ -318,13 +375,13 @@ namespace GustUI.Rendering
             }
 
             // Segment-relative — see CloseSegment's doc for why.
-            int vBase = vertexCount - currentSegmentVertexStart;
-            vertices[vertexCount++] = new GeometryVertex(Corner(0, 0), color, new Vector2(u0, v0), clipRect);
-            vertices[vertexCount++] = new GeometryVertex(Corner(destRect.Width, 0), color, new Vector2(u1, v0), clipRect);
-            vertices[vertexCount++] = new GeometryVertex(Corner(destRect.Width, destRect.Height), color, new Vector2(u1, v1), clipRect);
-            vertices[vertexCount++] = new GeometryVertex(Corner(0, destRect.Height), color, new Vector2(u0, v1), clipRect);
+            int vBase = acc.VertexCount - acc.CurrentSegmentVertexStart;
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(Corner(0, 0), color, new Vector2(u0, v0), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(Corner(destRect.Width, 0), color, new Vector2(u1, v0), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(Corner(destRect.Width, destRect.Height), color, new Vector2(u1, v1), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(Corner(0, destRect.Height), color, new Vector2(u0, v1), clipRect);
 
-            AppendQuadIndices(vBase);
+            AppendQuadIndices(acc, vBase);
         }
 
         /// <summary>
@@ -343,6 +400,9 @@ namespace GustUI.Rendering
         /// destSize is the glyph's on-screen size (srcRect scaled by the
         /// caller's glyphScale) — passed explicitly rather than derived from
         /// srcRect, mirroring DrawSdfString's original position+scale draw.
+        /// Routes to the text accumulator (or overlay, if currently inside
+        /// one — see SelectAccumulator) — the only Append* method that ever
+        /// picks text over nonText.
         /// </summary>
         public void AppendGlyphQuad(Texture2D atlas, Vector2 destPos, Vector2 destSize, Rectangle srcRect, Color color, float smoothing, float borderWidth, Color borderColor, Vector4 clipRect)
         {
@@ -351,9 +411,10 @@ namespace GustUI.Rendering
                 return;
             }
 
+            Accumulator acc = SelectAccumulator(true);
             var textParams = new TextParams { Smoothing = smoothing, BorderWidth = borderWidth, BorderColor = borderColor };
-            BeginSegmentIfNeeded(atlas, null, 4, true, textParams);
-            EnsureCapacity(4, 6);
+            acc.BeginSegmentIfNeeded(atlas, null, 4, true, textParams);
+            acc.EnsureCapacity(4, 6);
 
             float u0 = (float)srcRect.X / atlas.Width;
             float v0 = (float)srcRect.Y / atlas.Height;
@@ -361,13 +422,13 @@ namespace GustUI.Rendering
             float v1 = (float)(srcRect.Y + srcRect.Height) / atlas.Height;
 
             // Segment-relative — see CloseSegment's doc for why.
-            int vBase = vertexCount - currentSegmentVertexStart;
-            vertices[vertexCount++] = new GeometryVertex(destPos, color, new Vector2(u0, v0), clipRect);
-            vertices[vertexCount++] = new GeometryVertex(new Vector2(destPos.X + destSize.X, destPos.Y), color, new Vector2(u1, v0), clipRect);
-            vertices[vertexCount++] = new GeometryVertex(new Vector2(destPos.X + destSize.X, destPos.Y + destSize.Y), color, new Vector2(u1, v1), clipRect);
-            vertices[vertexCount++] = new GeometryVertex(new Vector2(destPos.X, destPos.Y + destSize.Y), color, new Vector2(u0, v1), clipRect);
+            int vBase = acc.VertexCount - acc.CurrentSegmentVertexStart;
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(destPos, color, new Vector2(u0, v0), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destPos.X + destSize.X, destPos.Y), color, new Vector2(u1, v0), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destPos.X + destSize.X, destPos.Y + destSize.Y), color, new Vector2(u1, v1), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destPos.X, destPos.Y + destSize.Y), color, new Vector2(u0, v1), clipRect);
 
-            AppendQuadIndices(vBase);
+            AppendQuadIndices(acc, vBase);
         }
 
         /// <summary>
@@ -388,21 +449,22 @@ namespace GustUI.Rendering
             int addVertices = verts.Length;
             int addIndices = primitiveCount * 3;
 
-            BeginSegmentIfNeeded(texture, blend, addVertices);
-            EnsureCapacity(addVertices, addIndices);
+            Accumulator acc = SelectAccumulator(false);
+            acc.BeginSegmentIfNeeded(texture, blend, addVertices);
+            acc.EnsureCapacity(addVertices, addIndices);
 
             // Segment-relative — see CloseSegment's doc for why.
-            int vBase = vertexCount - currentSegmentVertexStart;
+            int vBase = acc.VertexCount - acc.CurrentSegmentVertexStart;
             for (int i = 0; i < addVertices; i++)
             {
                 GeometryVertex v = verts[i];
                 v.ClipRect = clipRect;
-                vertices[vertexCount++] = v;
+                acc.Vertices[acc.VertexCount++] = v;
             }
 
             for (int i = 0; i < addIndices; i++)
             {
-                indices[indexCount++] = (short)(vBase + idx[i]);
+                acc.Indices[acc.IndexCount++] = (short)(vBase + idx[i]);
             }
         }
 
@@ -431,16 +493,17 @@ namespace GustUI.Rendering
             int addVertices = localVerts.Length;
             int addIndices = primitiveCount * 3;
 
-            BeginSegmentIfNeeded(texture, blend, addVertices);
-            EnsureCapacity(addVertices, addIndices);
+            Accumulator acc = SelectAccumulator(false);
+            acc.BeginSegmentIfNeeded(texture, blend, addVertices);
+            acc.EnsureCapacity(addVertices, addIndices);
 
             Vector4 tintVec = tint.ToVector4();
             // Segment-relative — see CloseSegment's doc for why.
-            int vBase = vertexCount - currentSegmentVertexStart;
+            int vBase = acc.VertexCount - acc.CurrentSegmentVertexStart;
             for (int i = 0; i < addVertices; i++)
             {
                 GeometryVertex src = localVerts[i];
-                vertices[vertexCount++] = new GeometryVertex(
+                acc.Vertices[acc.VertexCount++] = new GeometryVertex(
                     new Vector2(src.Position.X + offset.X, src.Position.Y + offset.Y),
                     new Color(src.Color.ToVector4() * tintVec),
                     uv,
@@ -449,7 +512,7 @@ namespace GustUI.Rendering
 
             for (int i = 0; i < addIndices; i++)
             {
-                indices[indexCount++] = (short)(vBase + idx[i]);
+                acc.Indices[acc.IndexCount++] = (short)(vBase + idx[i]);
             }
         }
 
@@ -474,6 +537,11 @@ namespace GustUI.Rendering
         /// per frame anyway, so this degrades to "flush once," at zero
         /// extra cost.
         ///
+        /// Draws the NON-TEXT accumulator's segments, then the TEXT
+        /// accumulator's — see this class's own doc comment for why that
+        /// fixed order is safe (a label sits on top of its own container)
+        /// without being a fully general reordering.
+        ///
         /// Takes TWO effects (Phase 7: SDF text shares this accumulator) —
         /// <paramref name="flatEffect"/> (GeometryBatch.fx) for ordinary
         /// shape segments, <paramref name="textEffect"/> (SdfText.fx) for
@@ -488,76 +556,92 @@ namespace GustUI.Rendering
         /// </summary>
         public void Flush(Effect flatEffect, Effect textEffect)
         {
-            CloseSegment();
+            nonText.CloseSegment();
+            text.CloseSegment();
+            overlay.CloseSegment();
 
-            if (indexCount == 0)
+            if (nonText.IndexCount == 0 && text.IndexCount == 0 && overlay.IndexCount == 0)
             {
                 return;
             }
 
-            if (vertexBuffer == null || vertexBuffer.VertexCount < vertices.Length)
+            using (Managers.Telemetry.Scope("Draw.GeometryFlush.Submit"))
             {
-                vertexBuffer?.Dispose();
-                vertexBuffer = new DynamicVertexBuffer(device, GeometryVertex.VertexDeclaration, vertices.Length, BufferUsage.WriteOnly);
+                FlushAccumulator(nonText, flatEffect, textEffect);
+                FlushAccumulator(text, flatEffect, textEffect);
+                FlushAccumulator(overlay, flatEffect, textEffect);
             }
 
-            if (indexBuffer == null || indexBuffer.IndexCount < indices.Length)
+            FrameProfiler.CountFlush();
+        }
+
+        private void FlushAccumulator(Accumulator acc, Effect flatEffect, Effect textEffect)
+        {
+            if (acc.IndexCount == 0)
             {
-                indexBuffer?.Dispose();
-                indexBuffer = new DynamicIndexBuffer(device, IndexElementSize.SixteenBits, indices.Length, BufferUsage.WriteOnly);
+                return;
+            }
+
+            if (acc.VertexBuffer == null || acc.VertexBuffer.VertexCount < acc.Vertices.Length)
+            {
+                acc.VertexBuffer?.Dispose();
+                acc.VertexBuffer = new DynamicVertexBuffer(device, GeometryVertex.VertexDeclaration, acc.Vertices.Length, BufferUsage.WriteOnly);
+            }
+
+            if (acc.IndexBuffer == null || acc.IndexBuffer.IndexCount < acc.Indices.Length)
+            {
+                acc.IndexBuffer?.Dispose();
+                acc.IndexBuffer = new DynamicIndexBuffer(device, IndexElementSize.SixteenBits, acc.Indices.Length, BufferUsage.WriteOnly);
             }
 
             using (Managers.Telemetry.Scope("Draw.GeometryFlush.SetData"))
             {
-                vertexBuffer.SetData(vertices, 0, vertexCount, SetDataOptions.Discard);
-                indexBuffer.SetData(indices, 0, indexCount, SetDataOptions.Discard);
+                acc.VertexBuffer.SetData(acc.Vertices, 0, acc.VertexCount, SetDataOptions.Discard);
+                acc.IndexBuffer.SetData(acc.Indices, 0, acc.IndexCount, SetDataOptions.Discard);
             }
 
-            device.SetVertexBuffer(vertexBuffer);
-            device.Indices = indexBuffer;
+            device.SetVertexBuffer(acc.VertexBuffer);
+            device.Indices = acc.IndexBuffer;
             device.DepthStencilState = DepthStencilState.None;
             device.RasterizerState = RasterizerState.CullNone;
 
-            using (Managers.Telemetry.Scope("Draw.GeometryFlush.Submit"))
+            foreach (Segment segment in acc.Segments)
             {
-                foreach (Segment segment in segments)
+                device.BlendState = segment.Blend ?? BlendState.AlphaBlend;
+                Effect effect = segment.IsText ? textEffect : flatEffect;
+
+                if (segment.IsText)
                 {
-                    device.BlendState = segment.Blend ?? BlendState.AlphaBlend;
-                    Effect effect = segment.IsText ? textEffect : flatEffect;
+                    effect.Parameters["Smoothing"].SetValue(segment.TextParams.Smoothing);
+                    effect.Parameters["BorderWidth"].SetValue(segment.TextParams.BorderWidth);
+                    effect.Parameters["BorderColor"].SetValue(segment.TextParams.BorderColor.ToVector4());
+                }
 
-                    if (segment.IsText)
-                    {
-                        effect.Parameters["Smoothing"].SetValue(segment.TextParams.Smoothing);
-                        effect.Parameters["BorderWidth"].SetValue(segment.TextParams.BorderWidth);
-                        effect.Parameters["BorderColor"].SetValue(segment.TextParams.BorderColor.ToVector4());
-                    }
-
-                    foreach (EffectPass pass in effect.CurrentTechnique.Passes)
-                    {
-                        // Texture/sampler MUST be (re-)bound AFTER Apply(), not
-                        // before — see the long GOTCHA comment in GeometryBatch.fx.
-                        // On this KNI DesktopGL target, EffectPass.Apply() resets
-                        // texture/sampler bindings for an Effect with its own
-                        // declared `sampler` object; binding before Apply() runs
-                        // with zero errors but every fragment samples fully
-                        // transparent, silently vanishing every shape.
-                        pass.Apply();
-                        device.Textures[0] = segment.Texture;
-                        device.SamplerStates[0] = SamplerState.LinearClamp;
-                        device.DrawIndexedPrimitives(PrimitiveType.TriangleList, segment.VertexStart, segment.IndexStart, segment.IndexCount / 3);
-                    }
+                foreach (EffectPass pass in effect.CurrentTechnique.Passes)
+                {
+                    // Texture/sampler MUST be (re-)bound AFTER Apply(), not
+                    // before — see the long GOTCHA comment in GeometryBatch.fx.
+                    // On this KNI DesktopGL target, EffectPass.Apply() resets
+                    // texture/sampler bindings for an Effect with its own
+                    // declared `sampler` object; binding before Apply() runs
+                    // with zero errors but every fragment samples fully
+                    // transparent, silently vanishing every shape.
+                    pass.Apply();
+                    device.Textures[0] = segment.Texture;
+                    device.SamplerStates[0] = SamplerState.LinearClamp;
+                    device.DrawIndexedPrimitives(PrimitiveType.TriangleList, segment.VertexStart, segment.IndexStart, segment.IndexCount / 3);
                 }
             }
 
-            FrameProfiler.CountFlush();
+            SegmentsThisFrame += acc.Segments.Count;
 
             // Reset so the next Append* call after this mid-frame flush
             // starts a clean batch rather than accumulating on top of
             // geometry that's already been drawn.
-            vertexCount = 0;
-            indexCount = 0;
-            segments.Clear();
-            hasOpenSegment = false;
+            acc.VertexCount = 0;
+            acc.IndexCount = 0;
+            acc.Segments.Clear();
+            acc.HasOpenSegment = false;
         }
     }
 }
