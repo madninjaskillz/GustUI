@@ -23,7 +23,7 @@ namespace GustUI
         public DrawManager DrawManager;
         public RenderTarget2D RenderTarget;
         public DebugMode DebugMode = DebugMode.None;
-        public Resources(SpriteBatch spriteBatch, GraphicsDevice graphicsDevice, VirtualContent virtualContent, ContentManager content, WindowElement root)
+        public Resources(GraphicsDevice graphicsDevice, VirtualContent virtualContent, ContentManager content, WindowElement root)
         {
             RootWindow = root;
             this.GraphicsDevice = graphicsDevice;
@@ -36,7 +36,7 @@ namespace GustUI
             FontManager = new FontManager(graphicsDevice, UUContent);
             InputManager = new InputManager();
             DrawOOPManager = new DrawOOPManager();
-            DrawManager = new DrawManager(spriteBatch);
+            DrawManager = new DrawManager();
         }
 
         public void Update()

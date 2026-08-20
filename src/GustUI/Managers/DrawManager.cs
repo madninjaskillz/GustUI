@@ -18,7 +18,6 @@ namespace GustUI.Managers
     {
         private RenderTarget2D currentTarget;
         private RenderTarget2D renderTarget;
-        private SpriteBatch spriteBatch;
         private RenderTarget2D renderTargetClone;
         public bool IsInBatch { get; private set; } = false;
         private FrameCounter _frameCounter = new FrameCounter();
@@ -151,9 +150,8 @@ namespace GustUI.Managers
             geometryBatch.Flush(flatEffect, textEffect);
         }
 
-        public DrawManager(SpriteBatch spriteBatch)
+        public DrawManager()
         {
-            this.spriteBatch = spriteBatch;
         }
 
         private RenderTarget2D GetRT()
@@ -484,41 +482,36 @@ namespace GustUI.Managers
         }
 
         /// <summary>
-        /// The actual SpriteBatch End()/Begin() pair, WITHOUT the geometry
-        /// flush — used by SetScissor (Phase 3: scissor changes are pure
-        /// GPU/SpriteBatch state now, geometry doesn't need to sync with
-        /// them since clip travels per-vertex) so that pushing/popping a
-        /// clip region no longer forces a geometry-batch flush the way it
-        /// did through Phase 1-2 (when SetScissor called the general
-        /// Begin()/End() pair). Public Begin()/End() still call these too,
-        /// via the wrappers above — this split exists so ONE call site
-        /// (SetScissor) can skip the geometry half while every other
-        /// caller keeps it.
+        /// Sets the GPU state a SpriteBatch.Begin() call used to set as a
+        /// side effect — directly on GraphicsDevice now, not through
+        /// SpriteBatch (SpriteBatch removal slice 1, 2026-08-20). Safe
+        /// because nothing has called spriteBatch.Draw()/DrawString() since
+        /// Phase 8 (see GeometryBatch's own doc comment) — every actual
+        /// draw goes through GeometryBatch (which sets its own BlendState/
+        /// RasterizerState/SamplerState per segment in Flush(), ignoring
+        /// these fields entirely) or the legacy DrawTriangles/
+        /// DrawFullScreenEffect raw-draw paths (which likewise set their
+        /// own state explicitly, right before drawing, not relying on this
+        /// having run first). This method's ONLY remaining real effect is
+        /// keeping device.RasterizerState (ScissorTestEnable=true) and
+        /// BlendState/SamplerState current between those explicit sets —
+        /// still called from the exact same sync points (SetScissor,
+        /// BeginAdditive/EndAdditive, End()/Begin()) so flush-count
+        /// telemetry stays comparable.
         /// </summary>
         private void BeginSprite(SpriteSortMode mode = SpriteSortMode.Deferred)
         {
             IsInBatch = true;
             FrameProfiler.CountFlush();
-            // Z MUST stay 1. Matrix.CreateScale(float) scales all THREE axes,
-            // and SpriteBatch's transform is a real 3D matrix applied to real
-            // 3D vertices: a sprite's layerDepth is its vertex Z, and the
-            // orthographic projection SpriteEffect folds in leaves Z alone
-            // (M33=1, M43=0, M44=1), so clip-space z == layerDepth * M33 with
-            // w == 1. Clipping keeps only -w <= z <= w, i.e. layerDepth 1.0 —
-            // which SpriteBatchExtensions.DrawString passes for EVERY string —
-            // sits exactly ON the far plane. Scaling Z by 1.5 pushed it to 1.5,
-            // outside the frustum, and the GPU discarded every glyph quad:
-            // all text vanished from the first frame, silently, with no GL
-            // error, while rectangles (drawn at the default layerDepth 0)
-            // were untouched. Scaling only X/Y is what "scale the 2D output"
-            // actually means here.
-            Matrix? transform = RenderScale != 1f ? Matrix.CreateScale(RenderScale, RenderScale, 1f) : null;
-            spriteBatch.Begin(mode, blendState, samplerState, null, rasterizerState, null, transform);
+            GraphicsDevice device = Resources.StaticResources.GraphicsDevice;
+            device.BlendState = blendState ?? BlendState.AlphaBlend;
+            device.SamplerStates[0] = samplerState ?? SamplerState.LinearClamp;
+            device.DepthStencilState = DepthStencilState.None;
+            device.RasterizerState = rasterizerState;
         }
 
         private void EndSprite()
         {
-            spriteBatch.End();
             IsInBatch = false;
         }
 

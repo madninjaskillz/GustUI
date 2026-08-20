@@ -39,10 +39,10 @@ public class WindowElement : FilledRectangleElement
     /// </summary>
     public float DevicePixelRatio { get; set; } = 1f;
 
-    public WindowElement(SpriteBatch spriteBatch, GameWindow gameWindow, GraphicsDevice graphicsDevice, VirtualContent virtualContent, ContentManager content) : base()
+    public WindowElement(GameWindow gameWindow, GraphicsDevice graphicsDevice, VirtualContent virtualContent, ContentManager content) : base()
     {
         this.gameWindow = gameWindow;
-        Resources.StaticResources = new Resources(spriteBatch, graphicsDevice, virtualContent, content, this);
+        Resources.StaticResources = new Resources(graphicsDevice, virtualContent, content, this);
         Resources.StaticResources.Theme = new Theme();
 
         gameWindow.ClientSizeChanged += GameWindow_ClientSizeChanged;
