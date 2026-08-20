@@ -19,23 +19,36 @@ public class TVElements : TraitValue
     // allocate a fresh list so callers holding the old one keep a valid snapshot.
     private List<Element> sortedCache;
 
-    public void InvalidateSort() => sortedCache = null;
+    // Bumped on every structural change (add/remove/depth-reorder) —
+    // Element.Draw's per-container visibility cull cache keys off this to
+    // know when the child SET (not just positions) changed, alongside its
+    // own position/size-driven invalidation (Element.MarkChildCullDirty).
+    public int Version { get; private set; }
+
+    public void InvalidateSort()
+    {
+        sortedCache = null;
+        Version++;
+    }
 
     public void Add(Element item, string name)
     {
         namedItems.Add(new(item, name));
         sortedCache = null;
+        Version++;
         Log.This(name + " added to children, now " + namedItems.Count + " items");
     }
     public void Remove(Element item)
     {
         namedItems.Remove(namedItems.Find(x => x.Item1 == item));
         sortedCache = null;
+        Version++;
     }
     public void Remove(string name)
     {
         namedItems.Remove(namedItems.Find(x => x.Item2 == name));
         sortedCache = null;
+        Version++;
     }
     public List<Element> Items => sortedCache ??= namedItems.Select(x => x.Item1).OrderBy(x => x.Depth).ToList();
     public Element Get(string name)

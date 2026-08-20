@@ -79,6 +79,23 @@ public class Element : IDisposable
     {
         traits = Reflection.GetTraitsFromAttributes(this.GetType());
         RefreshTraitCache();
+
+        // Only meaningful for the PARENT's child-visibility cull cache
+        // (see cachedVisibleChildren below) — reading Parent dynamically at
+        // fire time (not capturing it here) means this stays correct even
+        // though Parent is usually null until AddChild runs later. Safe to
+        // rely on Trait<T>.Set firing here: TVVector.X/Y are init-only
+        // specifically so nothing can change a position/size without going
+        // through Set (see TVVector's own doc comment).
+        if (CachedPositionTrait != null)
+        {
+            CachedPositionTrait.ValueChangedEventHandler += (s, e) => Parent?.MarkChildCullDirty();
+        }
+
+        if (CachedSizeTrait != null)
+        {
+            CachedSizeTrait.ValueChangedEventHandler += (s, e) => Parent?.MarkChildCullDirty();
+        }
     }
 
     // ---- hot-trait cache -------------------------------------------------
@@ -464,6 +481,77 @@ public class Element : IDisposable
         return bounds.Intersects(clip);
     }
 
+    // ---- child-visibility cull cache --------------------------------------
+    // Caches Draw()'s per-child IsPotentiallyVisible scan below so a frame
+    // where nothing moved doesn't re-run it. Found 2026-08-20 profiling:
+    // ~5ms/frame at ~5100 elements was exactly this walk (virtual dispatch +
+    // AABB test per child), on an otherwise-static scene between rebinds.
+    //
+    // Invalidated automatically, not by any caller remembering to mark it:
+    // MarkChildCullDirty fires whenever a CHILD's own Position/Size trait
+    // actually changes (subscribed once per element in the constructor) —
+    // reliable now that TVVector.X/Y are init-only, so Trait<T>.Set is the
+    // ONLY way to change either (see TVVector's own doc comment for why
+    // that used to not be true). The clip-rect/children-version check below
+    // catches everything else: an ancestor's clip changing, add/remove,
+    // Depth-reorder.
+    //
+    // NOT safe for a child using SizeFitsChildren (VerticalScrollElement's
+    // inner container is the only one in this codebase): its effective
+    // bounds are derived from grandchildren on demand, with no Set() call
+    // for anything to hook, so a container that owns one is simply never
+    // cached — falls back to a fresh scan every frame, same as before this
+    // existed. That's cheap in practice: it's always a small, static child
+    // set (VerticalScrollElement's is exactly 2 items).
+    private List<Element> cachedVisibleChildren;
+    private Rectangle cachedVisibleClip;
+    private int cachedChildrenVersion = -1;
+    private bool childCullDirty = true;
+
+    internal void MarkChildCullDirty() => childCullDirty = true;
+
+    private List<Element> GetVisibleChildren(List<Element> items, Rectangle activeClip, int childrenVersion)
+    {
+        if (!childCullDirty
+            && cachedVisibleChildren != null
+            && cachedChildrenVersion == childrenVersion
+            && cachedVisibleClip == activeClip)
+        {
+            return cachedVisibleChildren;
+        }
+
+        bool cacheable = true;
+        List<Element> visible = cachedVisibleChildren ?? new List<Element>(items.Count);
+        visible.Clear();
+        for (int i = 0; i < items.Count; i++)
+        {
+            if (items[i].SizeFitsChildren)
+            {
+                cacheable = false;
+            }
+
+            if (items[i].IsPotentiallyVisible(activeClip))
+            {
+                visible.Add(items[i]);
+            }
+        }
+
+        if (cacheable)
+        {
+            cachedVisibleChildren = visible;
+            cachedVisibleClip = activeClip;
+            cachedChildrenVersion = childrenVersion;
+            childCullDirty = false;
+        }
+        else
+        {
+            cachedVisibleChildren = null;
+            childCullDirty = true;
+        }
+
+        return visible;
+    }
+
     public virtual void Draw()
     {
         FrameProfiler.CountElementDraw();
@@ -485,7 +573,8 @@ public class Element : IDisposable
                 pushedVisibleClip = true;
             }
 
-            List<Element> items = childrenTrait.Value().Items;
+            TVElements childrenValue = childrenTrait.Value();
+            List<Element> items = childrenValue.Items;
             // Cull against the nearest ClipChildren ancestor's region (not
             // just this element's own) — a non-clipping passthrough
             // container's children still sit inside whatever ancestor
@@ -493,12 +582,10 @@ public class Element : IDisposable
             if (visibleClipStack.Count > 0)
             {
                 Rectangle activeClip = visibleClipStack.Peek();
-                for (int i = 0; i < items.Count; i++)
+                List<Element> visible = GetVisibleChildren(items, activeClip, childrenValue.Version);
+                for (int i = 0; i < visible.Count; i++)
                 {
-                    if (items[i].IsPotentiallyVisible(activeClip))
-                    {
-                        items[i].Draw();
-                    }
+                    visible[i].Draw();
                 }
             }
             else
