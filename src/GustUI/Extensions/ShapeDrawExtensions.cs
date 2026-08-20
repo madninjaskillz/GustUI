@@ -12,16 +12,16 @@ using System.Threading.Tasks;
 
 namespace GustUI.Extensions
 {
-    internal static class SpriteBatchExtensions
+    internal static class ShapeDrawExtensions
     {
-        public static void DrawLine(this DrawManager spriteBatch, Vector2 start, Vector2 end, Color color)
+        public static void DrawLine(this DrawManager manager, Vector2 start, Vector2 end, Color color)
         {
             Vector2 edge = end - start;
             float angle = (float)Math.Atan2(edge.Y, edge.X);
             var rect = new Rectangle((int)start.X, (int)start.Y, (int)edge.Length(), 1);
 
-            AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
-            spriteBatch.GeometryBatch.AppendRotatedQuad(white.Texture, rect, white.Pixels, color, angle, new Vector2(0, 0), spriteBatch.GetClipRectForGeometry(), null);
+            AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
+            manager.GeometryBatch.AppendRotatedQuad(white.Texture, rect, white.Pixels, color, angle, new Vector2(0, 0), manager.GetClipRectForGeometry(), manager.CurrentBlend);
         }
 
         /// <summary>Rotated filled rectangle around an arbitrary DEST-LOCAL
@@ -29,10 +29,10 @@ namespace GustUI.Extensions
         /// rotated-rect append, generalized past a line's implied
         /// thickness/length to any rect+origin), using the shared white
         /// atlas texel instead of a private per-element pixel texture.</summary>
-        public static void DrawRotatedFilledRectangle(this DrawManager spriteBatch, Rectangle rectangle, Color color, float angle, Vector2 origin)
+        public static void DrawRotatedFilledRectangle(this DrawManager manager, Rectangle rectangle, Color color, float angle, Vector2 origin)
         {
-            AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
-            spriteBatch.GeometryBatch.AppendRotatedQuad(white.Texture, rectangle, white.Pixels, color, angle, origin, spriteBatch.GetClipRectForGeometry(), null);
+            AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
+            manager.GeometryBatch.AppendRotatedQuad(white.Texture, rectangle, white.Pixels, color, angle, origin, manager.GetClipRectForGeometry(), manager.CurrentBlend);
         }
 
         /// <summary>
@@ -49,14 +49,14 @@ namespace GustUI.Extensions
         /// transform, so this is crisp at ANY DPI/zoom with no bake, no
         /// cache, no per-size texture at all.
         /// </summary>
-        public static void DrawFilledCircle(this DrawManager spriteBatch, Vector2 center, float radius, Color color)
+        public static void DrawFilledCircle(this DrawManager manager, Vector2 center, float radius, Color color)
         {
             if (radius <= 0.01f)
             {
                 return;
             }
 
-            int segments = ArcSegments(radius, spriteBatch.RenderScale);
+            int segments = ArcSegments(radius, manager.RenderScale);
             var points = new Vector2[segments];
             var normals = new Vector2[segments];
             for (int i = 0; i < segments; i++)
@@ -67,7 +67,7 @@ namespace GustUI.Extensions
                 points[i] = center + dir * radius;
             }
 
-            AppendFeatheredFill(spriteBatch, points, normals, center, color);
+            AppendFeatheredFill(manager, points, normals, center, color);
         }
 
         /// <summary>
@@ -75,7 +75,7 @@ namespace GustUI.Extensions
         /// radius = rect.Height / 2) — ToggleSwitchElement's track shape,
         /// same real-geometry treatment as <see cref="DrawFilledCircle"/>.
         /// </summary>
-        public static void DrawFilledCapsule(this DrawManager spriteBatch, Rectangle rect, Color color)
+        public static void DrawFilledCapsule(this DrawManager manager, Rectangle rect, Color color)
         {
             if (rect.Width <= 0 || rect.Height <= 0)
             {
@@ -96,7 +96,7 @@ namespace GustUI.Extensions
             // straight top/bottom edges need no extra points: a fan
             // triangulation from the centroid already draws a straight edge
             // between any two non-adjacent-angle boundary points.
-            int capSegments = ArcSegments(radius, spriteBatch.RenderScale);
+            int capSegments = ArcSegments(radius, manager.RenderScale);
             int total = (capSegments + 1) * 2;
             var points = new Vector2[total];
             var normals = new Vector2[total];
@@ -121,7 +121,7 @@ namespace GustUI.Extensions
             }
 
             Vector2 centroid = new Vector2(rect.Left + rect.Width / 2f, rect.Top + rect.Height / 2f);
-            AppendFeatheredFill(spriteBatch, points, normals, centroid, color);
+            AppendFeatheredFill(manager, points, normals, centroid, color);
         }
 
         /// <summary>
@@ -130,7 +130,7 @@ namespace GustUI.Extensions
         /// four concentric vertex rings (feather-in, inner solid edge, outer
         /// solid edge, feather-out) instead of a baked atlas annulus.
         /// </summary>
-        public static void DrawRing(this DrawManager spriteBatch, Vector2 center, float innerRadius, float outerRadius, Color color)
+        public static void DrawRing(this DrawManager manager, Vector2 center, float innerRadius, float outerRadius, Color color)
         {
             if (outerRadius <= 0.01f || outerRadius <= innerRadius)
             {
@@ -138,8 +138,8 @@ namespace GustUI.Extensions
             }
 
             innerRadius = Math.Max(0f, innerRadius);
-            int segments = ArcSegments(outerRadius, spriteBatch.RenderScale);
-            float feather = 1f / Math.Max(0.01f, spriteBatch.RenderScale);
+            int segments = ArcSegments(outerRadius, manager.RenderScale);
+            float feather = 1f / Math.Max(0.01f, manager.RenderScale);
             float half = feather * 0.5f;
 
             float r0 = Math.Max(0f, innerRadius - half);
@@ -154,11 +154,11 @@ namespace GustUI.Extensions
                 r1 = r2 = (innerRadius + outerRadius) * 0.5f;
             }
 
-            AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
+            AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
             float u = (white.Pixels.X + 0.5f) / white.Texture.Width;
             float v = (white.Pixels.Y + 0.5f) / white.Texture.Height;
             var uv = new Vector2(u, v);
-            Vector4 clip = spriteBatch.GetClipRectForGeometry();
+            Vector4 clip = manager.GetClipRectForGeometry();
             Color transparent = color * 0f;
 
             var verts = new GeometryVertex[segments * 4];
@@ -182,7 +182,7 @@ namespace GustUI.Extensions
                 AppendBandQuad(idx, ref ii, i, ni, segments * 2, segments * 3);
             }
 
-            spriteBatch.GeometryBatch.AppendTriangles(white.Texture, verts, idx, ii / 3, clip, null);
+            manager.GeometryBatch.AppendTriangles(white.Texture, verts, idx, ii / 3, clip, manager.CurrentBlend);
         }
 
         /// <summary>Two triangles spanning one segment of a band between an
@@ -222,7 +222,7 @@ namespace GustUI.Extensions
         /// shader needed: GeometryBatch.fx already premultiplies color×alpha
         /// per vertex).
         /// </summary>
-        private static void AppendFeatheredFill(DrawManager spriteBatch, Vector2[] points, Vector2[] normals, Vector2 centroid, Color color)
+        private static void AppendFeatheredFill(DrawManager manager, Vector2[] points, Vector2[] normals, Vector2 centroid, Color color)
         {
             int n = points.Length;
             if (n < 3)
@@ -230,13 +230,13 @@ namespace GustUI.Extensions
                 return;
             }
 
-            float feather = 1f / Math.Max(0.01f, spriteBatch.RenderScale);
+            float feather = 1f / Math.Max(0.01f, manager.RenderScale);
 
-            AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
+            AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
             float u = (white.Pixels.X + 0.5f) / white.Texture.Width;
             float v = (white.Pixels.Y + 0.5f) / white.Texture.Height;
             var uv = new Vector2(u, v);
-            Vector4 clip = spriteBatch.GetClipRectForGeometry();
+            Vector4 clip = manager.GetClipRectForGeometry();
             Color transparent = color * 0f;
 
             var verts = new GeometryVertex[1 + n * 2];
@@ -265,7 +265,7 @@ namespace GustUI.Extensions
                 idx[ii++] = (short)a; idx[ii++] = (short)ob; idx[ii++] = (short)b;
             }
 
-            spriteBatch.GeometryBatch.AppendTriangles(white.Texture, verts, idx, ii / 3, clip, null);
+            manager.GeometryBatch.AppendTriangles(white.Texture, verts, idx, ii / 3, clip, manager.CurrentBlend);
         }
 
         /// <summary>Linear 2-color gradient fill via per-vertex color on the
@@ -273,9 +273,9 @@ namespace GustUI.Extensions
         /// bake-a-256x1-texture-per-instance approach with zero texture
         /// allocation and no extra GeometryBatch segment (same texture every
         /// flat-color primitive already samples).</summary>
-        public static void DrawFilledRectangleGradient(this DrawManager spriteBatch, Rectangle rectangle, Color primary, Color secondary, Direction direction)
+        public static void DrawFilledRectangleGradient(this DrawManager manager, Rectangle rectangle, Color primary, Color secondary, Direction direction)
         {
-            AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
+            AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
             Color topLeft, topRight, bottomLeft, bottomRight;
             if (direction == Direction.Horizontally)
             {
@@ -288,18 +288,18 @@ namespace GustUI.Extensions
                 bottomLeft = bottomRight = secondary;
             }
 
-            spriteBatch.GeometryBatch.AppendQuadGradient(white.Texture, rectangle, white.Pixels, topLeft, topRight, bottomRight, bottomLeft, spriteBatch.GetClipRectForGeometry(), null);
+            manager.GeometryBatch.AppendQuadGradient(white.Texture, rectangle, white.Pixels, topLeft, topRight, bottomRight, bottomLeft, manager.GetClipRectForGeometry(), manager.CurrentBlend);
         }
 
         /// <summary>DrawLine with a pixel thickness (rotated filled rect).</summary>
-        public static void DrawThickLine(this DrawManager spriteBatch, Vector2 start, Vector2 end, Color color, int thickness)
+        public static void DrawThickLine(this DrawManager manager, Vector2 start, Vector2 end, Color color, int thickness)
         {
             Vector2 edge = end - start;
             float angle = (float)Math.Atan2(edge.Y, edge.X);
             var rect = new Rectangle((int)start.X, (int)start.Y, (int)edge.Length() + 1, thickness);
 
-            AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
-            spriteBatch.GeometryBatch.AppendRotatedQuad(white.Texture, rect, white.Pixels, color, angle, new Vector2(0, thickness / 2f), spriteBatch.GetClipRectForGeometry(), null);
+            AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
+            manager.GeometryBatch.AppendRotatedQuad(white.Texture, rect, white.Pixels, color, angle, new Vector2(0, thickness / 2f), manager.GetClipRectForGeometry(), manager.CurrentBlend);
         }
 
         /// <summary>
@@ -307,7 +307,7 @@ namespace GustUI.Extensions
         /// "sampled geometry IS the curve" idiom (no curve primitive exists in
         /// the sprite batch and none is needed).
         /// </summary>
-        public static void DrawCubicBezier(this DrawManager spriteBatch, Vector2 p0, Vector2 c0, Vector2 c1, Vector2 p1,
+        public static void DrawCubicBezier(this DrawManager manager, Vector2 p0, Vector2 c0, Vector2 c1, Vector2 p1,
             Color color, int thickness = 2, int segments = 24)
         {
             Vector2 previous = p0;
@@ -320,30 +320,30 @@ namespace GustUI.Extensions
                     + 3f * u * u * t * c0
                     + 3f * u * t * t * c1
                     + t * t * t * p1;
-                spriteBatch.DrawThickLine(previous, point, color, thickness);
+                manager.DrawThickLine(previous, point, color, thickness);
                 previous = point;
             }
         }
 
-        public static void DrawRectangle(this DrawManager spriteBatch, Rectangle rectangle, Color color, int borderSize = 1)
+        public static void DrawRectangle(this DrawManager manager, Rectangle rectangle, Color color, int borderSize = 1)
         {
             // Delegates to DrawFilledRectangle (not a direct Pixel draw)
             // specifically so border strokes automatically pick up the
             // geometry-backend routing below without duplicating it here.
             for (int i = 0; i < borderSize; i++)
             {
-                spriteBatch.DrawFilledRectangle(new Rectangle(rectangle.Left, rectangle.Top + i, rectangle.Width, 1), color);
-                spriteBatch.DrawFilledRectangle(new Rectangle(rectangle.Left, rectangle.Bottom - i, rectangle.Width, 1), color);
+                manager.DrawFilledRectangle(new Rectangle(rectangle.Left, rectangle.Top + i, rectangle.Width, 1), color);
+                manager.DrawFilledRectangle(new Rectangle(rectangle.Left, rectangle.Bottom - i, rectangle.Width, 1), color);
 
-                spriteBatch.DrawFilledRectangle(new Rectangle(rectangle.Left + i, rectangle.Top, 1, rectangle.Height), color);
-                spriteBatch.DrawFilledRectangle(new Rectangle(rectangle.Right - i, rectangle.Top, 1, rectangle.Height), color);
+                manager.DrawFilledRectangle(new Rectangle(rectangle.Left + i, rectangle.Top, 1, rectangle.Height), color);
+                manager.DrawFilledRectangle(new Rectangle(rectangle.Right - i, rectangle.Top, 1, rectangle.Height), color);
             }
         }
 
-        public static void DrawFilledRectangle(this DrawManager spriteBatch, Rectangle rectangle, Color color)
+        public static void DrawFilledRectangle(this DrawManager manager, Rectangle rectangle, Color color)
         {
-            AtlasRegion white = spriteBatch.GeometryAtlas.WhiteRegion;
-            spriteBatch.GeometryBatch.AppendQuad(white.Texture, rectangle, white.Pixels, color, spriteBatch.GetClipRectForGeometry(), null);
+            AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
+            manager.GeometryBatch.AppendQuad(white.Texture, rectangle, white.Pixels, color, manager.GetClipRectForGeometry(), manager.CurrentBlend);
         }
 
         /// <summary>
@@ -356,7 +356,7 @@ namespace GustUI.Extensions
         /// panel tracking a window resize) costs nothing extra since there's
         /// no texture to miss-and-rebake in the first place.
         /// </summary>
-        public static void DrawRoundedRectangle(this DrawManager spriteBatch, Rectangle rectangle, Color color, int radius)
+        public static void DrawRoundedRectangle(this DrawManager manager, Rectangle rectangle, Color color, int radius)
         {
             if (rectangle.Width <= 0 || rectangle.Height <= 0)
             {
@@ -366,14 +366,14 @@ namespace GustUI.Extensions
             float r = Math.Min(radius, Math.Min(rectangle.Width, rectangle.Height) / 2f);
             if (r <= 0.01f)
             {
-                spriteBatch.DrawFilledRectangle(rectangle, color);
+                manager.DrawFilledRectangle(rectangle, color);
                 return;
             }
 
-            int segmentsPerCorner = Math.Max(3, ArcSegments(r, spriteBatch.RenderScale) / 4);
+            int segmentsPerCorner = Math.Max(3, ArcSegments(r, manager.RenderScale) / 4);
             (Vector2[] points, Vector2[] normals) = BuildRoundedRectOutline(rectangle, r, segmentsPerCorner);
             var centroid = new Vector2(rectangle.Left + rectangle.Width / 2f, rectangle.Top + rectangle.Height / 2f);
-            AppendFeatheredFill(spriteBatch, points, normals, centroid, color);
+            AppendFeatheredFill(manager, points, normals, centroid, color);
         }
 
         /// <summary>
@@ -419,14 +419,14 @@ namespace GustUI.Extensions
         /// <summary>Rounded-rect OUTLINE, drawn as a rounded fill with a
         /// smaller rounded fill punched out of it — needs the caller's
         /// backing colour, since the sprite batch has no stencil.</summary>
-        public static void DrawRoundedBorder(this DrawManager spriteBatch, Rectangle rectangle, Color borderColor,
+        public static void DrawRoundedBorder(this DrawManager manager, Rectangle rectangle, Color borderColor,
             Color interiorColor, int radius, int thickness = 1)
         {
-            spriteBatch.DrawRoundedRectangle(rectangle, borderColor, radius);
+            manager.DrawRoundedRectangle(rectangle, borderColor, radius);
             var inner = new Rectangle(
                 rectangle.X + thickness, rectangle.Y + thickness,
                 Math.Max(0, rectangle.Width - thickness * 2), Math.Max(0, rectangle.Height - thickness * 2));
-            spriteBatch.DrawRoundedRectangle(inner, interiorColor, Math.Max(0, radius - thickness));
+            manager.DrawRoundedRectangle(inner, interiorColor, Math.Max(0, radius - thickness));
         }
 
         public static void SaveTextureData(this RenderTarget2D texture, string filename)

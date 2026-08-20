@@ -34,8 +34,11 @@ namespace GustUI.Managers
         private SamplerState samplerState = null;
 
         /// <summary>
-        /// Uniform scale applied to every draw via <see cref="Begin"/>'s
-        /// SpriteBatch transform matrix (1 = off, the default). Pairs with
+        /// Uniform scale applied to every draw (1 = off, the default) —
+        /// folded into GeometryBatch's own MatrixTransform/RenderScale
+        /// effect parameters (see <see cref="FlushGeometryBatch"/>) and
+        /// DrawTriangles' geometryEffect.View, not a SpriteBatch transform
+        /// (removed 2026-08-20 — nothing reads one anymore). Pairs with
         /// WindowElement.DevicePixelRatio: that keeps GustUI's own layout/
         /// hit-testing in the ORIGINAL logical space (unaware anything HiDPI
         /// is happening); this magnifies the composited output to fill
@@ -225,12 +228,12 @@ namespace GustUI.Managers
                 DrawSdfString(debugFont, fps, ps + new Vector2(2, 2), debugFontSize, Color.White);
 
 
-                SpriteBatchExtensions.DrawFilledRectangle(this, new Rectangle(0, 0, (int)Resources.StaticResources.RootWindow.GetSize().X, bottom), Color.Blue * 0.8f);
+                ShapeDrawExtensions.DrawFilledRectangle(this, new Rectangle(0, 0, (int)Resources.StaticResources.RootWindow.GetSize().X, bottom), Color.Blue * 0.8f);
 
                 string consoleText = "CMD:>";
                 var ctHeight = (int)debugFont.MeasureString(consoleText, debugFontSize).Y;
                 var ctBorder = 2;
-                SpriteBatchExtensions.DrawFilledRectangle(this, new Rectangle(ctBorder, bottom - ctHeight - (ctBorder * 2), (int)Resources.StaticResources.RootWindow.GetSize().X - (ctBorder * 2), ctHeight + ctBorder), Color.Black * 0.8f);
+                ShapeDrawExtensions.DrawFilledRectangle(this, new Rectangle(ctBorder, bottom - ctHeight - (ctBorder * 2), (int)Resources.StaticResources.RootWindow.GetSize().X - (ctBorder * 2), ctHeight + ctBorder), Color.Black * 0.8f);
                 bottom = bottom - ctHeight - (ctBorder * 2);
 
                 DrawSdfString(debugFont, consoleText, new Vector2(5, 0) + new Vector2(0, bottom), debugFontSize, Color.Black);
@@ -312,12 +315,12 @@ namespace GustUI.Managers
             var origin = new Vector2(windowWidth - width - 8, 48);
             var panelRect = new Rectangle((int)origin.X, (int)origin.Y, width, height);
 
-            SpriteBatchExtensions.DrawFilledRectangle(this, panelRect, new Color(10, 10, 14) * 0.88f);
-            SpriteBatchExtensions.DrawRectangle(this, panelRect, new Color(70, 70, 84), 1);
+            ShapeDrawExtensions.DrawFilledRectangle(this, panelRect, new Color(10, 10, 14) * 0.88f);
+            ShapeDrawExtensions.DrawRectangle(this, panelRect, new Color(70, 70, 84), 1);
             DrawSdfString(debugFont, "CPU telemetry — last 10s", origin + new Vector2(padding, padding - 2), fontSize, Color.White);
 
             var graphRect = new Rectangle((int)origin.X + padding, (int)origin.Y + padding + 16, width - padding * 2, graphHeight);
-            SpriteBatchExtensions.DrawFilledRectangle(this, graphRect, new Color(4, 4, 6) * 0.7f);
+            ShapeDrawExtensions.DrawFilledRectangle(this, graphRect, new Color(4, 4, 6) * 0.7f);
 
             var samples = new List<(double TimeSeconds, float TotalMs)>(Telemetry.RecentSamples(10.0));
             if (samples.Count > 1)
@@ -346,7 +349,7 @@ namespace GustUI.Managers
                     var point = new Vector2(x, y);
                     if (havePrevious)
                     {
-                        SpriteBatchExtensions.DrawLine(this, previous, point, Resources.StaticResources.Theme.AccentSelection);
+                        ShapeDrawExtensions.DrawLine(this, previous, point, Resources.StaticResources.Theme.AccentSelection);
                     }
 
                     previous = point;
@@ -522,7 +525,7 @@ namespace GustUI.Managers
         /// straight through to GeometryBatch.AppendRotatedQuad's own
         /// dest-local-pixel-space convention, UNCHANGED — matching exactly
         /// how DrawLine/DrawThickLine's own geometry branch already does it
-        /// (SpriteBatchExtensions.cs), which is screenshot-verified correct.
+        /// (ShapeDrawExtensions.cs), which is screenshot-verified correct.
         /// The `value` parameter has always been dead (never read) —
         /// untouched, not this change's concern.
         /// </summary>
@@ -530,21 +533,21 @@ namespace GustUI.Managers
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
             Rectangle src = new Rectangle(0, 0, pixel.Width, pixel.Height);
-            GeometryBatch.AppendRotatedQuad(pixel, rectangle, src, color, angle, vector2, GetClipRectForGeometry(), null);
+            GeometryBatch.AppendRotatedQuad(pixel, rectangle, src, color, angle, vector2, GetClipRectForGeometry(), CurrentBlend);
         }
 
         internal void Draw(Texture2D pixel, Rectangle rectangle, Color color)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
             Rectangle src = new Rectangle(0, 0, pixel.Width, pixel.Height);
-            GeometryBatch.AppendQuad(pixel, rectangle, src, color, GetClipRectForGeometry(), null);
+            GeometryBatch.AppendQuad(pixel, rectangle, src, color, GetClipRectForGeometry(), CurrentBlend);
         }
 
         internal void Draw(Texture2D texture, Rectangle rectangle, Rectangle? source, Color color)
         {
             Ensure.IsTrue(IsInBatch, "IsInBatch");
             Rectangle src = source ?? new Rectangle(0, 0, texture.Width, texture.Height);
-            GeometryBatch.AppendQuad(texture, rectangle, src, color, GetClipRectForGeometry(), null);
+            GeometryBatch.AppendQuad(texture, rectangle, src, color, GetClipRectForGeometry(), CurrentBlend);
         }
 
         // Public clipping API: nested scissors intersect with the enclosing one.
@@ -615,14 +618,32 @@ namespace GustUI.Managers
         }
 
         /// <summary>
-        /// Switches the active SpriteBatch to additive blending — same
-        /// End()/Begin()-to-change-GPU-state-mid-frame shape as
-        /// <see cref="SetScissor"/> (blend state, like blend mode or the
-        /// scissor rect, can only change between batches, not within one).
-        /// For a true glow/bloom stroke: draw the same line 2-3× with
-        /// increasing thickness and decreasing alpha inside a
-        /// BeginAdditive()/<see cref="EndAdditive"/> pair so overlapping
-        /// passes brighten instead of just alpha-composing over each other.
+        /// The blend state <see cref="BeginAdditive"/>/<see cref="EndAdditive"/>
+        /// last set (null = default alpha blend) — every ShapeDrawExtensions/
+        /// DrawManager call into GeometryBatch.Append* must pass this instead
+        /// of a hardcoded null, or BeginAdditive silently does nothing for
+        /// that shape (found 2026-08-20: GlowCurveElement's glow strokes had
+        /// been alpha-blending instead of brightening since Phase 8 moved
+        /// shape drawing onto GeometryBatch, which resolves each segment's
+        /// blend from what's passed in per-call, not from this field —
+        /// unlike the old SpriteBatch.Begin() path, which read this field
+        /// directly).
+        /// </summary>
+        internal BlendState CurrentBlend => blendState;
+
+        /// <summary>
+        /// Switches to additive blending for whatever's drawn until
+        /// <see cref="EndAdditive"/> — same End()/Begin()-to-change-GPU-
+        /// state-mid-frame shape as <see cref="SetScissor"/> (blend state,
+        /// like blend mode or the scissor rect, can only change between
+        /// batches, not within one). For a true glow/bloom stroke: draw the
+        /// same line 2-3× with increasing thickness and decreasing alpha
+        /// inside a BeginAdditive()/<see cref="EndAdditive"/> pair so
+        /// overlapping passes brighten instead of just alpha-composing over
+        /// each other. Only takes effect for shapes drawn through
+        /// GeometryBatch if the caller threads <see cref="CurrentBlend"/>
+        /// through to the Append* call (see its own doc) — this method only
+        /// changes what that field HOLDS, same as it always did.
         /// Caller must already be inside a Begin()/End() batch (mirrors
         /// SetScissor's assumption) and must pair this with EndAdditive
         /// before any non-additive drawing resumes.
@@ -809,7 +830,7 @@ namespace GustUI.Managers
         /// retired bitmap DrawString's outline did (0 = none; N = an N-pixel
         /// stroke); <paramref name="borderColor"/> defaults to a dimmed
         /// version of <paramref name="color"/> (matching
-        /// SpriteBatchExtensions.DrawString's BorderFade=0.1 default) when
+        /// ShapeDrawExtensions.DrawString's BorderFade=0.1 default) when
         /// null. Converted into the SDF's normalized distance-field units
         /// via the SAME per-draw texel-to-screen-pixel scale factor
         /// Smoothing's own conversion uses (see SdfText.fx's own comment for
@@ -862,7 +883,7 @@ namespace GustUI.Managers
             // border's whole point is to BE the literal pixel width the
             // caller asked for.
             float borderWidth = borderSize > 0 ? borderSize * pixelToNormalized : 0f;
-            // BorderFade = 0.1, matching SpriteBatchExtensions.DrawString's
+            // BorderFade = 0.1, matching ShapeDrawExtensions.DrawString's
             // own default outline dimming — alpha forced to exactly 0 when
             // there's no border so the shader's degenerate-case identity
             // holds (see SdfText.fx's own comment).
@@ -935,7 +956,7 @@ namespace GustUI.Managers
                 (white.Pixels.X + 0.5f) / white.Texture.Width,
                 (white.Pixels.Y + 0.5f) / white.Texture.Height);
 
-            GeometryBatch.AppendCachedTriangles(white.Texture, localVerts, indices, primitiveCount, offset, tint, uv, GetClipRectForGeometry(), null);
+            GeometryBatch.AppendCachedTriangles(white.Texture, localVerts, indices, primitiveCount, offset, tint, uv, GetClipRectForGeometry(), CurrentBlend);
         }
 
         public void SetScissor(Rectangle? rect)
