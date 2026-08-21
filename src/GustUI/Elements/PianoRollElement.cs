@@ -93,6 +93,11 @@ namespace GustUI.Elements
         /// <summary>Playhead position in beats; negative hides it.</summary>
         public double PlayheadBeats = -1;
 
+        /// <summary>Pitches whose gutter keys draw PRESSED (audition
+        /// feedback — QWERTY musical typing, mouse note-hits). Null/empty =
+        /// none. Host-owned, rebuilt per frame like the note list.</summary>
+        public HashSet<int> HighlightedPitches;
+
         /// <summary>Radius of the bend-handle grip drawn on selected notes.</summary>
         public const float BendHandleSize = 8f;
 
@@ -113,6 +118,7 @@ namespace GustUI.Elements
         public Color PatternEndDimColor = new Color(0, 0, 0) * 0.45f;
         public Color KeyWhiteColor = new Color(214, 214, 220);
         public Color KeyBlackColor = new Color(28, 28, 34);
+        public Color KeyPressedColor = new Color(110, 145, 235);
         public Color KeyLineColor = new Color(120, 120, 128);
         public Color KeyLabelColor = new Color(60, 60, 70);
         public Color KeyEdgeColor = new Color(70, 70, 84);
@@ -281,16 +287,17 @@ namespace GustUI.Elements
                     continue; // beyond the MIDI range: bare gutter
                 }
 
+                bool pressed = HighlightedPitches != null && HighlightedPitches.Contains(pitch);
                 if (IsBlackKey(pitch))
                 {
                     // The white keys behind flow through; the black key sits
                     // over the left portion, its row line only under itself.
                     manager.DrawFilledRectangle(new Rectangle(x0 + blackKeyWidth, top, gutter - blackKeyWidth, rowH), KeyWhiteColor);
-                    manager.DrawFilledRectangle(new Rectangle(x0, top, blackKeyWidth, rowH - 1), KeyBlackColor);
+                    manager.DrawFilledRectangle(new Rectangle(x0, top, blackKeyWidth, rowH - 1), pressed ? KeyPressedColor : KeyBlackColor);
                 }
                 else
                 {
-                    manager.DrawFilledRectangle(new Rectangle(x0, top, gutter, rowH), KeyWhiteColor);
+                    manager.DrawFilledRectangle(new Rectangle(x0, top, gutter, rowH), pressed ? KeyPressedColor : KeyWhiteColor);
 
                     // A physical white-key boundary exists only at E/F and
                     // B/C — where no black key separates the rows.
