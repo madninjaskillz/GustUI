@@ -103,6 +103,17 @@ namespace GustUI
             return data;
         }
 
+        /// <summary>
+        /// Whether this data bakes SOLID tile faces (opaque white background,
+        /// darkened wave — tint with the tile color) or transparent OVERLAYS
+        /// (white wave only — tint with a contrasting wave color). Callers
+        /// that draw a texture over an already-filled tile must pick their
+        /// tint by this: tinting an overlay bake with the tile's own color
+        /// renders the waveform invisible (found on ezmuze's multi-tile
+        /// Repeat clips under the geometry render modes).
+        /// </summary>
+        public bool SolidBackground => solidBackground;
+
         public int LevelCount => levels.Count;
 
         public int BaseColumns => levels[0].Length / 2;
