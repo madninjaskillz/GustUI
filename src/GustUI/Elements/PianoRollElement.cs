@@ -260,6 +260,29 @@ namespace GustUI.Elements
                 DrawNote(manager, GhostNote, x0, y0, width, height, gridX, 0.55f);
             }
 
+            // Bend-edit handles (mode-gated): curvature diamonds join the
+            // geometry batch (above bodies), then ONE DrawTriangles flush
+            // for every bent body + diamond this frame, then the vertex
+            // squares as sprites on top — the curve-editor idiom (drag a
+            // point to move it, drag a diamond to bow the segment).
+            if (BendEditMode)
+            {
+                foreach (PianoRollNoteView note in Notes)
+                {
+                    AppendBendDiamonds(note, x0, y0, width);
+                }
+            }
+
+            FlushBendGeometry(manager);
+
+            if (BendEditMode)
+            {
+                foreach (PianoRollNoteView note in Notes)
+                {
+                    DrawBendVertexSquares(manager, note, x0, y0, width);
+                }
+            }
+
             // ---- playhead ----
             if (PlayheadBeats >= 0 && PlayheadBeats <= BeatsVisible)
             {
@@ -393,54 +416,158 @@ namespace GustUI.Elements
             }
             else
             {
-                // Curved geometry: the block is a strip of short column rects
-                // following Pitch + offset(t) — the sampled bend IS the shape.
-                const int columnStep = 3;
-                float[] offsets = note.BendOffsets;
-                int columns = Math.Max(1, noteW / columnStep);
-                for (int cIx = 0; cIx <= columns; cIx++)
-                {
-                    float t = cIx / (float)columns;
-                    float offset = SampleOffsets(offsets, t);
-                    int cx = left + (int)(t * noteW);
-                    int cw = Math.Min(columnStep, left + noteW - cx);
-                    if (cw <= 0)
-                    {
-                        continue;
-                    }
-
-                    int top = y0 + (int)YTopForPitch(note.Pitch + offset);
-                    if (top + rowH < y0 || top > y0 + height)
-                    {
-                        continue;
-                    }
-
-                    manager.DrawFilledRectangle(new Rectangle(cx, top + 1, cw, rowH), body);
-
-                    // Thin top/bottom edge lines keep the curved block crisp.
-                    manager.DrawFilledRectangle(new Rectangle(cx, top + 1, cw, 1), border);
-                    manager.DrawFilledRectangle(new Rectangle(cx, top + rowH, cw, 1), border);
-                }
-
-                // End caps.
-                int startTop = y0 + (int)YTopForPitch(note.Pitch + SampleOffsets(offsets, 0f));
-                int endTop = y0 + (int)YTopForPitch(note.Pitch + SampleOffsets(offsets, 1f));
-                manager.DrawFilledRectangle(new Rectangle(left, startTop + 1, 1, rowH), border);
-                manager.DrawFilledRectangle(new Rectangle(left + noteW - 1, endTop + 1, 1, rowH), border);
-            }
-
-            // Bend-edit handles (mode-gated): vertex squares at each bend
-            // point, a curvature diamond at each segment's midpoint — the
-            // curve-editor idiom (drag a point to move it, drag a diamond
-            // to bow the segment). Drawn for every note so the whole
-            // pattern's pitch shapes are editable at a glance.
-            if (BendEditMode && alpha >= 1f)
-            {
-                DrawBendHandles(manager, note, x0, y0, width);
+                // Curved geometry, done properly: a float-precision quad
+                // strip that follows Pitch + offset(t) (accumulated and
+                // flushed in ONE DrawTriangles call per frame — see
+                // FlushBendGeometry). Top/bottom edges carry a 1px alpha-
+                // feathered skirt: geometric antialiasing, since the render
+                // targets run without MSAA and a hard 1px edge on a slope
+                // would still staircase.
+                AppendBendBody(note, x0, y0, width, height, gridX, rowH, body, border);
             }
         }
 
-        private void DrawBendHandles(Managers.DrawManager manager, PianoRollNoteView note, int x0, int y0, int width)
+        // ---- bend geometry batch (built during the note pass, flushed once) ----
+
+        private readonly List<VertexPositionColor> bendVerts = new List<VertexPositionColor>();
+        private readonly List<short> bendIndices = new List<short>();
+
+        /// <summary>Appends the bent note body: per-sample quads for the body
+        /// band, 1px border bands, and 1px fade-out skirts along both edges.
+        /// All Y coordinates are float (no integer column snapping) and
+        /// clamped to the view rect (the roll clips manually — no scissor).</summary>
+        private void AppendBendBody(PianoRollNoteView note, int x0, int y0, int width, int height,
+            int gridX, int rowH, Color body, Color border)
+        {
+            float[] offsets = note.BendOffsets;
+            float leftF = x0 + XForBeat(note.StartBeats, width);
+            float rightF = x0 + XForBeat(note.StartBeats + note.LengthBeats, width);
+            float xStart = Math.Max(leftF, gridX);
+            float xEnd = Math.Min(rightF, x0 + width);
+            float span = rightF - leftF;
+            if (xEnd - xStart < 1f || span <= 0f)
+            {
+                return;
+            }
+
+            Color fade = border * 0f; // premultiplied: zero = fully transparent
+            float yMin = y0;
+            float yMax = y0 + height;
+            int samples = Math.Clamp((int)((xEnd - xStart) / 2f), 1, 512);
+
+            float prevX = xStart;
+            float prevTop = y0 + YTopForPitch(note.Pitch + SampleOffsets(offsets, (xStart - leftF) / span)) + 1f;
+            float firstTop = prevTop;
+            for (int i = 1; i <= samples; i++)
+            {
+                float x = xStart + (xEnd - xStart) * i / samples;
+                float t = (x - leftF) / span;
+                float top = y0 + YTopForPitch(note.Pitch + SampleOffsets(offsets, t)) + 1f;
+
+                float b1 = prevTop + rowH;
+                float b2 = top + rowH;
+                AddBendQuad(prevX, prevTop - 1f, x, top - 1f, prevTop, top, fade, border, yMin, yMax);
+                AddBendQuad(prevX, prevTop, x, top, prevTop + 1f, top + 1f, border, border, yMin, yMax);
+                AddBendQuad(prevX, prevTop + 1f, x, top + 1f, b1 - 1f, b2 - 1f, body, body, yMin, yMax);
+                AddBendQuad(prevX, b1 - 1f, x, b2 - 1f, b1, b2, border, border, yMin, yMax);
+                AddBendQuad(prevX, b1, x, b2, b1 + 1f, b2 + 1f, border, fade, yMin, yMax);
+
+                prevX = x;
+                prevTop = top;
+            }
+
+            // End caps (only at TRUE note ends — a pan-clipped edge gets none).
+            if (leftF >= gridX)
+            {
+                AddBendQuad(leftF, firstTop, leftF + 1f, firstTop, firstTop + rowH, firstTop + rowH, border, border, yMin, yMax);
+            }
+
+            if (rightF <= x0 + width)
+            {
+                AddBendQuad(rightF - 1f, prevTop, rightF, prevTop, prevTop + rowH, prevTop + rowH, border, border, yMin, yMax);
+            }
+        }
+
+        /// <summary>One quad between a top edge (x1,y1t)→(x2,y2t) and a bottom
+        /// edge (x1,y1b)→(x2,y2b), with separate top/bottom colors (equal for
+        /// solid bands, one transparent for the feathered skirts).</summary>
+        private void AddBendQuad(float x1, float y1t, float x2, float y2t, float y1b, float y2b,
+            Color cTop, Color cBot, float yMin, float yMax)
+        {
+            short baseIx = (short)bendVerts.Count;
+            bendVerts.Add(new VertexPositionColor(new Vector3(x1, Math.Clamp(y1t, yMin, yMax), 0f), cTop));
+            bendVerts.Add(new VertexPositionColor(new Vector3(x2, Math.Clamp(y2t, yMin, yMax), 0f), cTop));
+            bendVerts.Add(new VertexPositionColor(new Vector3(x1, Math.Clamp(y1b, yMin, yMax), 0f), cBot));
+            bendVerts.Add(new VertexPositionColor(new Vector3(x2, Math.Clamp(y2b, yMin, yMax), 0f), cBot));
+            bendIndices.Add(baseIx);
+            bendIndices.Add((short)(baseIx + 1));
+            bendIndices.Add((short)(baseIx + 2));
+            bendIndices.Add((short)(baseIx + 1));
+            bendIndices.Add((short)(baseIx + 3));
+            bendIndices.Add((short)(baseIx + 2));
+        }
+
+        /// <summary>An axis-rotated diamond (the ACTUAL diamond shape, not a
+        /// square posing as one) centered on the curve.</summary>
+        private void AddBendDiamond(float cx, float cy, float r, Color c)
+        {
+            short baseIx = (short)bendVerts.Count;
+            bendVerts.Add(new VertexPositionColor(new Vector3(cx, cy - r, 0f), c));
+            bendVerts.Add(new VertexPositionColor(new Vector3(cx + r, cy, 0f), c));
+            bendVerts.Add(new VertexPositionColor(new Vector3(cx, cy + r, 0f), c));
+            bendVerts.Add(new VertexPositionColor(new Vector3(cx - r, cy, 0f), c));
+            bendIndices.Add(baseIx);
+            bendIndices.Add((short)(baseIx + 1));
+            bendIndices.Add((short)(baseIx + 3));
+            bendIndices.Add((short)(baseIx + 1));
+            bendIndices.Add((short)(baseIx + 2));
+            bendIndices.Add((short)(baseIx + 3));
+        }
+
+        /// <summary>Draws everything the frame accumulated into the bend
+        /// geometry batch in one DrawTriangles call (one batch flush total,
+        /// per the DrawManager guidance), then resets the batch.</summary>
+        private void FlushBendGeometry(Managers.DrawManager manager)
+        {
+            if (bendIndices.Count == 0)
+            {
+                return;
+            }
+
+            manager.DrawTriangles(bendVerts.ToArray(), bendIndices.ToArray(), bendIndices.Count / 3);
+            bendVerts.Clear();
+            bendIndices.Clear();
+        }
+
+        /// <summary>The segment-midpoint curvature diamonds, appended to the
+        /// bend geometry batch (drawn as real rotated diamonds, above note
+        /// bodies but below the sprite-drawn vertex squares).</summary>
+        private void AppendBendDiamonds(PianoRollNoteView note, int x0, int y0, int width)
+        {
+            List<PianoRollBendPointView> points = note.BendPoints;
+            if (points == null || points.Count < 2 || note.LengthBeats <= 0)
+            {
+                return;
+            }
+
+            float r = BendVertexHitSize * 0.75f;
+            for (int i = 0; i + 1 < points.Count; i++)
+            {
+                // ON the curve at the segment's midpoint (SampleOffsets reads
+                // the same sampled curve the note body renders from).
+                double midBeat = (points[i].Beats + points[i + 1].Beats) * 0.5;
+                float t = (float)(midBeat / note.LengthBeats);
+                float offset = SampleOffsets(note.BendOffsets, t);
+                float mx = x0 + XForBeat(note.StartBeats + midBeat, width);
+                float my = y0 + YTopForPitch(note.Pitch + offset) + RowHeight * 0.5f;
+                AddBendDiamond(mx, my, r + 1f, NoteBorderColor);
+                AddBendDiamond(mx, my, r, BendHandleColor * 0.8f);
+            }
+        }
+
+        /// <summary>The bend VERTEX squares — sprite rects drawn after the
+        /// geometry flush so they sit above every note body and diamond.</summary>
+        private void DrawBendVertexSquares(Managers.DrawManager manager, PianoRollNoteView note, int x0, int y0, int width)
         {
             List<PianoRollBendPointView> points = note.BendPoints;
             int hs = (int)BendVertexHitSize;
@@ -449,31 +576,13 @@ namespace GustUI.Elements
                 return;
             }
 
-            for (int i = 0; i < points.Count; i++)
+            foreach (PianoRollBendPointView v in points)
             {
-                PianoRollBendPointView v = points[i];
                 int vx = x0 + (int)XForBeat(note.StartBeats + v.Beats, width);
                 int vy = y0 + (int)(YTopForPitch(note.Pitch + v.Semitones) + RowHeight * 0.5f);
                 var handle = new Rectangle(vx - hs / 2, vy - hs / 2, hs, hs);
                 manager.DrawFilledRectangle(handle, BendHandleColor);
                 manager.DrawRectangle(handle, NoteBorderColor);
-
-                if (i + 1 < points.Count && note.LengthBeats > 0)
-                {
-                    // The segment's curvature diamond, ON the curve at the
-                    // segment's midpoint (SampleOffsets reads the same
-                    // sampled curve the note body renders from).
-                    PianoRollBendPointView b2 = points[i + 1];
-                    double midBeat = (v.Beats + b2.Beats) * 0.5;
-                    float t = (float)(midBeat / note.LengthBeats);
-                    float offset = SampleOffsets(note.BendOffsets, t);
-                    int mx = x0 + (int)XForBeat(note.StartBeats + midBeat, width);
-                    int my = y0 + (int)(YTopForPitch(note.Pitch + offset) + RowHeight * 0.5f);
-                    int ds = hs - 2;
-                    var diamond = new Rectangle(mx - ds / 2, my - ds / 2, ds, ds);
-                    manager.DrawFilledRectangle(diamond, BendHandleColor * 0.55f);
-                    manager.DrawRectangle(diamond, NoteBorderColor);
-                }
             }
         }
 
