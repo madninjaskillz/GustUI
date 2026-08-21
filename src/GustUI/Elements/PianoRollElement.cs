@@ -28,6 +28,21 @@ namespace GustUI.Elements
         /// the note block renders BENT: its body follows Pitch + offset.
         /// </summary>
         public float[] BendOffsets;
+
+        /// <summary>The bend's actual vertices (note-local beats +
+        /// semitone offsets), for the BEND-edit mode's handles
+        /// (<see cref="PianoRollElement.BendEditMode"/>); null when the
+        /// note has no bend.</summary>
+        public List<PianoRollBendPointView> BendPoints;
+    }
+
+    /// <summary>One bend vertex as the roll draws it (a display view of the
+    /// host's own bend model, like <see cref="PianoRollNoteView"/> itself).</summary>
+    public class PianoRollBendPointView
+    {
+        public double Beats;
+        public float Semitones;
+        public float Curvature;
     }
 
     /// <summary>
@@ -98,8 +113,16 @@ namespace GustUI.Elements
         /// none. Host-owned, rebuilt per frame like the note list.</summary>
         public HashSet<int> HighlightedPitches;
 
-        /// <summary>Radius of the bend-handle grip drawn on selected notes.</summary>
-        public const float BendHandleSize = 8f;
+        /// <summary>BEND-edit mode (the toolbar's Notes/Bend toggle): every
+        /// note draws its bend vertices as grabbable squares and each
+        /// segment's midpoint as a curvature diamond; the host runs the
+        /// editing state machine against the same geometry
+        /// (<see cref="BendVertexHitSize"/>).</summary>
+        public bool BendEditMode;
+
+        /// <summary>Hit/draw size of a bend vertex handle (square) and the
+        /// segment-midpoint curvature handle (diamond).</summary>
+        public const float BendVertexHitSize = 7f;
 
         // House-style hard-coded dark defaults, host-overridable.
         public Color BackColor = new Color(16, 16, 21);
@@ -406,17 +429,51 @@ namespace GustUI.Elements
                 manager.DrawFilledRectangle(new Rectangle(left + noteW - 1, endTop + 1, 1, rowH), border);
             }
 
-            // Bend handle on the selected note's tail (bend is opt-in: the
-            // handle is the affordance; the host hit-tests the same spot).
-            if (note.Selected && alpha >= 1f)
+            // Bend-edit handles (mode-gated): vertex squares at each bend
+            // point, a curvature diamond at each segment's midpoint — the
+            // curve-editor idiom (drag a point to move it, drag a diamond
+            // to bow the segment). Drawn for every note so the whole
+            // pattern's pitch shapes are editable at a glance.
+            if (BendEditMode && alpha >= 1f)
             {
-                float endOffset = bent ? SampleOffsets(note.BendOffsets, 1f) : 0f;
-                int hx = left + noteW - 1;
-                int hy = y0 + (int)(YTopForPitch(note.Pitch + endOffset) + RowHeight * 0.5f);
-                int hs = (int)BendHandleSize;
-                var handle = new Rectangle(hx - hs / 2, hy - hs / 2, hs, hs);
+                DrawBendHandles(manager, note, x0, y0, width);
+            }
+        }
+
+        private void DrawBendHandles(Managers.DrawManager manager, PianoRollNoteView note, int x0, int y0, int width)
+        {
+            List<PianoRollBendPointView> points = note.BendPoints;
+            int hs = (int)BendVertexHitSize;
+            if (points == null || points.Count == 0)
+            {
+                return;
+            }
+
+            for (int i = 0; i < points.Count; i++)
+            {
+                PianoRollBendPointView v = points[i];
+                int vx = x0 + (int)XForBeat(note.StartBeats + v.Beats, width);
+                int vy = y0 + (int)(YTopForPitch(note.Pitch + v.Semitones) + RowHeight * 0.5f);
+                var handle = new Rectangle(vx - hs / 2, vy - hs / 2, hs, hs);
                 manager.DrawFilledRectangle(handle, BendHandleColor);
                 manager.DrawRectangle(handle, NoteBorderColor);
+
+                if (i + 1 < points.Count && note.LengthBeats > 0)
+                {
+                    // The segment's curvature diamond, ON the curve at the
+                    // segment's midpoint (SampleOffsets reads the same
+                    // sampled curve the note body renders from).
+                    PianoRollBendPointView b2 = points[i + 1];
+                    double midBeat = (v.Beats + b2.Beats) * 0.5;
+                    float t = (float)(midBeat / note.LengthBeats);
+                    float offset = SampleOffsets(note.BendOffsets, t);
+                    int mx = x0 + (int)XForBeat(note.StartBeats + midBeat, width);
+                    int my = y0 + (int)(YTopForPitch(note.Pitch + offset) + RowHeight * 0.5f);
+                    int ds = hs - 2;
+                    var diamond = new Rectangle(mx - ds / 2, my - ds / 2, ds, ds);
+                    manager.DrawFilledRectangle(diamond, BendHandleColor * 0.55f);
+                    manager.DrawRectangle(diamond, NoteBorderColor);
+                }
             }
         }
 
