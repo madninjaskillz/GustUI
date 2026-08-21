@@ -55,7 +55,12 @@ namespace GustUI.Elements
             menuSections = sections;
             Set<PositionTrait>(new TVVector(0, 0));
             Set<SizeTrait>(new TVVector(host.GetSize().X, BarHeight));
-            Set<BackgroundFillTrait>(new TVFillSolidColor(Resources.StaticResources.Theme.SurfaceHeader));
+            // Transparent: the chrome-row STRIP behind this bar paints the
+            // shared SurfaceHeader background (FullScreenModalElement/
+            // ModalWindowElement chromeRowBg). The bar painting its own
+            // 28px background next to the 40px toolbar left a dark gap
+            // under whichever bar was shorter.
+            Set<BackgroundFillTrait>(new TVFillSolidColor(Microsoft.Xna.Framework.Color.Transparent));
             BuildItems();
         }
 

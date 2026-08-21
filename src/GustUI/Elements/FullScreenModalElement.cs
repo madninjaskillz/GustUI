@@ -83,6 +83,16 @@ namespace GustUI.Elements
         private FilledRectangleElement menuSpacer;
         private FilledRectangleElement toolbarSlot;
 
+        /// <summary>The chrome row's ONE full-width SurfaceHeader strip,
+        /// drawn behind the menu bar and toolbar (Depth −1): the bars
+        /// themselves are transparent (see MenuBarElement's ctor comment),
+        /// so their differing heights (28 vs 40) can't leave a dark gap
+        /// under the shorter one — the container paints the background,
+        /// not the elements. Sized every Update to the modal's width ×
+        /// ChromeRowHeight (which already covers the wrapped two-row and
+        /// menu-only cases).</summary>
+        private FilledRectangleElement chromeRowBg;
+
         /// <summary>
         /// The modal's window-chrome title (the welcome/About-modal look:
         /// the shared <see cref="ModalTitleBarElement"/> — green bar, white
@@ -155,6 +165,7 @@ namespace GustUI.Elements
 
             if (menuBar == null)
             {
+                EnsureChromeRowBackground();
                 menuBar = new MenuBarElement(this, sections);
                 menuBar.Set<PositionTrait>(new TVVector(0, titleBar != null ? ModalTitleBarElement.BarHeight : 0));
                 AddChild(menuBar, "modal-menu-bar");
@@ -175,6 +186,8 @@ namespace GustUI.Elements
         {
             if (toolbar == null)
             {
+                EnsureChromeRowBackground();
+
                 // toolbar itself stays a direct child of `this`, not of
                 // chromeRow — see ModalWindowElement.toolbarSlot's doc
                 // comment for why.
@@ -199,6 +212,19 @@ namespace GustUI.Elements
             }
 
             return toolbar;
+        }
+
+        private void EnsureChromeRowBackground()
+        {
+            if (chromeRowBg == null)
+            {
+                chromeRowBg = new FilledRectangleElement(0, 0, (int)this.GetSize().X, MenuBarElement.BarHeight,
+                    new TVFillSolidColor(() => Resources.StaticResources.Theme.SurfaceHeader))
+                {
+                    Depth = -1, // behind the (transparent) bars and everything else in the modal
+                };
+                AddChild(chromeRowBg, "chrome-row-bg");
+            }
         }
 
         private void EnsureTitleBar()
@@ -266,6 +292,12 @@ namespace GustUI.Elements
                 float rowTop = titleBar != null ? ModalTitleBarElement.BarHeight : 0;
                 TVVector slotPosition = toolbarSlot.ElementTrait<PositionTrait>().Value();
                 toolbar.Set<PositionTrait>(new TVVector(slotPosition.X, rowTop + slotPosition.Y));
+            }
+
+            if (chromeRowBg != null)
+            {
+                chromeRowBg.Set<PositionTrait>(new TVVector(0, titleBar != null ? ModalTitleBarElement.BarHeight : 0));
+                chromeRowBg.Set<SizeTrait>(new TVVector(this.GetSize().X, ChromeRowHeight));
             }
 
             Vector2 windowSize = Resources.StaticResources.RootWindow.GetSize().AsXna;

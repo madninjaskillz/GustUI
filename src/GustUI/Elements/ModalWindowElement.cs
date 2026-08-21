@@ -65,6 +65,26 @@ namespace GustUI.Elements
         /// existing fill-to-the-right-edge behavior is untouched).</summary>
         private FilledRectangleElement toolbarSlot;
 
+        /// <summary>See FullScreenModalElement.chromeRowBg — the ONE
+        /// full-width SurfaceHeader strip behind the (transparent) menu bar
+        /// and toolbar, so their differing heights can't leave a dark gap
+        /// under the shorter bar.</summary>
+        private FilledRectangleElement chromeRowBg;
+
+        private void EnsureChromeRowBackground()
+        {
+            if (chromeRowBg == null)
+            {
+                chromeRowBg = new FilledRectangleElement(0, 0, (int)this.GetSize().X, MenuBarElement.BarHeight,
+                    new TVFillSolidColor(() => Resources.StaticResources.Theme.SurfaceHeader))
+                {
+                    Depth = -1,
+                };
+                AddChildElement(chromeRowBg);
+                chromeRowBg.Set<PositionTrait>(new TVVector(0, ModalTitleBarElement.BarHeight));
+            }
+        }
+
         // ---- height cap + scroll (2026-08-13): a modal whose natural
         // content is taller than the window used to just run off the
         // bottom of the screen (footer buttons included — genuinely
@@ -257,6 +277,7 @@ namespace GustUI.Elements
 
             if (menuBar == null)
             {
+                EnsureChromeRowBackground();
                 menuBar = new MenuBarElement(this, sections);
                 menuBar.Set<PositionTrait>(new TVVector(0, ModalTitleBarElement.BarHeight));
                 AddChildElement(menuBar);
@@ -292,6 +313,8 @@ namespace GustUI.Elements
         {
             if (toolbar == null)
             {
+                EnsureChromeRowBackground();
+
                 // toolbar itself stays a direct child of `this`, not of
                 // chromeRow — see toolbarSlot's own doc comment for why.
                 toolbar = new ToolbarElement(this);
@@ -944,6 +967,11 @@ namespace GustUI.Elements
                 toolbarSlot.Set<SizeTrait>(new TVVector(toolbar.ContentWidth, ToolbarElement.BarHeight));
                 TVVector slotPosition = toolbarSlot.ElementTrait<PositionTrait>().Value();
                 toolbar.Set<PositionTrait>(new TVVector(slotPosition.X, ModalTitleBarElement.BarHeight + slotPosition.Y));
+            }
+
+            if (chromeRowBg != null)
+            {
+                chromeRowBg.Set<SizeTrait>(new TVVector(this.GetSize().X, ChromeRowHeight));
             }
 
             // Click-anywhere-brings-to-front (2026-08-17, user report: only

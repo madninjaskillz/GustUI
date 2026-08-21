@@ -34,7 +34,10 @@ namespace GustUI.Elements
             this.host = host;
             Set<PositionTrait>(new TVVector(0, 0));
             Set<SizeTrait>(new TVVector(host.GetSize().X, BarHeight));
-            Set<BackgroundFillTrait>(new TVFillSolidColor(() => Resources.StaticResources.Theme.SurfaceHeader));
+            // Transparent: the host modal's chrome-row strip paints the
+            // shared SurfaceHeader background (see MenuBarElement's ctor
+            // comment — one container background, no per-bar seams).
+            Set<BackgroundFillTrait>(new TVFillSolidColor(Microsoft.Xna.Framework.Color.Transparent));
         }
 
         /// <summary>How much width this toolbar's own CONTENT actually
