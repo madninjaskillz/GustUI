@@ -29,6 +29,13 @@ namespace GustUI.Elements
 
         private ButtonStates buttonState;
         private TextElement textElement;
+
+        /// <summary>The label, for subclasses that need to lay it out — see
+        /// <see cref="SplitButtonElement"/>, which narrows it so the centred
+        /// text doesn't drift under the chevron segment. Its size is SYNCED
+        /// from this button's, so anything set here is overwritten on the next
+        /// resize; re-apply rather than assuming it sticks.</summary>
+        protected TextElement Label => textElement;
         public BasicButtonElement()
         {
             textElement = this.AddChildElement<TextElement>();

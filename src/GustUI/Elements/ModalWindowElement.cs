@@ -276,6 +276,23 @@ namespace GustUI.Elements
         public int ContentTop => ModalTitleBarElement.BarHeight + ChromeRowHeight;
 
         /// <summary>
+        /// The area a body element is actually VISIBLE in, in element space —
+        /// the scroll viewport's size when the body scrolls, the modal's own
+        /// content box when it doesn't.
+        ///
+        /// A body that lays itself out (rather than just growing) needs this:
+        /// its own SizeTrait is what it was BUILT at, and when that exceeds the
+        /// viewport the modal simply scrolls it, so anything the body anchored
+        /// to its own bottom edge silently ends up below the fold. Without this
+        /// the only way to find the real height was to reverse-engineer the
+        /// chrome, margin and button-row arithmetic from outside.
+        /// </summary>
+        public Vector2 ContentViewportSize =>
+            scrollViewport != null
+                ? scrollViewport.GetSize().AsXna
+                : new Vector2(EffectiveContentWidth(), EffectiveContentHeight());
+
+        /// <summary>
         /// Shows (or replaces) this modal's own menu strip, directly below
         /// its title bar — the per-modal replacement for the old global
         /// FruitMenuElement. No-op if <paramref name="sections"/> is

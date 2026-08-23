@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 
 namespace GustUI.Elements
 {
+    [Attributes.ElementTraits(typeof(OnScrollWheelChanged))]
     public class FruitPopupMenu : FilledRectangleElement
     {
         /// <summary>
@@ -24,6 +25,22 @@ namespace GustUI.Elements
 
         private List<MenuItemModel> menuItems;
         public bool WasAutoPopped { get; set; }
+
+        /// <summary>Every item with the Y it would sit at if the popup were
+        /// tall enough to show them all. See <see cref="ApplyScroll"/>.</summary>
+        private readonly List<(FruitMenuItem Item, float NaturalY)> itemRows = new();
+
+        /// <summary>Total height of the items, whatever the popup ends up
+        /// being clamped to.</summary>
+        private float naturalHeight;
+
+        /// <summary>Pixels scrolled, 0 when everything fits.</summary>
+        private float scroll;
+
+        /// <summary>Pixels per wheel notch. Roughly two menu rows, which is
+        /// the scale a menu wants — a wheel notch that moves half an item is
+        /// worse than not scrolling at all.</summary>
+        private const float WheelStep = 64f;
 
         /// <summary>The element that opened this popup (e.g. a plain
         /// BasicButtonElement dropdown trigger, unlike the fruit-menu's own
@@ -64,11 +81,18 @@ namespace GustUI.Elements
 
                 i.Set<PositionTrait>(new TVVector(0, ps));
 
+                // Remembered so Update() can re-place every item at
+                // (natural - scroll) without having to re-derive the layout.
+                itemRows.Add((i, ps));
+
                 ps = ps + Math.Max(i.ElementTrait<SizeTrait>().Value().Y,7);
 
             }
 
+            naturalHeight = ps;
             Set<SizeTrait>(new TVVector(width, ps));
+
+            Set<OnScrollWheelChanged>(new TVEvent<ScrollEventArgs>(HandleWheel));
         }
 
         // Guards against the popup closing on the SAME click that opened it.
@@ -118,6 +142,25 @@ namespace GustUI.Elements
                 topLimit = Resources.StaticResources.RootWindow.Children.Items.First(x => x is FruitMenuElement).GetSize().Y;
             }
 
+            // Clamping alone cannot save a menu TALLER than the space it has
+            // to live in — Min/Max just pins it to the top and the surplus
+            // still hangs off the bottom, unreachable. So when the items do
+            // not fit, the popup is capped to the available height, clips its
+            // children, and scrolls (2026-08-23; File's dropdown crossed this
+            // line at a modest window size and took Preferences with it).
+            float available = Math.Max(80, windowSize.Y - topLimit - 8);
+            bool scrolls = naturalHeight > available;
+            float shownHeight = scrolls ? available : naturalHeight;
+
+            if (Math.Abs(size.Y - shownHeight) > 0.5f)
+            {
+                Set<SizeTrait>(new TVVector(size.X, shownHeight));
+                size = ElementTrait<SizeTrait>().Value();
+            }
+
+            ClipChildren = scrolls;
+            ApplyScroll(scrolls ? Math.Min(scroll, naturalHeight - available) : 0f);
+
             float clampedX = Math.Max(0, Math.Min(pos.X, windowSize.X - size.X));
             float clampedY = Math.Max(topLimit, Math.Min(pos.Y, windowSize.Y - size.Y));
             if (clampedX != pos.X || clampedY != pos.Y)
@@ -132,6 +175,37 @@ namespace GustUI.Elements
             }
 
             eligibleToAutoClose = true;
+        }
+
+        private void HandleWheel(ScrollEventArgs args)
+        {
+            // ScrollWheelDelta = previous - current, so wheel-up is negative —
+            // same convention VerticalScrollElement uses.
+            scroll += args.ScrollWheelDelta / 120f * WheelStep;
+        }
+
+        /// <summary>Re-places every item at its natural Y less the scroll
+        /// offset, clamping the offset to the real range first so a wheel
+        /// flick can't push the menu off its own top or bottom.</summary>
+        private void ApplyScroll(float requested)
+        {
+            float max = Math.Max(0, naturalHeight - ElementTrait<SizeTrait>().Value().Y);
+            float applied = Math.Max(0, Math.Min(requested, max));
+
+            if (Math.Abs(applied - scroll) > 0.01f)
+            {
+                scroll = applied;
+            }
+
+            foreach ((FruitMenuItem item, float naturalY) in itemRows)
+            {
+                TVVector at = item.ElementTrait<PositionTrait>().Value();
+                float wanted = naturalY - applied;
+                if (Math.Abs(at.Y - wanted) > 0.01f)
+                {
+                    item.Set<PositionTrait>(new TVVector(at.X, wanted));
+                }
+            }
         }
 
         private static bool AnyMenuUiHovered()

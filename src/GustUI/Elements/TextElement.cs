@@ -194,12 +194,60 @@ namespace GustUI.Elements
                         continue; // collapse runs of spaces rather than wrapping on them
                     }
 
+                    // A word WIDER THAN THE BOX can never fit on any line, so
+                    // it is broken at character granularity rather than left to
+                    // overflow. This used to be an explicit non-goal ("a single
+                    // word wider than the box still gets its own line"), which
+                    // is fine for prose and wrong for the things that actually
+                    // hit it: URLs, file paths and Guids contain no spaces at
+                    // all, and text is not clipped — an unbroken sign-in URL
+                    // simply drew straight out through both sides of its modal
+                    // (found 2026-08-23).
+                    if (measureWidth(word) > wrapWidth)
+                    {
+                        if (line.Length > 0)
+                        {
+                            wrapped.Append(line).Append('\n');
+                            line = "";
+                        }
+
+                        int start = 0;
+                        while (start < word.Length)
+                        {
+                            // Grow the chunk while it still fits. Always take at
+                            // least one character, so a box too narrow for even
+                            // a single glyph still advances instead of spinning.
+                            int take = 1;
+                            while (start + take < word.Length
+                                   && measureWidth(word.Substring(start, take + 1)) <= wrapWidth)
+                            {
+                                take++;
+                            }
+
+                            string chunk = word.Substring(start, take);
+                            start += take;
+
+                            if (start < word.Length)
+                            {
+                                wrapped.Append(chunk).Append('\n');
+                            }
+                            else
+                            {
+                                // The tail stays as the current line, so a
+                                // following word can still join it.
+                                line = chunk;
+                            }
+                        }
+
+                        continue;
+                    }
+
                     string candidate = line.Length == 0 ? word : line + " " + word;
                     if (line.Length > 0
                         && measureWidth(candidate) > wrapWidth)
                     {
                         wrapped.Append(line).Append('\n');
-                        line = word; // a single word wider than the box still gets its own line
+                        line = word;
                     }
                     else
                     {
@@ -293,6 +341,15 @@ namespace GustUI.Elements
             }
         }
 
+        /// <summary>
+        /// The element's LAID-OUT size: its own width (unchanged — this is
+        /// what callers lay out against), and the height the text actually
+        /// needs at that width, word-wrap included.
+        ///
+        /// Note the X is deliberately NOT the measured text width. Use
+        /// <see cref="Measure"/> when you need to know how wide a string
+        /// really is.
+        /// </summary>
         public Vector2 CalculatedSize()
         {
             TVFont fontValue = fontTrait.Value();
@@ -300,6 +357,58 @@ namespace GustUI.Elements
             Vector2 size = MakeMeasure(fontValue)(text);
 
             return new Vector2(ElementTrait<SizeTrait>().Value().X, size.Y);
+        }
+
+        /// <summary>
+        /// The REAL rendered size of <paramref name="text"/> in
+        /// <paramref name="font"/>, with no element and no layout involved.
+        ///
+        /// Exists because <see cref="CalculatedSize"/> answers a different
+        /// question — it reports the element's own width, so it cannot tell a
+        /// caller whether a string fits. Anything laying out columns of
+        /// unwrapped text needs this instead: the fonts are proportional, so
+        /// "how many characters fit" is not a question a character count can
+        /// answer, and a string that overruns its column is drawn straight
+        /// over its neighbour rather than clipped.
+        /// </summary>
+        public static Vector2 Measure(string text, TVFont font)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return Vector2.Zero;
+            }
+
+            return Resources.StaticResources.FontManager
+                .LoadSdfFont(font.Family)
+                .MeasureString(text, font.Size);
+        }
+
+        /// <summary>
+        /// <paramref name="text"/> trimmed with an ellipsis until it measures
+        /// within <paramref name="width"/>, or unchanged when it already does.
+        /// The companion to <see cref="Measure"/>, here rather than in each
+        /// caller because every list of unwrapped text needs exactly this.
+        /// </summary>
+        public static string Ellipsise(string text, float width, TVFont font)
+        {
+            if (string.IsNullOrEmpty(text) || width <= 0 || Measure(text, font).X <= width)
+            {
+                return text ?? "";
+            }
+
+            // Three ASCII dots rather than U+2026: the SDF fonts here have no
+            // glyph for the single-character ellipsis and drop it silently, so
+            // a truncated label would just stop mid-word with no indication
+            // that anything was cut.
+            const string Ellipsis = "...";
+
+            int keep = text.Length;
+            while (keep > 1 && Measure(text.Substring(0, keep) + Ellipsis, font).X > width)
+            {
+                keep--;
+            }
+
+            return text.Substring(0, keep).TrimEnd() + Ellipsis;
         }
     }
 }

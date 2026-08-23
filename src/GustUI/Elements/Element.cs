@@ -31,7 +31,7 @@ public class Element : IDisposable
 
     /// <summary>Keyboard input routed to the focused element by the
     /// InputManager (one call per newly pressed key). Base: ignore.</summary>
-    internal virtual void HandleKeyInput(Microsoft.Xna.Framework.Input.Keys key, bool shift)
+    internal virtual void HandleKeyInput(Microsoft.Xna.Framework.Input.Keys key, bool shift, bool control)
     {
     }
     public bool SizeFitsChildren { get; set; } = false;

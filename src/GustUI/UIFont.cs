@@ -997,7 +997,47 @@ namespace GustUI
             // Summary:
             //     E990 <img alt="Xbox icon" src="./microsoft.ui.xaml.controls/images/segoe-fluent-icons/e990.png"
             //     />
-            XboxOneConsole = 59792
+            XboxOneConsole = 59792,
+
+            // ---- added 2026-08-23 ----
+            //
+            // Everything above this line is Microsoft's WinRT Symbol enum
+            // copied verbatim, and it has a real hole: an Up (E110) with no
+            // Down, and no chevron of any direction. A control that opens
+            // something downward - a split button, a dropdown, an expander -
+            // had nothing to point with.
+            //
+            // Membership of this enum is what gets BAKED: FontManager.
+            // IconRangesFor builds segmdl2.ttf's SDF atlas from
+            // Enum.GetValues(typeof(Symbol)), so a codepoint that isn't a
+            // member here doesn't render in SDF mode at all.
+            //
+            // Every one of these was individually verified against
+            // stbtt_GetGlyphSDF's uncatchable stack overflow (see
+            // FontManager.SdfUnsafeSymbolCodepoints) by baking it ALONE in
+            // its own OS process - the only way to test it, since a managed
+            // try/catch cannot survive a real stack overflow. All seven
+            // baked cleanly. Do the same before adding any more.
+
+            // E1FD - the exact vertical mirror of Up (E110); same arrow
+            // weight, so the two pair correctly in one UI.
+            Down = 57853,
+
+            // E70D / E70E - the light chevron pair.
+            ChevronDown = 59149,
+            ChevronUp = 59150,
+
+            // E96D / E96E - Segoe MDL2 names these "ChevronUpSmall" and
+            // "ChevronDownSmall", which is misleading: at a given font size
+            // they draw noticeably HEAVIER than E70D/E70E, not smaller. Named
+            // for what they look like, because a name that contradicts the
+            // glyph is worse than an unfaithful one. This is the weight a
+            // split button's chevron wants.
+            ChevronUpBold = 59757,
+            ChevronDownBold = 59758,
+
+            // E972 - a narrower down chevron, for tight rows.
+            ChevronDownSmall = 59762
         }
     }
 }

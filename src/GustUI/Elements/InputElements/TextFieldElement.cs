@@ -74,8 +74,14 @@ namespace GustUI.Elements.InputElements
             textElement.Set<SizeTrait>(new TVVector(Math.Max(10, size.X - 12), Math.Max(10, size.Y - 6)));
         }
 
-        internal override void HandleKeyInput(Keys key, bool shift)
+        internal override void HandleKeyInput(Keys key, bool shift, bool control)
         {
+            if (control)
+            {
+                HandleShortcut(key);
+                return;
+            }
+
             if (key == Keys.Back)
             {
                 if (text.Length > 0)
@@ -94,13 +100,101 @@ namespace GustUI.Elements.InputElements
             }
 
             char? c = CharFor(key, shift);
-            if (c.HasValue && text.Length < MaxLength)
+            if (c.HasValue)
             {
-                Text = text + c.Value;
-                OnTextChanged?.Invoke(text);
+                Insert(c.Value.ToString());
             }
         }
 
+        /// <summary>
+        /// Ctrl+V / Ctrl+C / Ctrl+X / Ctrl+A.
+        ///
+        /// Paste is the one that matters: this field is where API keys, OAuth
+        /// client secrets and authorisation codes get entered, and none of
+        /// those are things anyone types by hand. Without it those flows are
+        /// effectively unusable (reported 2026-08-23).
+        ///
+        /// There is no selection model here yet, so copy and cut act on the
+        /// WHOLE field and select-all is a no-op that at least doesn't type an
+        /// "a" — better than a shortcut that silently corrupts the value.
+        /// </summary>
+        private void HandleShortcut(Keys key)
+        {
+            switch (key)
+            {
+                case Keys.V:
+                    Insert(Managers.ClipboardBridge.GetText());
+                    break;
+
+                case Keys.C:
+                    Managers.ClipboardBridge.SetText(text);
+                    break;
+
+                case Keys.X:
+                    Managers.ClipboardBridge.SetText(text);
+                    if (text.Length > 0)
+                    {
+                        Text = "";
+                        OnTextChanged?.Invoke(text);
+                    }
+
+                    break;
+            }
+        }
+
+        /// <summary>Appends, honouring <see cref="MaxLength"/> and stripping
+        /// anything that can't live on one line — pasted text routinely arrives
+        /// with a trailing newline, and a redirect URL copied out of a browser
+        /// can arrive with leading whitespace.</summary>
+        public void Insert(string incoming)
+        {
+            if (string.IsNullOrEmpty(incoming))
+            {
+                return;
+            }
+
+            var cleaned = new StringBuilder(incoming.Length);
+            foreach (char c in incoming)
+            {
+                if (c == '\n' || c == '\r' || c == '\t')
+                {
+                    continue;
+                }
+
+                if (!char.IsControl(c))
+                {
+                    cleaned.Append(c);
+                }
+            }
+
+            if (cleaned.Length == 0)
+            {
+                return;
+            }
+
+            int room = MaxLength - text.Length;
+            if (room <= 0)
+            {
+                return;
+            }
+
+            string addition = cleaned.Length <= room ? cleaned.ToString() : cleaned.ToString(0, room);
+            Text = text + addition;
+            OnTextChanged?.Invoke(text);
+        }
+
+        /// <summary>
+        /// The character a key produces. Covers the full printable ASCII range
+        /// a US layout can reach, not just letters and digits — the previous
+        /// set (a-z, 0-9, space, -, _, .) could not type a URL, a path, or most
+        /// API keys, so a field that couldn't be pasted into couldn't be filled
+        /// in at all.
+        ///
+        /// This is a US-layout map. A proper fix is the platform's own
+        /// character input (KNI exposes a TextInput event on desktop), which
+        /// would also bring dead keys and IME along; that is a bigger change
+        /// than this one, and paste covers the case that actually hurts.
+        /// </summary>
         private static char? CharFor(Keys key, bool shift)
         {
             if (key >= Keys.A && key <= Keys.Z)
@@ -111,7 +205,13 @@ namespace GustUI.Elements.InputElements
 
             if (key >= Keys.D0 && key <= Keys.D9)
             {
-                return (char)('0' + (key - Keys.D0));
+                int digit = key - Keys.D0;
+                if (!shift)
+                {
+                    return (char)('0' + digit);
+                }
+
+                return ")!@#$%^&*("[digit];
             }
 
             if (key >= Keys.NumPad0 && key <= Keys.NumPad9)
@@ -123,7 +223,21 @@ namespace GustUI.Elements.InputElements
             {
                 Keys.Space => ' ',
                 Keys.OemMinus => shift ? '_' : '-',
-                Keys.OemPeriod => '.',
+                Keys.OemPlus => shift ? '+' : '=',
+                Keys.OemPeriod => shift ? '>' : '.',
+                Keys.OemComma => shift ? '<' : ',',
+                Keys.OemQuestion => shift ? '?' : '/',
+                Keys.OemSemicolon => shift ? ':' : ';',
+                Keys.OemQuotes => shift ? '"' : '\'',
+                Keys.OemTilde => shift ? '~' : '`',
+                Keys.OemOpenBrackets => shift ? '{' : '[',
+                Keys.OemCloseBrackets => shift ? '}' : ']',
+                Keys.OemPipe or Keys.OemBackslash => shift ? '|' : '\\',
+                Keys.Decimal => '.',
+                Keys.Add => '+',
+                Keys.Subtract => '-',
+                Keys.Multiply => '*',
+                Keys.Divide => '/',
                 _ => (char?)null,
             };
         }

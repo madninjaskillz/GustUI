@@ -12,7 +12,18 @@ using System.Threading.Tasks;
 
 namespace GustUI.Extensions
 {
-    internal static class ShapeDrawExtensions
+    /// <summary>
+    /// Shape primitives on top of <see cref="DrawManager"/> — antialiased
+    /// circles, capsules, rings, thick lines, curves, and the monotone-region
+    /// fill the ezmuze mark is drawn from.
+    ///
+    /// PUBLIC (2026-08-23, was internal): a host app that draws its own element
+    /// needs the same primitives GustUI's built-in elements use, and the
+    /// alternative was either duplicating the feathered-geometry maths outside
+    /// the framework or putting app artwork inside it. Every type in these
+    /// signatures is already public.
+    /// </summary>
+    public static class ShapeDrawExtensions
     {
         public static void DrawLine(this DrawManager manager, Vector2 start, Vector2 end, Color color)
         {
@@ -180,6 +191,219 @@ namespace GustUI.Extensions
                 AppendBandQuad(idx, ref ii, i, ni, 0, segments);
                 AppendBandQuad(idx, ref ii, i, ni, segments, segments * 2);
                 AppendBandQuad(idx, ref ii, i, ni, segments * 2, segments * 3);
+            }
+
+            manager.GeometryBatch.AppendTriangles(white.Texture, verts, idx, ii / 3, clip, manager.CurrentBlend);
+        }
+
+        /// <summary>
+        /// A slice of a ring: same band as <see cref="DrawRing"/> but only from
+        /// <paramref name="startAngle"/> through <paramref name="sweepAngle"/>
+        /// radians (0 = three o'clock, positive = clockwise on screen).
+        ///
+        /// Exists so a ring can DRAW ITSELF IN — an arc whose sweep animates
+        /// from nothing to a full turn is the entrance the ezmuze mark uses.
+        /// Unlike the closed ring this does not wrap, so the band has two open
+        /// ends; they are left square, which is invisible at the sweep speeds
+        /// this is for.
+        /// </summary>
+        public static void DrawRingArc(this DrawManager manager, Vector2 center, float innerRadius,
+            float outerRadius, Color color, float startAngle, float sweepAngle)
+        {
+            if (outerRadius <= 0.01f || outerRadius <= innerRadius || sweepAngle <= 0.0001f)
+            {
+                return;
+            }
+
+            sweepAngle = Math.Min(sweepAngle, MathHelper.TwoPi);
+            innerRadius = Math.Max(0f, innerRadius);
+
+            // Segment count follows the SWEPT length, not the whole circle, so
+            // a short arc doesn't pay for a full circle's worth of triangles
+            // and a long one is still smooth.
+            int segments = Math.Max(2, (int)Math.Ceiling(
+                ArcSegments(outerRadius, manager.RenderScale) * (sweepAngle / MathHelper.TwoPi)));
+
+            float feather = 1f / Math.Max(0.01f, manager.RenderScale);
+            float half = feather * 0.5f;
+
+            float r0 = Math.Max(0f, innerRadius - half);
+            float r1 = innerRadius + half;
+            float r2 = outerRadius - half;
+            float r3 = outerRadius + half;
+            if (r1 > r2)
+            {
+                r1 = r2 = (innerRadius + outerRadius) * 0.5f;
+            }
+
+            AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
+            var uv = new Vector2(
+                (white.Pixels.X + 0.5f) / white.Texture.Width,
+                (white.Pixels.Y + 0.5f) / white.Texture.Height);
+            Vector4 clip = manager.GetClipRectForGeometry();
+            Color transparent = color * 0f;
+
+            int ring = segments + 1;
+            var verts = new GeometryVertex[ring * 4];
+            for (int i = 0; i <= segments; i++)
+            {
+                float a = startAngle + sweepAngle * (i / (float)segments);
+                var dir = new Vector2((float)Math.Cos(a), (float)Math.Sin(a));
+                verts[i] = new GeometryVertex(center + dir * r0, transparent, uv, clip);
+                verts[ring + i] = new GeometryVertex(center + dir * r1, color, uv, clip);
+                verts[ring * 2 + i] = new GeometryVertex(center + dir * r2, color, uv, clip);
+                verts[ring * 3 + i] = new GeometryVertex(center + dir * r3, transparent, uv, clip);
+            }
+
+            var idx = new short[segments * 18];
+            int ii = 0;
+            for (int i = 0; i < segments; i++)
+            {
+                AppendBandQuad(idx, ref ii, i, i + 1, 0, ring);
+                AppendBandQuad(idx, ref ii, i, i + 1, ring, ring * 2);
+                AppendBandQuad(idx, ref ii, i, i + 1, ring * 2, ring * 3);
+            }
+
+            manager.GeometryBatch.AppendTriangles(white.Texture, verts, idx, ii / 3, clip, manager.CurrentBlend);
+        }
+
+        /// <summary>
+        /// Fills the region between two polylines that span the same range and
+        /// never double back — an <b>x-monotone</b> region, one boundary above
+        /// the other.
+        ///
+        /// This is the shape a centroid fan cannot draw. <see cref="DrawFilledCircle"/>
+        /// and friends triangulate by fanning from the middle, which is only
+        /// valid for a CONVEX outline; the ezmuze mark's two halves are a disc
+        /// cut by an S-shaped wave, and an S is not convex. A general polygon
+        /// triangulator (ear clipping) would cover it, but nothing here needs
+        /// one: both halves are bounded above and below by a function of x, and
+        /// that special case triangulates as a plain strip.
+        ///
+        /// <paramref name="upperNormals"/>/<paramref name="lowerNormals"/> point
+        /// OUT of the region and drive the antialiased edge — the caller knows
+        /// what each boundary is (a circle's arc, a wave) and can give a true
+        /// normal, which a general routine could only approximate.
+        ///
+        /// Both arrays must be the same length and ordered the same way along
+        /// the sweep. Fewer than two points draws nothing.
+        /// </summary>
+        public static void DrawMonotoneRegion(this DrawManager manager,
+            Vector2[] upper, Vector2[] lower, Vector2[] upperNormals, Vector2[] lowerNormals, Color color) =>
+            manager.DrawMonotoneRegion(upper, lower, upperNormals, lowerNormals, color, color, Vector2.Zero, Vector2.Zero);
+
+        /// <summary>
+        /// <see cref="DrawMonotoneRegion(DrawManager, Vector2[], Vector2[], Vector2[], Vector2[], Color)"/>
+        /// with a LINEAR GRADIENT: each vertex takes its colour from where it
+        /// falls along the axis <paramref name="gradientFrom"/> →
+        /// <paramref name="gradientTo"/>, clamped at both ends.
+        ///
+        /// Evaluated per vertex rather than per region, which is the only thing
+        /// that makes it usable here: the two halves of the ezmuze mark meet
+        /// along a wave, so a gradient run "top of this shape to bottom of this
+        /// shape" would restart at every column and band the seam. Anchoring it
+        /// to a fixed axis in the same space as the geometry means the two
+        /// halves sample one continuous ramp.
+        ///
+        /// A zero-length axis collapses to a flat fill of
+        /// <paramref name="gradientFrom"/>'s colour.
+        /// </summary>
+        public static void DrawMonotoneRegion(this DrawManager manager,
+            Vector2[] upper, Vector2[] lower, Vector2[] upperNormals, Vector2[] lowerNormals,
+            Color from, Color to, Vector2 gradientFrom, Vector2 gradientTo)
+        {
+            int n = upper.Length;
+            if (n < 2 || lower.Length != n || upperNormals.Length != n || lowerNormals.Length != n)
+            {
+                return;
+            }
+
+            float feather = 1f / Math.Max(0.01f, manager.RenderScale);
+            float half = feather * 0.5f;
+
+            AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
+            var uv = new Vector2(
+                (white.Pixels.X + 0.5f) / white.Texture.Width,
+                (white.Pixels.Y + 0.5f) / white.Texture.Height);
+            Vector4 clip = manager.GetClipRectForGeometry();
+
+            // Four rings: the two boundaries pushed a half-feather OUT (fully
+            // transparent) and a half-feather IN (fully opaque). The opaque
+            // pair is the region's real interior; each transparent pair makes
+            // one soft edge.
+            Vector2 axis = gradientTo - gradientFrom;
+            float axisLengthSquared = axis.LengthSquared();
+
+            Color At(Vector2 point)
+            {
+                if (axisLengthSquared <= 0.0001f)
+                {
+                    return from;
+                }
+
+                float t = Vector2.Dot(point - gradientFrom, axis) / axisLengthSquared;
+                return Color.Lerp(from, to, MathHelper.Clamp(t, 0f, 1f));
+            }
+
+            var verts = new GeometryVertex[n * 4];
+            for (int i = 0; i < n; i++)
+            {
+                // How deep the region is at this column, measured along the
+                // interior direction rather than as a plain difference, so a
+                // caller whose boundaries are not stacked vertically still gets
+                // the right answer.
+                float depth = Vector2.Dot(lower[i] - upper[i], -upperNormals[i]);
+
+                Vector2 outerUpper, innerUpper, innerLower, outerLower;
+
+                if (depth <= 0f)
+                {
+                    // EMPTY column - the two boundaries have met or crossed, so
+                    // there is nothing here to draw. Every vertex collapses to
+                    // one point and the quads come out zero-area.
+                    //
+                    // This case has to be handled explicitly, because the two
+                    // boundaries generally carry DIFFERENT normals: even when
+                    // they sit on exactly the same point, insetting each along
+                    // its own normal separates them again, and the band between
+                    // is filled at full opacity. In the ezmuze mark, where the
+                    // unfilled part of each half collapses onto the disc's arc,
+                    // that painted a fully opaque one-pixel line along the whole
+                    // arc - a complete thin circle drawn around a disc that had
+                    // not formed yet (2026-08-23).
+                    outerUpper = innerUpper = innerLower = outerLower = upper[i];
+                }
+                else if (depth < feather)
+                {
+                    // Thinner than the feather itself: collapse the solid middle
+                    // to a line rather than let the two feather bands cross and
+                    // invert, exactly as DrawRing does for a narrow band. What
+                    // is left is a correctly faint hairline.
+                    outerUpper = upper[i] + upperNormals[i] * half;
+                    outerLower = lower[i] + lowerNormals[i] * half;
+                    innerUpper = innerLower = (upper[i] + lower[i]) * 0.5f;
+                }
+                else
+                {
+                    outerUpper = upper[i] + upperNormals[i] * half;
+                    innerUpper = upper[i] - upperNormals[i] * half;
+                    innerLower = lower[i] - lowerNormals[i] * half;
+                    outerLower = lower[i] + lowerNormals[i] * half;
+                }
+
+                verts[i] = new GeometryVertex(outerUpper, At(outerUpper) * 0f, uv, clip);
+                verts[n + i] = new GeometryVertex(innerUpper, At(innerUpper), uv, clip);
+                verts[n * 2 + i] = new GeometryVertex(innerLower, At(innerLower), uv, clip);
+                verts[n * 3 + i] = new GeometryVertex(outerLower, At(outerLower) * 0f, uv, clip);
+            }
+
+            var idx = new short[(n - 1) * 18];
+            int ii = 0;
+            for (int i = 0; i < n - 1; i++)
+            {
+                AppendBandQuad(idx, ref ii, i, i + 1, 0, n);
+                AppendBandQuad(idx, ref ii, i, i + 1, n, n * 2);
+                AppendBandQuad(idx, ref ii, i, i + 1, n * 2, n * 3);
             }
 
             manager.GeometryBatch.AppendTriangles(white.Texture, verts, idx, ii / 3, clip, manager.CurrentBlend);

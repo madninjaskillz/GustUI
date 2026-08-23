@@ -352,11 +352,18 @@ namespace GustUI.Managers
             if (typing)
             {
                 bool shift = keyboardState.IsKeyDown(Keys.LeftShift) || keyboardState.IsKeyDown(Keys.RightShift);
+
+                // Control travels with the keystroke so a focused field can
+                // implement the clipboard shortcuts. It cannot look this up
+                // itself — by the time a handler runs, the modifier may
+                // already be released.
+                bool control = keyboardState.IsKeyDown(Keys.LeftControl) || keyboardState.IsKeyDown(Keys.RightControl);
+
                 foreach (Keys key in keyboardState.GetPressedKeys())
                 {
                     if (!previousKeyboardState.IsKeyDown(key))
                     {
-                        CurrentlyFocused.HandleKeyInput(key, shift);
+                        CurrentlyFocused.HandleKeyInput(key, shift, control);
                     }
                 }
             }
@@ -507,7 +514,7 @@ namespace GustUI.Managers
             {
                 foreach (Element element in ClickTargets(currentlyHovered).Where(e => e.HasTrait<OnMousePress>()))
                 {
-                    element.ElementTrait<OnMousePress>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
+                    Dispatch(element, element.ElementTrait<OnMousePress>().Value(), mouseState);
                 }
 
 
@@ -531,7 +538,7 @@ namespace GustUI.Managers
 
                 foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnMouseButtonHeldDown>()))
                 {
-                    element.ElementTrait<OnMouseButtonHeldDown>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
+                    Dispatch(element, element.ElementTrait<OnMouseButtonHeldDown>().Value(), mouseState);
                 }
             }
             else if (mouseState.LeftButton == ButtonState.Released && previousMouseState.LeftButton == ButtonState.Pressed)
@@ -539,7 +546,7 @@ namespace GustUI.Managers
                 HaveInteracted = true;
                 foreach (Element element in ClickTargets(currentlyHovered).Where(e => e.HasTrait<OnMouseRelease>()))
                 {
-                    element.ElementTrait<OnMouseRelease>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
+                    Dispatch(element, element.ElementTrait<OnMouseRelease>().Value(), mouseState);
                 }
             }
 
@@ -551,7 +558,7 @@ namespace GustUI.Managers
                 HaveInteracted = true;
                 foreach (Element element in ClickTargets(currentlyHovered).Where(e => e.HasTrait<OnRightClickTrait>()))
                 {
-                    element.ElementTrait<OnRightClickTrait>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
+                    Dispatch(element, element.ElementTrait<OnRightClickTrait>().Value(), mouseState);
                 }
             }
 
@@ -564,6 +571,46 @@ namespace GustUI.Managers
         // Previous frame's hover list is cached rather than recomputed with a
         // second full ProcessHovers tree walk every frame.
         private List<Element> lastHoverList = new List<Element>();
+
+        /// <summary>
+        /// Fires one mouse event at one element, tolerating the two states a
+        /// dispatch loop can legitimately find mid-iteration.
+        ///
+        /// A trait can be DECLARED (via [ElementTraits]) and never SET, in
+        /// which case Value() is null — HasTrait says yes and the old
+        /// `.Value().TriggerAction` dereferenced it anyway. And a handler
+        /// earlier in the same loop can tear the screen down (a button that
+        /// opens a new view kills every sibling), leaving the elements after it
+        /// detached; asking a detached element for its absolute position walks
+        /// a null parent chain. Neither is a bug in the element — both are
+        /// ordinary — and neither should take the process down mid-click, which
+        /// is exactly what used to happen: an unhandled NullReferenceException
+        /// straight out of the game loop (found 2026-08-23, clicking "New
+        /// project" on the welcome screen).
+        /// </summary>
+        private static void Dispatch<T>(Element element, TVEvent<T> handler, MouseState mouseState)
+            where T : TVEventArgs
+        {
+            if (handler?.TriggerAction == null)
+            {
+                return;
+            }
+
+            ClickEventArgs args;
+            try
+            {
+                args = element.GetClickArgs(mouseState);
+            }
+            catch (NullReferenceException)
+            {
+                return; // torn down by an earlier handler in this same loop
+            }
+
+            if (args is T typed)
+            {
+                handler.TriggerAction.Invoke(typed);
+            }
+        }
 
         private void UpdateHoverTransitions(MouseState mouseState)
         {

@@ -91,6 +91,21 @@ namespace GustUI
         /// exists or is planned — design-guide.md §2 standardizes on plain
         /// (non-italic) text everywhere.</summary>
         public TVFont UiFontBold = new() { Family = "segoeuib.ttf", Size = 24, Border = 0 };
+        /// <summary>
+        /// The wordmark face (Comfortaa, SIL OFL — see THIRD-PARTY/). A brand
+        /// font, NOT a UI font: it exists so a logo can be SET rather than
+        /// shipped as pixels, which makes it resolution-independent through the
+        /// SDF path and recolourable per theme. Don't reach for it for ordinary
+        /// interface text — design-guide.md §2's type ramp is Segoe, and mixing
+        /// a display face into the ramp muddies the hierarchy it encodes.
+        ///
+        /// Both weights are Basic-Latin subsets of the upstream variable font,
+        /// 20 KB each; see THIRD-PARTY/README.md for what was changed and why.
+        /// </summary>
+        public TVFont WordmarkFont = new() { Family = "Comfortaa-Bold.ttf", Size = 48, Border = 0 };
+
+        public TVFont WordmarkLightFont = new() { Family = "Comfortaa-Light.ttf", Size = 48, Border = 0 };
+
         public TVFont SymbolFont = new() { Family = "segmdl2.ttf", Size = 24, Border = 0 };
         public TVFont AltSymbolFont = new() { Family = "SegoeIcons.ttf", Size = 24, Border = 0 };
 

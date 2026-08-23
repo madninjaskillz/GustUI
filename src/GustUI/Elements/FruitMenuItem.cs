@@ -126,12 +126,21 @@ namespace GustUI.Elements
             }
 
 
+            // A menu item is ONE fixed-height row, so its label must be one
+            // line: wrapping produces a second line the row has no space for,
+            // which lands on top of the next item. Anything too long is
+            // ellipsised to the label column instead — the full text is still
+            // available to a caller that wants it in a tooltip.
+            TVFont labelFont = Resources.StaticResources.Theme.UiFont;
+            float labelWidth = width - 70;
+
             textElement = this.AddChildElement<TextElement>();
+            textElement.WordWrap = false;
             textElement.Set<PositionTrait>(new TVVector(50, 6));
-            textElement.Set<SizeTrait>(new TVVector(width - 70, 50));
-            textElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
+            textElement.Set<SizeTrait>(new TVVector(labelWidth, 50));
+            textElement.Set<FontTrait>(labelFont);
             textElement.Set<ForegroundColorTrait>(new TVColor(Color.Black));
-            textElement.Set<TextTrait>(new TVText(text));
+            textElement.Set<TextTrait>(new TVText(TextElement.Ellipsise(text, labelWidth, labelFont)));
 
             if (!menuItem.Enabled)
             {
