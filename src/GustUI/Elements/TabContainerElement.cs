@@ -325,6 +325,25 @@ namespace GustUI.Elements
         /// tab. Contrast <see cref="DetachTab"/>: tear-off keeps the
         /// content alive and notifies with the REPLACEMENT modal instead,
         /// since the tab isn't closing, just moving.</summary>
+        /// <summary>Closes ONLY the tab hosting <paramref name="content"/>
+        /// (its owner is notified with null, the content killed, the
+        /// container dissolving back to a plain window at one tab) —
+        /// see ModalWindowElement.CloseContent. Unknown content falls back
+        /// to closing the whole container.</summary>
+        public override void CloseContent(Element content)
+        {
+            for (int i = 0; i < tabs.Count; i++)
+            {
+                if (tabs[i].Content == content)
+                {
+                    RemoveTabAndKillContent(i);
+                    return;
+                }
+            }
+
+            Close();
+        }
+
         private void RemoveTabAndKillContent(int index)
         {
             TabEntry entry = tabs[index];

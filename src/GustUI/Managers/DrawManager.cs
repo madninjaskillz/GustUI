@@ -813,25 +813,40 @@ namespace GustUI.Managers
             device.RasterizerState = RasterizerState.CullNone;
             device.DepthStencilState = DepthStencilState.None;
 
-            foreach (EffectPass pass in effect.CurrentTechnique.Passes)
+            // finally, not straight-line code: the End()/Begin() and the
+            // render-target swap above are a matched pair, and a driver-level
+            // throw out of Apply()/DrawUserPrimitives (a shader the device
+            // won't accept, a lost device) would otherwise leave the batch
+            // ended and an intermediate RenderTarget2D still bound — so every
+            // subsequent draw call this frame AND the next trips
+            // Ensure.IsTrue(IsInBatch) or paints into the wrong target. A
+            // caller that catches the exception and carries on (e.g. ezmuze
+            // studio's vis screen, which drops a failing effect and keeps
+            // going) then has a usable device instead of a corrupted one.
+            try
             {
-                pass.Apply();
-                if (inputTexture != null)
+                foreach (EffectPass pass in effect.CurrentTechnique.Passes)
                 {
-                    device.Textures[0] = inputTexture;
-                    device.SamplerStates[0] = SamplerState.LinearClamp;
-                }
-                if (inputTexture2 != null)
-                {
-                    device.Textures[1] = inputTexture2;
-                    device.SamplerStates[1] = SamplerState.LinearClamp;
-                }
+                    pass.Apply();
+                    if (inputTexture != null)
+                    {
+                        device.Textures[0] = inputTexture;
+                        device.SamplerStates[0] = SamplerState.LinearClamp;
+                    }
+                    if (inputTexture2 != null)
+                    {
+                        device.Textures[1] = inputTexture2;
+                        device.SamplerStates[1] = SamplerState.LinearClamp;
+                    }
 
-                device.DrawUserPrimitives(PrimitiveType.TriangleList, fullScreenTriangle, 0, 1);
+                    device.DrawUserPrimitives(PrimitiveType.TriangleList, fullScreenTriangle, 0, 1);
+                }
             }
-
-            SetRenderTarget(previousTarget);
-            Begin();
+            finally
+            {
+                SetRenderTarget(previousTarget);
+                Begin();
+            }
         }
 
         private Effect sdfEffect;

@@ -72,6 +72,14 @@ namespace GustUI.Managers
         /// <summary>This frame's mouse state — read this instead of calling Mouse.GetState per element.</summary>
         public MouseState CurrentMouseState { get; private set; }
 
+        /// <summary>This frame's keyboard state as the manager saw it —
+        /// synthetic when injected, empty while <see cref="WindowActive"/>
+        /// is false, the real poll otherwise. Per-frame pollers (musical
+        /// typing, held-key audition) read THIS rather than Keyboard.GetState,
+        /// so an inactive window never plays notes from keys typed into
+        /// whatever is in front of it.</summary>
+        public KeyboardState CurrentKeyboardState { get; private set; }
+
         /// <summary>
         /// Divides polled mouse coordinates before hit-testing — the general
         /// counterpart to <c>WindowElement.DevicePixelRatio</c> shrinking
@@ -287,9 +295,38 @@ namespace GustUI.Managers
             pointerEdges.Add(new PointerEdge(x, y, leftDown, rightDown));
         }
 
+        /// <summary>
+        /// Whether the host OS window is the active (focused) window — the
+        /// host sets this every frame from its Game.IsActive BEFORE calling
+        /// <see cref="Update"/>. While false, REAL polled input is
+        /// neutralized: KNI's Mouse.GetState/Keyboard.GetState report global
+        /// device state regardless of focus (found 2026-08-22, user report:
+        /// clicks in a browser in front of the app were still landing on the
+        /// app's elements behind it), so the polled mouse is replaced by a
+        /// buttons-up state frozen at its last position with no scroll delta,
+        /// and the polled keyboard by an empty state. Synthetic input (the
+        /// remote-control API, <see cref="SetSyntheticMouseState"/>) bypasses
+        /// the gate — driving an unfocused window is exactly its job. A press
+        /// that loses focus mid-hold still gets its release edge (the neutral
+        /// state reads as released next frame). Defaults to true so hosts
+        /// that never set it keep today's behavior.
+        /// </summary>
+        public bool WindowActive { get; set; } = true;
+
         public void Update()
         {
             MouseState polledState = syntheticMouseState ?? Mouse.GetState();
+            if (!syntheticMouseState.HasValue && !WindowActive)
+            {
+                // Inactive window: nothing the real mouse does reaches the
+                // tree (see WindowActive). Position is frozen at the last
+                // processed position so hover state doesn't churn either.
+                polledState = new MouseState(
+                    previousMouseState.X, previousMouseState.Y,
+                    previousScrollWheelValue, 0, 0, 0,
+                    ButtonState.Released, ButtonState.Released, ButtonState.Released,
+                    ButtonState.Released, ButtonState.Released);
+            }
             if (!syntheticMouseState.HasValue && MouseScale != 1f && MouseScale > 0f)
             {
                 // Scale correction only makes sense for real, physical-pixel
@@ -305,7 +342,8 @@ namespace GustUI.Managers
                     polledState.XButton1, polledState.XButton2);
             }
 
-            KeyboardState keyboardState = syntheticKeyboardState ?? Keyboard.GetState();
+            KeyboardState keyboardState = syntheticKeyboardState ?? (WindowActive ? Keyboard.GetState() : default(KeyboardState));
+            CurrentKeyboardState = keyboardState;
 
             // While a text-input element is focused, newly pressed keys go to
             // it and keyboard SHORTCUT hooks are suppressed (typing "z" must
@@ -467,7 +505,7 @@ namespace GustUI.Managers
 
             if (mouseState.LeftButton == ButtonState.Pressed && previousMouseState.LeftButton == ButtonState.Released)
             {
-                foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnMousePress>()))
+                foreach (Element element in ClickTargets(currentlyHovered).Where(e => e.HasTrait<OnMousePress>()))
                 {
                     element.ElementTrait<OnMousePress>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
                 }
@@ -499,7 +537,7 @@ namespace GustUI.Managers
             else if (mouseState.LeftButton == ButtonState.Released && previousMouseState.LeftButton == ButtonState.Pressed)
             {
                 HaveInteracted = true;
-                foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnMouseRelease>()))
+                foreach (Element element in ClickTargets(currentlyHovered).Where(e => e.HasTrait<OnMouseRelease>()))
                 {
                     element.ElementTrait<OnMouseRelease>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
                 }
@@ -511,7 +549,7 @@ namespace GustUI.Managers
             if (mouseState.RightButton == ButtonState.Pressed && previousMouseState.RightButton == ButtonState.Released)
             {
                 HaveInteracted = true;
-                foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnRightClickTrait>()))
+                foreach (Element element in ClickTargets(currentlyHovered).Where(e => e.HasTrait<OnRightClickTrait>()))
                 {
                     element.ElementTrait<OnRightClickTrait>().Value().TriggerAction?.Invoke(element.GetClickArgs(mouseState));
                 }
@@ -577,6 +615,33 @@ namespace GustUI.Managers
         /// top-level branch (highest child index = drawn last) wins — the same
         /// result the old indexed two-pass collection produced.
         /// </summary>
+        /// <summary>
+        /// The hovered elements a CLICK should reach, honouring
+        /// <see cref="Element.SwallowsPointer"/>: everything from the
+        /// deepest swallowing element onward.
+        ///
+        /// <see cref="CollectHovered"/> appends parents before children, so
+        /// the tail of the list from that element is exactly it plus its own
+        /// descendants — its ancestors, which are what a swallowing control
+        /// wants to shield, are the part dropped. Returns the list unchanged
+        /// (no allocation, no reordering) when nothing swallows, which is
+        /// every existing caller.
+        /// </summary>
+        private static IReadOnlyList<Element> ClickTargets(List<Element> hovered)
+        {
+            int start = -1;
+            for (int i = hovered.Count - 1; i >= 0; i--)
+            {
+                if (hovered[i].SwallowsPointer)
+                {
+                    start = i;
+                    break;
+                }
+            }
+
+            return start <= 0 ? hovered : hovered.GetRange(start, hovered.Count - start);
+        }
+
         private List<Element> ProcessHovers(Element root, Vector2 position)
         {
             List<Element> best = new List<Element>();

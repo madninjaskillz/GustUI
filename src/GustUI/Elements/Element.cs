@@ -67,6 +67,26 @@ public class Element : IDisposable
     public bool ClipChildren { get; set; } = false;
 
     /// <summary>
+    /// When true, a click on this element does NOT also reach its ancestors:
+    /// <see cref="Managers.InputManager"/> dispatches the click family
+    /// (press / release / right-click) only to this element and its own
+    /// descendants.
+    ///
+    /// WHY THIS EXISTS: hover collection walks parent-first and every hovered
+    /// element with the trait is invoked, so a button placed inside a
+    /// clickable row fires BOTH — the button's action and the row's. That is
+    /// right for a row whose children are decoration, and wrong the moment a
+    /// child is itself a control: a "preview this sample" button inside a
+    /// "choose this sample" row selected the sample it was only meant to let
+    /// you hear.
+    ///
+    /// Opt-in and false by default, so no existing element changes behaviour
+    /// and the dispatch ORDER is untouched (parent-first, as before) — this
+    /// only removes ancestors from the list, it never reorders it.
+    /// </summary>
+    public bool SwallowsPointer { get; set; } = false;
+
+    /// <summary>
     /// Marks this element as persistent app chrome (menu bar, status bar):
     /// screens that clear the stage by killing the window's children should
     /// skip chrome elements so navigation survives view switches. The flag is
@@ -848,7 +868,7 @@ public class Element : IDisposable
         // preview > popup > status bar > loading > MODAL > side panels >
         // content) intact no matter what else happens to be alive when a
         // floating window is brought to front.
-        int ceiling = FullScreenModalElement.ModalDepth - 1;
+        int ceiling = MoveToFrontCeiling;
         this.Depth = candidates.Any() ? Math.Min(candidates.Max(x => x.Depth) + 1, ceiling) : 0;
 
         // 2026-08-17 (inactive-title-bar-desaturation feature): Depth alone
@@ -862,6 +882,17 @@ public class Element : IDisposable
         // has no ceiling to saturate against.
         this.FrontSequence = ++frontSequenceCounter;
     }
+
+    /// <summary>
+    /// The highest Depth <see cref="MoveToFront"/> may assign this element.
+    /// Defaults to just below the full-screen modal tier (the 2026-08-17
+    /// clamp above). <see cref="ModalWindowElement"/> overrides this for its
+    /// opt-in <see cref="ModalWindowElement.FloatAboveModalTier"/> windows —
+    /// auxiliary floats a full-screen editor owns and needs ABOVE its own
+    /// 60,000 surface (e.g. the wave picker's loop browser), which the
+    /// blanket clamp silently buried behind their owner.
+    /// </summary>
+    private protected virtual int MoveToFrontCeiling => FullScreenModalElement.ModalDepth - 1;
 
     private static long frontSequenceCounter = 0;
 

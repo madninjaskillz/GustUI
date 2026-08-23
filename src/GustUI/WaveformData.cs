@@ -50,6 +50,7 @@ namespace GustUI
         private Texture2D[] textures;
         private bool solidBackground;
         private float waveShade;
+        private float backgroundAlpha = 1f;
         private int textureHeight = DefaultTextureHeight;
         private int pendingTextureHeight = DefaultTextureHeight;
 
@@ -64,14 +65,21 @@ namespace GustUI
         /// Texture style: with <paramref name="solidBackground"/> false the
         /// bake is an overlay — transparent background, white waveform —
         /// tinted freely at draw time. With true, the bake is a complete
-        /// tile face: opaque white background with the waveform darkened to
-        /// <paramref name="waveShade"/> — so ONE tinted draw renders both a
-        /// solid-colored tile and its waveform (tint × white = tile color,
-        /// tint × shade = darker wave). That collapses a filled rect + wave
-        /// overlay into a single sprite, which batches with its neighbours —
-        /// the fast path for hundreds of timeline blocks (see TVFillImage.Tint).
+        /// tile face; its look depends on <paramref name="backgroundAlpha"/>:
+        ///  - 1 (default): opaque white background with the waveform darkened
+        ///    to <paramref name="waveShade"/> (tint × white = tile color,
+        ///    tint × shade = darker wave) — the original bright-tile style.
+        ///  - &lt; 1: TRANSLUCENT background at that alpha with the waveform
+        ///    at FULL brightness (tint × backgroundAlpha = dim see-through
+        ///    tile, tint × white = solid wave) — the bright-wave-on-dim-tile
+        ///    style, for hosts whose tiles sit on a dark surface and want the
+        ///    waveform, not the tile, to carry the contrast.
+        /// Either way ONE tinted draw renders both the tile and its waveform,
+        /// collapsing a filled rect + wave overlay into a single sprite that
+        /// batches with its neighbours — the fast path for hundreds of
+        /// timeline blocks (see TVFillImage.Tint).
         /// </summary>
-        public static WaveformData FromMinMax(float[] interleavedMinMax, bool solidBackground = false, float waveShade = 0.4f)
+        public static WaveformData FromMinMax(float[] interleavedMinMax, bool solidBackground = false, float waveShade = 0.4f, float backgroundAlpha = 1f)
         {
             Ensure.NotNull(interleavedMinMax, nameof(interleavedMinMax));
 
@@ -79,6 +87,7 @@ namespace GustUI
             {
                 solidBackground = solidBackground,
                 waveShade = waveShade,
+                backgroundAlpha = MathHelper.Clamp(backgroundAlpha, 0f, 1f),
             };
             data.levels.Add(interleavedMinMax);
 
@@ -215,6 +224,25 @@ namespace GustUI
 
                 if (solidBackground)
                 {
+                    if (backgroundAlpha < 1f)
+                    {
+                        // Translucent face: dim see-through background, the
+                        // waveform at full tile brightness — quiet columns
+                        // ease toward the background so silence stays a
+                        // near-flat sliver, loud hits go fully solid. Both
+                        // background and wave are premultiplied white × v,
+                        // so a lerp of v covers color AND alpha at once.
+                        float strength = MathHelper.Lerp(0.35f, 1f, loudness);
+                        for (int y = 0; y < height; y++)
+                        {
+                            float coverage = MathHelper.Clamp(Math.Min(y + 1f, bottom) - Math.Max(y, top), 0f, 1f);
+                            float v = MathHelper.Lerp(backgroundAlpha, 1f, coverage * strength);
+                            pixels[y * columns + c] = new Color(v, v, v, v);
+                        }
+
+                        continue;
+                    }
+
                     // Opaque face: background white, waveform band darkened —
                     // shade eases from a near-background tint at silence to
                     // the full requested waveShade at full loudness.

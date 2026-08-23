@@ -178,6 +178,21 @@ namespace GustUI.Elements
         /// browser and wave bank are the first two opted in.</summary>
         public bool Tabable { get; set; }
 
+        /// <summary>Opt-in (2026-08-21): lets <see cref="Element.MoveToFront"/>
+        /// place this floating window ABOVE the full-screen modal tier
+        /// (<see cref="FullScreenModalElement.ModalDepth"/>), instead of the
+        /// default clamp just below it. For auxiliary floats a full-screen
+        /// editor OWNS and shows over itself (the wave picker's loop
+        /// browser) — the 2026-08-17 blanket clamp silently buried those
+        /// behind their owner, including on every later title-bar drag
+        /// (drag-press calls MoveToFront too, so a one-shot depth override
+        /// at spawn wouldn't survive). Stays below the loading tier
+        /// (90,000) and everything above it.</summary>
+        public bool FloatAboveModalTier { get; set; }
+
+        private protected override int MoveToFrontCeiling
+            => FloatAboveModalTier ? FullScreenModalElement.ModalDepth + 9999 : base.MoveToFrontCeiling;
+
         /// <summary>Opt-in hook (2026-08-17, tear-off/dissolve fix): an app-
         /// level owner that constructs and reuses ONE long-lived
         /// ModalWindowElement across every open/close cycle (LoopBrowserPanel,
@@ -399,6 +414,42 @@ namespace GustUI.Elements
             }
 
             Kill();
+        }
+
+        /// <summary>Closes the window HOSTING <paramref name="content"/>: for
+        /// a plain modal that is this whole window (<see cref="Close"/>);
+        /// <see cref="TabContainerElement"/> overrides it to close only that
+        /// content's TAB, leaving sibling tabs alive. Found 2026-08-22: a
+        /// docked panel's Close() killed its shell — which, once merged, was
+        /// the shared tab container — taking every other panel tabbed with
+        /// it down too. Panels call this on their CURRENT shell (whatever
+        /// OnContentRehosted last handed them).</summary>
+        public virtual void CloseContent(Element content) => Close();
+
+        /// <summary>Closes whatever window CURRENTLY hosts <paramref name="content"/>
+        /// — found by walking its parent chain to the nearest ModalWindowElement
+        /// (a plain modal, a scroll-wrapped one, or a TabContainerElement) and
+        /// calling <see cref="CloseContent"/> on it. A panel's own `modal`
+        /// field can be stale: merging into a tab container does not notify
+        /// the owner (only tear-off/dissolve/close do), so a close routed
+        /// through the field hit the dead pre-merge shell and left the tab
+        /// behind (found 2026-08-22: every Stack swap ADDED tabs). Returns
+        /// false when the content isn't hosted by any window.</summary>
+        public static bool CloseHostOf(Element content)
+        {
+            Element cursor = content?.Parent;
+            while (cursor != null)
+            {
+                if (cursor is ModalWindowElement host)
+                {
+                    host.CloseContent(content);
+                    return true;
+                }
+
+                cursor = cursor.Parent;
+            }
+
+            return false;
         }
 
         // ---- free-form resize (2026-08-16) ----
@@ -1305,8 +1356,25 @@ namespace GustUI.Elements
             // time in the constructor) while the viewport is what's actually
             // placed/clipped/sized within the modal's chrome.
             Element positioned = contentScrolls ? (Element)scrollViewport : content;
-            positioned.Set<PositionTrait>(new TVVector((size.X / 2f) - (positioned.GetSize().X / 2f), ContentTop + ContentMargin));
-
+            if (!FitModalToContent && !contentScrolls)
+            {
+                // A fill-available modal's content host is a nominal-size
+                // (often 10px) transparent rect the panel reflows internally
+                // (LoopBrowserPanel/WaveBankPanel/StackPanelView) — its
+                // authored SizeTrait never grows, and hit-testing culls a
+                // subtree against its parent's rect (InputManager.
+                // CollectHovered), so everything below the nominal height
+                // was silently unclickable (found 2026-08-21: no loop-
+                // browser row responded to clicks, docked or floating).
+                // Stretch the host to the real client area, same geometry
+                // LayoutDocked assigns, so docked and floating agree.
+                positioned.Set<PositionTrait>(new TVVector(0, ContentTop));
+                positioned.Set<SizeTrait>(new TVVector(size.X, Math.Max(0f, size.Y - ContentTop)));
+            }
+            else
+            {
+                positioned.Set<PositionTrait>(new TVVector((size.X / 2f) - (positioned.GetSize().X / 2f), ContentTop + ContentMargin));
+            }
         }
 
         // ---- docked modal (2026-08-16) ----
@@ -1432,8 +1500,13 @@ namespace GustUI.Elements
             // FitModalToContent is false. The content host's own per-frame
             // layout (each caller's own Update-driven reflow) is
             // responsible for sizing its internal children to this modal's
-            // current GetSize().
+            // current GetSize(). The host's own SizeTrait must still track
+            // the client area, though — hit-testing culls a subtree against
+            // its parent's rect, so a nominal-size host makes its children
+            // unclickable (2026-08-21, see the matching floating-path fix).
+            TVVector dockedSize = this.GetSize();
             content.Set<PositionTrait>(new TVVector(0, ContentTop));
+            content.Set<SizeTrait>(new TVVector(dockedSize.X, Math.Max(0f, dockedSize.Y - ContentTop)));
         }
 
         /// <summary>Hold-to-dock gesture, modeled directly on the top-edge
