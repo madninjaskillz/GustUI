@@ -89,7 +89,8 @@ namespace GustUI.Elements
         // content is taller than the window used to just run off the
         // bottom of the screen (footer buttons included — genuinely
         // unreachable, not just visually cramped). When content.GetSize().Y
-        // at construction exceeds MaxModalHeight(), content is wrapped in a
+        // exceeds MaxModalHeight() — re-checked every frame, see
+        // RefreshScrollMode — content is wrapped in a
         // VerticalScrollElement instead of added to this modal directly, and
         // the modal's own height is capped to that same max — title bar and
         // footer buttons always stay on-screen with BottomScreenMargin of
@@ -99,6 +100,27 @@ namespace GustUI.Elements
         // this only ever engages for the overflow case.
         private VerticalScrollElement scrollViewport;
         private bool contentScrolls;
+
+        /// <summary>
+        /// How much of this modal's own CHROME is showing, 0..1 — the body
+        /// fill, title bar, footer and drop shadow, plus the open-slide. 1 is
+        /// the normal state and costs nothing.
+        ///
+        /// Separate from the open animation so a caller can hold a modal
+        /// invisible for reasons of its own and let it appear later: the
+        /// welcome screen holds it at 0 while the logo animates, so the logo
+        /// plays alone over the background, then ramps it to 1. It deliberately
+        /// does NOT touch the body content — a caller that wants part of its
+        /// body visible during the hold (that logo) needs to be the one saying
+        /// which part, which it does with Element.Opacity.
+        /// </summary>
+        public float ChromeReveal
+        {
+            get => chromeReveal;
+            set => chromeReveal = Math.Clamp(value, 0f, 1f);
+        }
+
+        private float chromeReveal = 1f;
 
         /// <summary>Matches VerticalScrollElement's own hardcoded scrollbar
         /// width — reserved as EXTRA width beyond the content's own natural
@@ -677,31 +699,13 @@ namespace GustUI.Elements
 
             this.content = body;
 
-            // Decide once, now, whether this instance needs to scroll: the
-            // body's own SizeTrait is already final at this point (stack-
-            // style containers like VerticalStackElement recompute it
-            // synchronously as children are added, before ever reaching
-            // here) — see the scrollViewport field's doc comment for why a
-            // one-time decision is enough for how this app actually uses
-            // modals (built fresh per open, content set doesn't change
-            // afterward).
-            float buttonHeightForCap = this.buttons.Count > 0 ? 80 : ContentMargin;
-            float naturalModalHeight = 40 + ContentMargin + NaturalContentHeight() + ContentMargin + buttonHeightForCap;
-            contentScrolls = naturalModalHeight > MaxModalHeight();
-
-            if (contentScrolls)
-            {
-                scrollViewport = new VerticalScrollElement();
-                scrollViewport.Set<SizeTrait>(new TVVector(EffectiveContentWidth(), EffectiveContentHeight()));
-                AddChildElement(scrollViewport);
-                scrollViewport.AddChild(body, "content");
-            }
-            else
-            {
-                this.AddChild(this.content, "content");
-            }
-
+            this.AddChild(this.content, "content");
             content.Set<PositionTrait>(new TVVector(0, 0));
+
+            // Whether this scrolls is re-decided every frame (see
+            // RefreshScrollMode) — this first call just covers the common case
+            // of content that is already too tall when it arrives.
+            RefreshScrollMode();
 
 
             if (this.buttons.Count > 0)
@@ -837,6 +841,52 @@ namespace GustUI.Elements
         /// own live GetSize(). The shared read Setup()/Update() both used
         /// inline before the scroll-cap pass; factored out so both call
         /// sites and EffectiveContentHeight/ContentWidth agree.</summary>
+        /// <summary>
+        /// Promotes the body into a scroll viewport once it outgrows the
+        /// screen. Called every frame, not once at construction.
+        ///
+        /// It used to be a one-time decision, on the reasoning that a modal is
+        /// built fresh per open and its content does not change afterward. That
+        /// is not true of content which ARRIVES: the welcome screen's pack
+        /// templates appear when the pack sync finishes indexing, seconds after
+        /// the modal was built, and cloud demos land whenever the service
+        /// answers. Such a modal grew past the bottom of the window and could
+        /// never gain a scrollbar, because the only moment that could have
+        /// given it one had already passed.
+        ///
+        /// One direction only. Content that shrinks back keeps its viewport,
+        /// which is harmless — a scroll element whose content fits has nothing
+        /// to scroll and draws no rail — whereas unwrapping means reparenting
+        /// the body a second time for no visible gain.
+        /// </summary>
+        private void RefreshScrollMode()
+        {
+            if (contentScrolls || content == null)
+            {
+                return;
+            }
+
+            float buttonHeight = this.buttons.Count > 0 ? 80 : ContentMargin;
+            float naturalModalHeight = 40 + ContentMargin + NaturalContentHeight() + ContentMargin + buttonHeight;
+            if (naturalModalHeight <= MaxModalHeight())
+            {
+                return;
+            }
+
+            contentScrolls = true;
+
+            // Detach rather than Kill: this is the caller's body element, with
+            // its own live subscriptions and state, being re-parented — not
+            // discarded.
+            Children.Remove(content);
+
+            scrollViewport = new VerticalScrollElement();
+            scrollViewport.Set<SizeTrait>(new TVVector(EffectiveContentWidth(), EffectiveContentHeight()));
+            AddChildElement(scrollViewport);
+            scrollViewport.AddChild(content, "content");
+            content.Set<PositionTrait>(new TVVector(0, 0));
+        }
+
         private float NaturalContentHeight() =>
             content is TextElement textElement ? textElement.CalculatedSize().Y : content.GetSize().Y;
 
@@ -860,7 +910,14 @@ namespace GustUI.Elements
 
             float buttonHeight = this.buttons.Count > 0 ? 80 : ContentMargin;
             float cappedContent = MaxModalHeight() - 40 - ContentMargin - ContentMargin - buttonHeight;
-            return Math.Max(80f, cappedContent);
+
+            // The cap is a CEILING, not a height. Returning it flat was
+            // harmless while scroll mode was decided once (it only ever
+            // engaged for content already taller than the cap, where the two
+            // are the same number) and is not now that the decision is live:
+            // a modal whose content grew past the cap and then shrank back
+            // would stand at full screen height around a short body.
+            return Math.Max(80f, Math.Min(natural, cappedContent));
         }
 
         /// <summary>Content width the MODAL should size itself to — the
@@ -1131,6 +1188,10 @@ namespace GustUI.Elements
                 }
             }
 
+            // Before the sizing below, so a body that grew this frame is
+            // already wrapped when its height is turned into the modal's.
+            RefreshScrollMode();
+
             if (FitModalToContent)
             {
                 float contentHeight = EffectiveContentHeight();
@@ -1317,9 +1378,30 @@ namespace GustUI.Elements
                 Set<PositionTrait>(new TVVector(restPosition.X, restPosition.Y + (1f - animProgress) * SlideDistance));
             }
 
+            // The open animation and the caller's hold are independent reasons
+            // to be invisible, so they multiply rather than one overriding the
+            // other.
+            float shown = animProgress * chromeReveal;
+
+            // Title bar and footer are fully faded, not just their fills: their
+            // TEXT and BUTTONS are children, and a title reading "ezmuze studio"
+            // over an invisible bar is exactly the artefact this is here to
+            // avoid.
+            titleBarElement.Opacity = shown;
+            if (this.buttons.Count > 0)
+            {
+                buttonBackgroundElement.Opacity = shown;
+            }
+
+            if (contentScrolls)
+            {
+                // The rail is chrome; what it scrolls is not.
+                scrollViewport.ScrollbarOpacity = shown;
+            }
+
             if (ElementTrait<BackgroundFillTrait>().Value() is TVFill bodyFill)
             {
-                bodyFill.Opacity = animProgress;
+                bodyFill.Opacity = shown;
             }
 
             if (titleBarElement.ElementTrait<BackgroundFillTrait>().Value() is TVFill titleFill)
@@ -1340,8 +1422,8 @@ namespace GustUI.Elements
                 // shadow visibly deepens as the modal slides into place.
                 float dragTarget = BeingDragged ? 32f : 16f;
                 dragGrowSize = MathHelper.Lerp(dragGrowSize, dragTarget, 0.2f);
-                nineGrid.NineGridSize = dragGrowSize * animProgress;
-                nineGrid.Opacity = 0.5f * animProgress;
+                nineGrid.NineGridSize = dragGrowSize * shown;
+                nineGrid.Opacity = 0.5f * shown;
             }
 
             // buttonBackgroundElement only exists when this.buttons.Count >

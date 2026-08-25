@@ -125,7 +125,7 @@ namespace GustUI.Elements
         /// collection and blanks the whole control — so the safe operation has
         /// to live here, next to the redirect that causes the asymmetry.
         /// </summary>
-        public void ClearChildren()
+        public override void ClearChildren()
         {
             var items = new System.Collections.Generic.List<Element>(container.Children.Items);
             foreach (Element child in items)
@@ -141,5 +141,18 @@ namespace GustUI.Elements
         /// <summary>The content children (the inner container's), as opposed
         /// to <see cref="Element.Children"/>'s container + scrollbar.</summary>
         public TVElements ContentChildren => container.Children;
+
+        /// <summary>
+        /// Fades JUST the rail, leaving the content alone —
+        /// <see cref="Element.Opacity"/> on this element would take the content
+        /// with it, and the two are not always meant to move together. A modal
+        /// holding its chrome back before an entrance needs the rail to go with
+        /// the chrome while whatever is scrolled stays as it is.
+        /// </summary>
+        public float ScrollbarOpacity
+        {
+            get => scrollBar.Opacity;
+            set => scrollBar.Opacity = value;
+        }
     }
 }

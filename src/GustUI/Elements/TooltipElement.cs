@@ -37,10 +37,33 @@ public class TooltipElement : Element
     /// (attached at runtime if absent) — any existing enter/exit handlers on
     /// the target are replaced.
     /// </summary>
+    /// <summary>
+    /// Gives an element a hover tooltip, CHAINING onto whatever enter/exit
+    /// handlers it already has rather than replacing them.
+    ///
+    /// Trait.Set replaces, which made a tooltip and a hover EFFECT mutually
+    /// exclusive on the same element — and silently, with whichever call came
+    /// last winning. That is a trap rather than a policy: attaching a tooltip
+    /// is not a statement about what else should happen on hover, and every
+    /// caller that hit it had to hand-roll Show/Hide to get both.
+    /// </summary>
     public static void Attach(Element target, string text)
     {
-        target.AddTrait<OnEnterTrait>().Set(new TVEvent<ClickEventArgs>(args => Show(text, args.GlobalMousePosition.AsXna)));
-        target.AddTrait<OnExitTrait>().Set(new TVEvent<ClickEventArgs>(args => Hide()));
+        Chain(target.AddTrait<OnEnterTrait>(), args => Show(text, args.GlobalMousePosition.AsXna));
+        Chain(target.AddTrait<OnExitTrait>(), _ => Hide());
+    }
+
+    /// <summary>Appends <paramref name="handler"/> to a trait's existing
+    /// action, preserving it. Order is existing-then-ours: whatever the
+    /// element already did on hover is still the primary behaviour.</summary>
+    private static void Chain(Trait<TVEvent<ClickEventArgs>> trait, Action<ClickEventArgs> handler)
+    {
+        Action<ClickEventArgs> existing = trait.Value()?.TriggerAction;
+        trait.Set(new TVEvent<ClickEventArgs>(args =>
+        {
+            existing?.Invoke(args);
+            handler(args);
+        }));
     }
 
     /// <summary>Shows the shared tooltip near a screen position (after the hover delay).</summary>

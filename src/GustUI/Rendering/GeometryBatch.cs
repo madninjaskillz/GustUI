@@ -283,6 +283,31 @@ namespace GustUI.Rendering
         }
 
         /// <summary>
+        /// A 0..1 alpha multiplier applied to EVERY colour appended, so a whole
+        /// subtree can be faded without every element knowing how to fade
+        /// itself. Pushed and popped around a subtree by
+        /// <see cref="Elements.Element.Opacity"/>; every draw path in the
+        /// library funnels through the Append methods below, which is what
+        /// makes one field here enough.
+        ///
+        /// ALPHA only — see <see cref="Fade"/>.
+        /// </summary>
+        public float Opacity { get; set; } = 1f;
+
+        /// <summary>
+        /// Scales a colour's ALPHA by <see cref="Opacity"/> and leaves its
+        /// channels alone.
+        ///
+        /// Not <c>color * Opacity</c>, which is the obvious spelling and the
+        /// wrong one: multiplying a Color scales the channels as well, so a
+        /// half-faded white becomes a translucent mid-grey and everything
+        /// "fading out" visibly darkens on the way. Against straight alpha
+        /// blending only the alpha may move.
+        /// </summary>
+        private Color Fade(Color color) =>
+            Opacity >= 1f ? color : new Color(color.R, color.G, color.B, (byte)(color.A * Opacity));
+
+        /// <summary>
         /// Appends an axis-aligned textured quad — the common case.
         /// DrawFilledRectangle/DrawRectangle/DrawRoundedRectangle's corner
         /// blits all reduce to this.
@@ -293,6 +318,8 @@ namespace GustUI.Rendering
             {
                 return;
             }
+
+            color = Fade(color);
 
             Accumulator acc = SelectAccumulator(false);
             acc.BeginSegmentIfNeeded(texture, blend, 4);
@@ -322,6 +349,10 @@ namespace GustUI.Rendering
         /// </summary>
         public void AppendQuadGradient(Texture2D texture, Rectangle destRect, Rectangle srcRect, Color colorTopLeft, Color colorTopRight, Color colorBottomRight, Color colorBottomLeft, Vector4 clipRect, BlendState blend)
         {
+            colorTopLeft = Fade(colorTopLeft);
+            colorTopRight = Fade(colorTopRight);
+            colorBottomRight = Fade(colorBottomRight);
+            colorBottomLeft = Fade(colorBottomLeft);
             if (destRect.Width == 0 || destRect.Height == 0)
             {
                 return;
@@ -352,6 +383,7 @@ namespace GustUI.Rendering
         /// </summary>
         public void AppendRotatedQuad(Texture2D texture, Rectangle destRect, Rectangle srcRect, Color color, float angle, Vector2 origin, Vector4 clipRect, BlendState blend)
         {
+            color = Fade(color);
             if (destRect.Width == 0 || destRect.Height == 0)
             {
                 return;
@@ -411,6 +443,9 @@ namespace GustUI.Rendering
                 return;
             }
 
+            color = Fade(color);
+            borderColor = Fade(borderColor);
+
             Accumulator acc = SelectAccumulator(true);
             var textParams = new TextParams { Smoothing = smoothing, BorderWidth = borderWidth, BorderColor = borderColor };
             acc.BeginSegmentIfNeeded(atlas, null, 4, true, textParams);
@@ -459,6 +494,11 @@ namespace GustUI.Rendering
             {
                 GeometryVertex v = verts[i];
                 v.ClipRect = clipRect;
+
+                // Faded on the way into the accumulator rather than in place:
+                // verts is the CALLER's array and is often a reused scratch
+                // buffer, so dimming it would dim the next frame too.
+                v.Color = Fade(v.Color);
                 acc.Vertices[acc.VertexCount++] = v;
             }
 
@@ -485,6 +525,7 @@ namespace GustUI.Rendering
         /// </summary>
         public void AppendCachedTriangles(Texture2D texture, GeometryVertex[] localVerts, short[] idx, int primitiveCount, Vector2 offset, Color tint, Vector2 uv, Vector4 clipRect, BlendState blend)
         {
+            tint = Fade(tint);
             if (primitiveCount <= 0 || localVerts == null || localVerts.Length == 0)
             {
                 return;

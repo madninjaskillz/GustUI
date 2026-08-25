@@ -67,6 +67,18 @@ public class Element : IDisposable
     public bool ClipChildren { get; set; } = false;
 
     /// <summary>
+    /// A 0..1 alpha multiplier for this element AND everything under it —
+    /// the primitive a fade needs. Multiplies with any ancestor's, so a child
+    /// can never be more opaque than its parent, and costs nothing at 1.
+    ///
+    /// Implemented at the single place every draw path in the library funnels
+    /// through (<see cref="Rendering.GeometryBatch.Opacity"/>), rather than by
+    /// teaching each element to fade itself — text in particular had no way to
+    /// fade at all, since its colour comes from a trait rather than a fill.
+    /// </summary>
+    public float Opacity { get; set; } = 1f;
+
+    /// <summary>
     /// When true, a click on this element does NOT also reach its ancestors:
     /// <see cref="Managers.InputManager"/> dispatches the click family
     /// (press / release / right-click) only to this element and its own
@@ -404,6 +416,24 @@ public class Element : IDisposable
         }
     }
 
+    /// <summary>
+    /// Kills every child. The counterpart to <see cref="AddChild"/>, and
+    /// virtual for the same reason AddChild is: an element that REDIRECTS
+    /// AddChild into an inner container (VerticalScrollElement) must redirect
+    /// this too, or a caller clearing "the list" empties the wrong collection
+    /// and blanks the whole control.
+    /// </summary>
+    public virtual void ClearChildren()
+    {
+        var items = new List<Element>(Children.Items);
+        foreach (Element child in items)
+        {
+            child.Kill();
+        }
+
+        Children.InvalidateSort();
+    }
+
     public virtual void AddChild(Element child, string name)
     {
         child.ElementName = name;
@@ -650,15 +680,34 @@ public class Element : IDisposable
     /// nesting-safe via GeometryBatch's own depth counter.</summary>
     private static void DrawChild(Element child)
     {
-        if (child.IsOverlay)
+        Rendering.GeometryBatch batch = Resources.StaticResources.DrawManager.GeometryBatch;
+
+        // Opacity MULTIPLIES down the tree and is restored afterwards, the same
+        // shape as the clip stack: a faded parent can never be undone by a
+        // child, and a subtree that never touches Opacity pays one float
+        // compare per element.
+        float outerOpacity = batch.Opacity;
+        if (child.Opacity < 1f)
         {
-            Resources.StaticResources.DrawManager.GeometryBatch.PushOverlay();
-            child.Draw();
-            Resources.StaticResources.DrawManager.GeometryBatch.PopOverlay();
+            batch.Opacity = outerOpacity * Math.Clamp(child.Opacity, 0f, 1f);
         }
-        else
+
+        try
         {
-            child.Draw();
+            if (child.IsOverlay)
+            {
+                batch.PushOverlay();
+                child.Draw();
+                batch.PopOverlay();
+            }
+            else
+            {
+                child.Draw();
+            }
+        }
+        finally
+        {
+            batch.Opacity = outerOpacity;
         }
     }
 

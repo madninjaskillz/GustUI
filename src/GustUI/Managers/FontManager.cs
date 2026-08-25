@@ -120,13 +120,73 @@ namespace GustUI.Managers
                 return cached;
             }
 
-            var bake = SdfFontBaker.Bake(content.ReadAllBytes(path), SdfBakeEmSize, 2048, 2048,
+            var bake = BakeOnDeepStack(content.ReadAllBytes(path),
                 new[] { CharacterRange.BasicLatin }.Concat(IconRangesFor(path)));
 
             var texture = bake.CreateTexture(graphicsDevice);
             var font = new SdfFont(texture, bake.Glyphs, bake.EmSize, path);
             SdfFontCache.Add(path, font);
             return font;
+        }
+
+        /// <summary>
+        /// Runs the SDF bake on a thread with a LARGE stack, and waits.
+        ///
+        /// Not concurrency — depth. stbtt_GetGlyphSDF flattens beziers by
+        /// recursing until it converges rather than to a depth cap (see
+        /// <see cref="SdfUnsafeSymbolCodepoints"/>'s note), and on some glyphs
+        /// it comes close enough to the default 1 MB stack that WHERE the font
+        /// is first drawn from decides whether it survives: segmdl2.ttf baked
+        /// happily when the first icon on screen was a title-bar button, and
+        /// stack-overflowed the process when it was a text element four
+        /// containers deep instead. A crash that depends on which element
+        /// happens to draw an icon first is not one any caller can be expected
+        /// to reason about, so the bake gets its own stack and stops caring.
+        ///
+        /// An uncatchable stack overflow here kills the process either way —
+        /// this buys headroom, it does not make the underlying stb recursion
+        /// safe, and the excluded-codepoint list is still load-bearing.
+        /// </summary>
+        private static SpriteFontPlus.SdfFontBakerResult BakeOnDeepStack(
+            byte[] fontBytes, IEnumerable<CharacterRange> ranges)
+        {
+            const int StackBytes = 16 * 1024 * 1024;
+
+            // The browser build has no threads to hand the work to, so it bakes
+            // inline and lives with whatever stack the caller had — the same
+            // position every build was in before this.
+            if (OperatingSystem.IsBrowser())
+            {
+                return SdfFontBaker.Bake(fontBytes, SdfBakeEmSize, 2048, 2048, ranges);
+            }
+
+            SpriteFontPlus.SdfFontBakerResult result = null;
+            Exception failure = null;
+
+            var thread = new System.Threading.Thread(
+                () =>
+                {
+                    try
+                    {
+                        result = SdfFontBaker.Bake(fontBytes, SdfBakeEmSize, 2048, 2048, ranges);
+                    }
+                    catch (Exception ex)
+                    {
+                        failure = ex;
+                    }
+                },
+                StackBytes);
+
+            thread.IsBackground = true;
+            thread.Start();
+            thread.Join();
+
+            if (failure != null)
+            {
+                throw failure;
+            }
+
+            return result;
         }
 
         /// <summary>On-screen size of <paramref name="text"/> in the given

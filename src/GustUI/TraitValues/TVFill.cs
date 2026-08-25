@@ -204,7 +204,21 @@ namespace GustUI.TraitValues
 
         private bool stopped;
 
-        /// <summary>Stops playback for good; GetTexture will no longer restart the video.</summary>
+        /// <summary>
+        /// Stops playback for good: <see cref="GetTexture"/> hands back nothing
+        /// from here on. TERMINAL — this fill cannot be restarted afterwards.
+        /// Play() is accepted but the player's state falls straight back to
+        /// Stopped and no further frames arrive, and neither pausing instead
+        /// nor replacing the VideoPlayer recovers it (WindowsDX / Media
+        /// Foundation, KNI — measured 2026-08-24).
+        ///
+        /// To hide a video TEMPORARILY, stop drawing it — swap the element's
+        /// fill for something else — rather than stopping the player. Nothing
+        /// calls GetTexture() while the fill is out of the draw tree, and a
+        /// player left alone in that state costs nothing measurable (0.05
+        /// CPU-seconds over 15s, i.e. inside the noise, measured the same day
+        /// against the same app paused).
+        /// </summary>
         public void Stop()
         {
             stopped = true;
@@ -230,6 +244,7 @@ namespace GustUI.TraitValues
                 {
                     player.Play(video);
                 }
+
                 return player.GetTexture();
             }
             catch (Exception e)

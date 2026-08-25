@@ -250,6 +250,7 @@ namespace GustUI.Elements
             }
 
             // ---- notes ----
+            bendManager = manager; // the batch's overflow flush needs it too
             foreach (PianoRollNoteView note in Notes)
             {
                 DrawNote(manager, note, x0, y0, width, height, gridX, 1f);
@@ -432,6 +433,23 @@ namespace GustUI.Elements
         private readonly List<VertexPositionColor> bendVerts = new List<VertexPositionColor>();
         private readonly List<short> bendIndices = new List<short>();
 
+        /// <summary>The manager this frame's bend batch flushes to. The batch
+        /// itself is a field (accumulated across the whole note pass), so the
+        /// overflow flush needs one as well; set at the top of that pass.</summary>
+        private Managers.DrawManager bendManager;
+
+        /// <summary>
+        /// Vertex ceiling for ONE bend batch. Indices are shorts, so a batch
+        /// cannot address more than 32,768 vertices — past that
+        /// <c>(short)bendVerts.Count</c> wraps and every quad after it indexes
+        /// back into earlier geometry, which silently swallows whole notes.
+        /// A single long bent note is ~10,000 vertices by itself (512 samples
+        /// x 5 stacked quads x 4), so three or four bent notes on screen
+        /// already reach this; it is a real limit, not a theoretical one.
+        /// A multiple of 4 so a flush never splits a quad.
+        /// </summary>
+        private const int MaxBendVerts = 32764;
+
         /// <summary>Appends the bent note body: per-sample quads for the body
         /// band, 1px border bands, and 1px fade-out skirts along both edges.
         /// All Y coordinates are float (no integer column snapping) and
@@ -494,6 +512,11 @@ namespace GustUI.Elements
         private void AddBendQuad(float x1, float y1t, float x2, float y2t, float y1b, float y2b,
             Color cTop, Color cBot, float yMin, float yMax)
         {
+            if (bendVerts.Count + 4 > MaxBendVerts && bendManager != null)
+            {
+                FlushBendGeometry(bendManager);
+            }
+
             short baseIx = (short)bendVerts.Count;
             bendVerts.Add(new VertexPositionColor(new Vector3(x1, Math.Clamp(y1t, yMin, yMax), 0f), cTop));
             bendVerts.Add(new VertexPositionColor(new Vector3(x2, Math.Clamp(y2t, yMin, yMax), 0f), cTop));
@@ -524,9 +547,11 @@ namespace GustUI.Elements
             bendIndices.Add((short)(baseIx + 3));
         }
 
-        /// <summary>Draws everything the frame accumulated into the bend
-        /// geometry batch in one DrawTriangles call (one batch flush total,
-        /// per the DrawManager guidance), then resets the batch.</summary>
+        /// <summary>Draws everything accumulated into the bend geometry batch
+        /// in one DrawTriangles call (normally ONE flush for the whole frame,
+        /// per the DrawManager guidance — <see cref="MaxBendVerts"/> forces an
+        /// extra one only when a frame's geometry outgrows a short index),
+        /// then resets the batch.</summary>
         private void FlushBendGeometry(Managers.DrawManager manager)
         {
             if (bendIndices.Count == 0)
