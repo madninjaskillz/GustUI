@@ -48,6 +48,13 @@ namespace GustUI.Elements.InputElements
         {
             var theme = Resources.StaticResources.Theme;
 
+            // A field's text stops at the field's edge. Without this a value
+            // longer than the box simply carried on drawing over whatever was
+            // beside it — a file name running straight through the Save button
+            // next to it, which reads as two broken controls rather than one
+            // long value.
+            ClipChildren = true;
+
             textElement = new TextElement { WordWrap = false };
             textElement.Set<ForegroundColorTrait>(new TVColor(theme.BodyText));
             textElement.Set<PositionTrait>(new TVVector(6, 4));

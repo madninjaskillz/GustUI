@@ -309,10 +309,35 @@ namespace GustUI.Elements
         /// the only way to find the real height was to reverse-engineer the
         /// chrome, margin and button-row arithmetic from outside.
         /// </summary>
-        public Vector2 ContentViewportSize =>
-            scrollViewport != null
-                ? scrollViewport.GetSize().AsXna
-                : new Vector2(EffectiveContentWidth(), EffectiveContentHeight());
+        public Vector2 ContentViewportSize
+        {
+            get
+            {
+                if (scrollViewport != null)
+                {
+                    return scrollViewport.GetSize().AsXna;
+                }
+
+                // A modal that does NOT fit itself to its content (a resizable
+                // or docked panel) has its size decided from outside, so the
+                // content box is that size minus the chrome. Asking
+                // EffectiveContent*() here would answer with the BODY's own
+                // SizeTrait — which is what the body was built at, and for a
+                // body that lays itself out from this property is simply the
+                // answer it gave last time. That circularity meant a resizable
+                // modal's contents never learned they had more room.
+                if (!FitModalToContent)
+                {
+                    float buttonHeight = buttons.Count > 0 ? 80 : ContentMargin;
+                    TVVector size = this.GetSize();
+                    return new Vector2(
+                        Math.Max(1f, size.X - (ContentMargin * 2)),
+                        Math.Max(1f, size.Y - ContentTop - ContentMargin - buttonHeight));
+                }
+
+                return new Vector2(EffectiveContentWidth(), EffectiveContentHeight());
+            }
+        }
 
         /// <summary>
         /// Shows (or replaces) this modal's own menu strip, directly below
@@ -495,6 +520,10 @@ namespace GustUI.Elements
 
         private ResizeHandlesElement resizeHandles;
 
+        /// <summary>The draggable boundary with whatever shares the screen
+        /// with this panel — see DockSplitterElement. Only while docked.</summary>
+        private DockSplitterElement dockSplitter;
+
         /// <summary>True while the user is actively dragging one of this
         /// modal's own resize handles (only ever true when constructed with
         /// <c>resizable: true</c>). A host that tears this modal down and
@@ -505,7 +534,13 @@ namespace GustUI.Elements
         /// ModalWindowElement means a fresh ResizeHandlesElement with no
         /// in-progress drag state, which silently ends the gesture the
         /// instant a mid-drag rebuild fires.</summary>
-        public bool IsResizing => resizeHandles != null && resizeHandles.IsActive;
+        /// <summary>True while this modal is being resized by any of its own
+        /// handles — including the dock splitter, so anything that backs off
+        /// during a resize backs off for that too rather than treating a
+        /// boundary drag as an ordinary click.</summary>
+        public bool IsResizing =>
+            (resizeHandles != null && resizeHandles.IsActive)
+            || (dockSplitter != null && dockSplitter.IsDragging);
 
         /// <summary>Smallest this modal may be dragged down to via its own
         /// resize handles (see <see cref="ResizeHandlesElement"/>) — the
@@ -1531,6 +1566,22 @@ namespace GustUI.Elements
             // already at 60,000 by the time this one spawns).
             MoveToFront();
             Managers.DockLayout.Register(this, side);
+
+            if (dockSplitter == null)
+            {
+                dockSplitter = new DockSplitterElement(this)
+                {
+                    // Above the title bar, which sits on exactly the same line
+                    // for a Top/Bottom dock. Whoever draws and hit-tests last
+                    // wins the overlap, and for this one line it must be the
+                    // splitter — the rest of the title bar still tears the
+                    // window out of the dock.
+                    Depth = 30,
+                };
+
+                AddChildElement(dockSplitter);
+            }
+
             LayoutDocked();
         }
 
@@ -1547,6 +1598,9 @@ namespace GustUI.Elements
 
             DockedSide = DockSide.None;
             Managers.DockLayout.Unregister(this);
+
+            dockSplitter?.Kill();
+            dockSplitter = null;
         }
 
         /// <summary>Full-height layout for the docked state — the docked
@@ -1584,8 +1638,16 @@ namespace GustUI.Elements
                 float leftInset = Managers.DockLayout.LeftInset;
                 float width = Math.Max(0f, windowSize.X - leftInset - Managers.DockLayout.RightInset);
                 float height = Managers.DockLayout.EffectiveSize(this, DockedSide);
+                // A TOP dock measures from the top of the window plus whatever
+                // is stacked above it — NOT from TopLimit(), which is
+                // DockLayout.TopInset and therefore includes this very panel's
+                // own reservation. That circularity put a top-docked panel
+                // below the space it was itself reserving, landing it on top of
+                // the window it was supposed to be making room beside.
+                // StackOffset is the right quantity because it excludes self by
+                // construction.
                 float y = DockedSide == DockSide.Top
-                    ? TopLimit() + stackOffset
+                    ? stackOffset
                     : windowSize.Y - BottomInset - height - stackOffset;
 
                 Set<PositionTrait>(new TVVector(leftInset, y));
@@ -1606,6 +1668,8 @@ namespace GustUI.Elements
             TVVector dockedSize = this.GetSize();
             content.Set<PositionTrait>(new TVVector(0, ContentTop));
             content.Set<SizeTrait>(new TVVector(dockedSize.X, Math.Max(0f, dockedSize.Y - ContentTop)));
+
+            dockSplitter?.LayoutFor(dockedSize.AsXna);
         }
 
         /// <summary>Hold-to-dock gesture, modeled directly on the top-edge

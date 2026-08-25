@@ -49,6 +49,53 @@ namespace GustUI.Managers
         /// resolve the squeeze).</summary>
         private static readonly List<ModalWindowElement> fillers = new List<ModalWindowElement>();
 
+        /// <summary>
+        /// How much each docked panel RESERVES along its dock axis, once
+        /// something has said so explicitly.
+        ///
+        /// This is the boundary between a docked panel and whatever fills the
+        /// rest, and it belongs here rather than being read back off the
+        /// panel's own SizeTrait. That was the old model and it had no way to
+        /// be right: the panel's size is written by half a dozen things —
+        /// a title-bar drag, a tab merge, its own content reflow — and any of
+        /// them silently moved a boundary the rest of the layout was deriving
+        /// from. Dragging the split line, which is where the panel's title bar
+        /// happens to sit, tore the panel out of the dock AND left the filler
+        /// believing it had the whole window.
+        ///
+        /// Absent = "however big the panel wants to be", which is the right
+        /// default for a panel that has just been docked and has never been
+        /// resized.
+        /// </summary>
+        private static readonly Dictionary<ModalWindowElement, float> reservations = new();
+
+        /// <summary>
+        /// Sets the boundary for a docked panel, in pixels along its dock axis.
+        ///
+        /// One entry point for both directions of the same gesture: there is
+        /// only ever ONE boundary between a dock and the space beside it, so
+        /// dragging it from the panel's side and dragging it from the filler's
+        /// side are the same act and must not be two mechanisms that can
+        /// disagree.
+        /// </summary>
+        public static void SetReservation(ModalWindowElement modal, float size)
+        {
+            if (modal != null)
+            {
+                reservations[modal] = Math.Max(0f, size);
+            }
+        }
+
+        /// <summary>Forgets an explicit boundary, returning the panel to
+        /// content-sized.</summary>
+        public static void ClearReservation(ModalWindowElement modal)
+        {
+            if (modal != null)
+            {
+                reservations.Remove(modal);
+            }
+        }
+
         public static float LeftInset => Reserved(leftStack, DockSide.Left);
 
         public static float RightInset => Reserved(rightStack, DockSide.Right);
@@ -69,6 +116,10 @@ namespace GustUI.Managers
             rightStack.Remove(modal);
             topStack.Remove(modal);
             bottomStack.Remove(modal);
+
+            // A panel that has left the dock keeps no claim on the boundary —
+            // re-docking it later should start from its content size again.
+            reservations.Remove(modal);
         }
 
         /// <summary>Read-only snapshot of whatever's currently docked to
@@ -172,7 +223,12 @@ namespace GustUI.Managers
             float axisSize = horizontal ? windowSize.X : windowSize.Y;
 
             float cap = 0.5f * axisSize;
-            float natural = horizontal ? modal.GetSize().X : modal.GetSize().Y;
+            // The explicit boundary wins; the panel's own size is only the
+            // default for one that has never been dragged.
+            float natural = reservations.TryGetValue(modal, out float reserved)
+                ? reserved
+                : (horizontal ? modal.GetSize().X : modal.GetSize().Y);
+
             float own = Math.Min(natural, cap);
 
             float fillerFloor = MaxFillerMinSize(horizontal);
@@ -183,12 +239,27 @@ namespace GustUI.Managers
             return Math.Min(own, remaining);
         }
 
+        /// <summary>
+        /// The most room any open filler needs along this axis — its own
+        /// MinSize PLUS whatever app chrome it leaves uncovered.
+        ///
+        /// The chrome has to be in here. A filler asks for
+        /// <c>AvailableRect(extraBottomInset)</c> and then floors the result at
+        /// its MinSize, so what it actually occupies is MinSize + that inset. A
+        /// budget computed from MinSize alone left a docked panel free to
+        /// reserve the chrome's worth of pixels as well, and the two then
+        /// overlapped by exactly the height of the status bar — visible only
+        /// once the window was small enough for the floor to bite.
+        /// </summary>
         private static float MaxFillerMinSize(bool horizontal)
         {
             float max = 0f;
             foreach (ModalWindowElement filler in fillers)
             {
-                float v = horizontal ? filler.MinSize.X : filler.MinSize.Y;
+                float v = horizontal
+                    ? filler.MinSize.X
+                    : filler.MinSize.Y + filler.BottomInset;
+
                 if (v > max)
                 {
                     max = v;
