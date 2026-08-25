@@ -154,6 +154,51 @@ namespace GustUI.Managers
         /// BasicLatin, <see cref="ProsePunctuation"/>, plus whatever
         /// <see cref="IconRangesFor"/> says this specific font needs — see
         /// its doc for why that's per-font rather than a blanket sweep.</summary>
+        /// <summary>
+        /// Bakes every named font up front, so nothing pays for one later.
+        ///
+        /// A bake is expensive — segmdl2.ttf alone covers the whole
+        /// UIFont.Symbol range — and <see cref="LoadSdfFont"/> runs it
+        /// synchronously on whatever thread first measures a string in that
+        /// family, blocking on the deep-stack baker thread. In this app that
+        /// thread is the game loop and that first measurement happened while
+        /// building the sequencer: opening a song paid for a font bake, on the
+        /// frame loop, every time a screen used a family no earlier screen had.
+        ///
+        /// It cannot go on a background thread — the bake ends in
+        /// CreateTexture, which needs the graphics device — so the answer is to
+        /// pay for it at startup instead, where there is already a loading
+        /// screen and nothing is waiting on a frame.
+        ///
+        /// Failures are logged and skipped rather than thrown: a font that
+        /// cannot be baked would have thrown at first use anyway, and taking
+        /// the whole app down at boot for one missing file is worse.
+        /// </summary>
+        public void WarmSdfCache(IEnumerable<string> paths)
+        {
+            if (paths == null)
+            {
+                return;
+            }
+
+            foreach (string path in paths)
+            {
+                if (string.IsNullOrWhiteSpace(path) || SdfFontCache.ContainsKey(path))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    LoadSdfFont(path);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[fonts] could not pre-bake {path}: {ex.Message}");
+                }
+            }
+        }
+
         public SdfFont LoadSdfFont(string path)
         {
             if (SdfFontCache.TryGetValue(path, out var cached))

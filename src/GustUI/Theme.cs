@@ -16,6 +16,35 @@ namespace GustUI
         Light
     }
 
+    /// <summary>Helpers over a theme's declared fonts.</summary>
+    public static class ThemeFonts
+    {
+        /// <summary>
+        /// Every distinct font file a theme names, found by reflecting over its
+        /// own TVFont fields.
+        ///
+        /// Reflected rather than listed so the list cannot drift: a theme that
+        /// gains a font gains it here too, and the alternative — a hand-kept
+        /// array beside the fields — is the kind of list that is correct on the
+        /// day it is written and wrong a month later.
+        /// </summary>
+        public static IEnumerable<string> Families(Theme theme)
+        {
+            if (theme == null)
+            {
+                return Array.Empty<string>();
+            }
+
+            return theme.GetType()
+                .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+                .Where(f => f.FieldType == typeof(TVFont))
+                .Select(f => (f.GetValue(theme) as TVFont)?.Family)
+                .Where(f => !string.IsNullOrWhiteSpace(f))
+                .Distinct()
+                .ToList();
+        }
+    }
+
     /// <summary>
     /// One full set of app-wide surface/accent color values. ezmuze-studio's
     /// design-guide.md §1 is normative — <see cref="Theme.DarkPalette"/> and

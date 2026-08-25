@@ -36,7 +36,6 @@ public class TVElements : TraitValue
         namedItems.Add(new(item, name));
         sortedCache = null;
         Version++;
-        Log.This(name + " added to children, now " + namedItems.Count + " items");
     }
     public void Remove(Element item)
     {
