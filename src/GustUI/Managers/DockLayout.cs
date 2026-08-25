@@ -122,6 +122,23 @@ namespace GustUI.Managers
             reservations.Remove(modal);
         }
 
+        /// <summary>
+        /// The panel docked to <paramref name="side"/> that is closest to the
+        /// middle of the screen — the one whose inboard edge IS the boundary
+        /// with whatever fills the rest, and therefore the one a filler's own
+        /// edge-drag is really moving.
+        /// </summary>
+        public static ModalWindowElement Innermost(DockSide side)
+        {
+            List<ModalWindowElement> stack = StackFor(side);
+            return stack == null || stack.Count == 0 ? null : stack[stack.Count - 1];
+        }
+
+        /// <summary>How much <paramref name="modal"/> reserves right now, after
+        /// every cap — what a caller adjusting the boundary has to add to.</summary>
+        public static float ReservedFor(ModalWindowElement modal, DockSide side) =>
+            modal == null ? 0f : EffectiveSize(modal, side);
+
         /// <summary>Read-only snapshot of whatever's currently docked to
         /// <paramref name="side"/>, closest-to-the-edge first — used by the
         /// dock-onto-an-occupied-side-merges-instead-of-stacks feature

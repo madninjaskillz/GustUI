@@ -1037,7 +1037,19 @@ namespace GustUI
             ChevronDownBold = 59758,
 
             // E972 - a narrower down chevron, for tight rows.
-            ChevronDownSmall = 59762
+            ChevronDownSmall = 59762,
+
+            // E7BA / E946 / E930 - the status trio, for anything reporting how
+            // something went: a warning triangle, an information disc and a
+            // completion tick. The WinRT Symbol enum this list started from has
+            // no equivalents - the nearest, Important, is a bare exclamation
+            // mark with no enclosing shape, which at 20px reads as a stray
+            // punctuation mark rather than a warning. These three are the
+            // shapes every platform uses for the job, and shape is the half of
+            // the signal that still works when colour does not.
+            Warning = 59322,
+            Info = 59718,
+            Completed = 59696
         }
     }
 }

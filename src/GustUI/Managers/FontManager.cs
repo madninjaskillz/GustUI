@@ -107,10 +107,51 @@ namespace GustUI.Managers
             return Array.Empty<CharacterRange>();
         }
 
+        /// <summary>
+        /// Punctuation past ASCII that ordinary UI prose actually uses.
+        ///
+        /// BasicLatin stops at U+007E, so an em dash, an ellipsis or a curly
+        /// apostrophe had no glyph — and a missing glyph does not draw a box or
+        /// a blank, it draws NOTHING, silently. "Preparing audio — 9 of 22"
+        /// rendered as "Preparing audio  9 of 22" and "Working…" as "Working",
+        /// with no error anywhere; the text is simply shorter than it was
+        /// written. That is a bad failure to have in a toolkit, because every
+        /// app on it inherits the trap and only finds out by staring at a
+        /// screenshot.
+        ///
+        /// Listed one at a time rather than taking the whole General
+        /// Punctuation block: the block is 111 codepoints of mostly typesetting
+        /// marks nothing here will ever type, and every glyph baked is atlas
+        /// space taken from the ones that matter.
+        /// </summary>
+        private static readonly char[] ProsePunctuation =
+        {
+            '\u00A0',  // no-break space
+            '\u00B0',  // degree — used by anything showing an angle
+            '\u00D7',  // multiplication sign, for "2 × 4"
+            '\u2013',  // en dash
+            '\u2014',  // em dash
+            '\u2018', '\u2019',  // curly single quotes / apostrophe
+            '\u201C', '\u201D',  // curly double quotes
+            '\u2022',  // bullet
+            '\u00B7',  // middle dot, the quieter separator
+            '\u2026',  // ellipsis
+            '\u2039', '\u203A',  // single angle quotes, used for breadcrumbs
+            '\u00AB', '\u00BB',  // double angle quotes
+            '\u2192',  // rightwards arrow
+
+            // NOT here, and deliberately: the geometric triangles
+            // (U+25B4/BE/B8/C2) and the warning sign (U+26A0). Segoe UI
+            // Semilight has no glyph for any of them, so baking them would
+            // change nothing - a text face is not a symbol font. Anything
+            // wanting those should ask UIFont.Symbol, which is baked
+            // separately for exactly this reason.
+        };
+
         /// <summary>Loads (and caches, one bake per family) the SDF atlas for
         /// <paramref name="path"/> — see <see cref="SdfBakeEmSize"/> for why
         /// this takes no size parameter at all. Character coverage is
-        /// BasicLatin plus whatever
+        /// BasicLatin, <see cref="ProsePunctuation"/>, plus whatever
         /// <see cref="IconRangesFor"/> says this specific font needs — see
         /// its doc for why that's per-font rather than a blanket sweep.</summary>
         public SdfFont LoadSdfFont(string path)
@@ -121,7 +162,9 @@ namespace GustUI.Managers
             }
 
             var bake = BakeOnDeepStack(content.ReadAllBytes(path),
-                new[] { CharacterRange.BasicLatin }.Concat(IconRangesFor(path)));
+                new[] { CharacterRange.BasicLatin }
+                    .Concat(ProsePunctuation.Select(c => new CharacterRange(c)))
+                    .Concat(IconRangesFor(path)));
 
             var texture = bake.CreateTexture(graphicsDevice);
             var font = new SdfFont(texture, bake.Glyphs, bake.EmSize, path);

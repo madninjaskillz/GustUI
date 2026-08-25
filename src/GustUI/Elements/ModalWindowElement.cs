@@ -1208,15 +1208,26 @@ namespace GustUI.Elements
 
             if (FillsAvailableSpace)
             {
-                if (BeingDragged || IsResizing)
+                if (BeingDragged)
                 {
-                    // User interaction wins, once and for all — same rule
-                    // AutoCenter already follows. From here this behaves
-                    // like any other floating modal.
+                    // Dragged by the title bar — the user has picked this
+                    // window up, so it is genuinely floating now. Same rule
+                    // AutoCenter already follows.
                     FillsAvailableSpace = false;
                 }
                 else
                 {
+                    // A RESIZE is not the same as being dragged away. On a side
+                    // with a dock, this window's edge and that dock's edge are
+                    // the same line, so dragging it means "move the boundary" —
+                    // absorb it into the dock's reservation and keep filling.
+                    // Opting out of filling instead left the window shrunk with
+                    // a hole between it and the dock, which stayed put.
+                    if (IsResizing)
+                    {
+                        AbsorbResizeIntoDocks();
+                    }
+
                     var fill = Managers.DockLayout.AvailableRect(BottomInset, MinSize);
                     Set<PositionTrait>(new TVVector(fill.Position));
                     Set<SizeTrait>(new TVVector(fill.Size));
@@ -1618,6 +1629,48 @@ namespace GustUI.Elements
         /// Top/Bottom: height) is exactly what <see cref="Managers.DockLayout"/>
         /// reserves from windows sharing space with it — see its own doc
         /// comment (content-sized, capped at 50%, live).</summary>
+        /// <summary>
+        /// Turns this filler's edge-drag into the adjacent dock's reservation,
+        /// on whichever sides actually have a dock.
+        ///
+        /// The two are the same line, so there is one quantity to change and
+        /// this is how the filler's handle reaches it. Sides with no dock are
+        /// left alone — there the window really is just being resized, and the
+        /// snap-back to AvailableRect immediately below undoes it, which is the
+        /// pre-existing behaviour for a fills-available window.
+        /// </summary>
+        private void AbsorbResizeIntoDocks()
+        {
+            (Vector2 position, Vector2 size) = Managers.DockLayout.AvailableRect(BottomInset, MinSize);
+            Vector2 mine = this.GetActualPosition().AsXna;
+            Vector2 mySize = this.GetSize().AsXna;
+
+            Nudge(DockSide.Bottom, (position.Y + size.Y) - (mine.Y + mySize.Y));
+            Nudge(DockSide.Right, (position.X + size.X) - (mine.X + mySize.X));
+            Nudge(DockSide.Top, mine.Y - position.Y);
+            Nudge(DockSide.Left, mine.X - position.X);
+        }
+
+        /// <summary>Grows the innermost dock on <paramref name="side"/> by
+        /// <paramref name="delta"/> pixels — the space this window just gave
+        /// up on that edge.</summary>
+        private static void Nudge(DockSide side, float delta)
+        {
+            if (Math.Abs(delta) < 0.5f)
+            {
+                return;
+            }
+
+            ModalWindowElement dock = Managers.DockLayout.Innermost(side);
+            if (dock == null)
+            {
+                return;
+            }
+
+            Managers.DockLayout.SetReservation(
+                dock, Math.Max(48f, Managers.DockLayout.ReservedFor(dock, side) + delta));
+        }
+
         private void LayoutDocked()
         {
             Vector2 windowSize = Resources.StaticResources.RootWindow.GetSize().AsXna;
