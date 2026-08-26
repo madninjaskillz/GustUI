@@ -265,6 +265,58 @@ namespace GustUI.Elements
         /// scratch.</summary>
         public Element Content => content;
 
+        /// <summary>
+        /// The window showing <paramref name="element"/> right now — its own
+        /// shell, or the tab container that adopted it.
+        ///
+        /// Walks UP from the element, which is the only reliable direction: a
+        /// view cannot remember the shell it was built with, because merging
+        /// into a container reparents the content and kills that shell. Where
+        /// the content currently sits is the question with a stable answer.
+        /// </summary>
+        public static ModalWindowElement HostWindowOf(Element element)
+        {
+            for (Element walk = element; walk != null; walk = walk.Parent)
+            {
+                if (walk is ModalWindowElement window)
+                {
+                    return window;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Brings <paramref name="element"/> into view: if it is a tab's
+        /// content its tab is made active, otherwise its window comes to the
+        /// front. False when it is not in a window at all.
+        ///
+        /// This is what "open something already open" should do. An app asking
+        /// to show a view it has already built should never have to know
+        /// whether that view ended up as a floating window or as somebody's
+        /// third tab — and tearing a tab out to add a fresh one in the same
+        /// gesture scrambles the strip it came from.
+        /// </summary>
+        public static bool Reveal(Element element)
+        {
+            for (Element walk = element; walk != null; walk = walk.Parent)
+            {
+                if (walk.Parent is TabContainerElement container && container.Activate(walk))
+                {
+                    return true;
+                }
+
+                if (walk is ModalWindowElement window)
+                {
+                    window.MoveToFront();
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         /// <summary>What the title bar's X does. Null (default) = the base
         /// Kill() path (starts the close animation) via
         /// ModalTitleBarElement's own default. Set this when a host needs

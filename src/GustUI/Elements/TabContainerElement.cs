@@ -216,6 +216,29 @@ namespace GustUI.Elements
         /// preserve here — by the time a real drag reaches this point it has
         /// always already been undocked itself (HandleTitleBarPress on
         /// press, or the very drag that got it here).</summary>
+        /// <summary>
+        /// Makes this container show the tab whose content is
+        /// <paramref name="content"/>. False if it holds no such tab.
+        /// </summary>
+        internal bool Activate(Element content)
+        {
+            for (int i = 0; i < tabs.Count; i++)
+            {
+                if (!ReferenceEquals(tabs[i].Content, content))
+                {
+                    continue;
+                }
+
+                activeIndex = i;
+                ReflowTabStrip();
+                ReflowActiveContent();
+                MoveToFront();
+                return true;
+            }
+
+            return false;
+        }
+
         /// <remarks>
         /// Public (2026-08-26) because an app can want this WITHOUT the drag:
         /// "open the editor for this panel as a tab beside it" is the same
