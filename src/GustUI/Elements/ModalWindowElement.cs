@@ -541,7 +541,11 @@ namespace GustUI.Elements
 
                 entry.Width = shared;
                 bool dragged = i == draggingIndex;
-                entry.Button.Depth = dragged ? 10 : 0;
+                // Always ABOVE the strip, which is an opaque fill: this line
+                // used to reset the depth set at build time, dropping every
+                // idle tab underneath its own background. A dragged tab goes
+                // one higher again so it rides over its neighbours.
+                entry.Button.Depth = dragged ? 12 : 11;
                 entry.Button.Set<PositionTrait>(new TVVector(dragged ? dragTabX : x, 0));
                 entry.Button.Set<SizeTrait>(new TVVector(shared, ModalTitleBarElement.BarHeight));
 
@@ -722,6 +726,12 @@ namespace GustUI.Elements
             {
                 return;
             }
+
+            // Hand the pointer back. Without this a plain tab CLICK leaves the
+            // capture on that button forever, and every later click in the app
+            // is routed to it — which shows up as unrelated windows whose close
+            // and maximise buttons quietly stop responding.
+            tabs[draggingIndex].Button?.ReleasePointer();
 
             float stripTop = tabStrip.GetActualXnaPosition().Y;
             bool tornOff = dragMouseY < stripTop - TearOffThresholdPx
