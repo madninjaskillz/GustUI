@@ -136,6 +136,10 @@ namespace GustUI.Elements
         /// </summary>
         internal float LeftReserved { get; set; }
 
+        /// <summary>Hides this bar's own close/maximise — set while a tab strip
+        /// covers the bar and carries those actions itself.</summary>
+        internal bool ChromeHidden { get; set; }
+
         internal float RightChromeWidth => (closable ? BarHeight : 0) + (hasMaximimizeButton ? BarHeight : 0);
 
         public ModalTitleBarElement()
@@ -358,13 +362,13 @@ namespace GustUI.Elements
             if (closable)
             {
                 closeButton.Set<PositionTrait>(new TVVector(size.X - BarHeight, 0));
-                closeButton.Set<SizeTrait>(new TVVector(BarHeight, BarHeight));
+                closeButton.Set<SizeTrait>(ChromeHidden ? new TVVector(0, 0) : new TVVector(BarHeight, BarHeight));
             }
 
             if (hasMaximimizeButton)
             {
                 sizeButton.Set<PositionTrait>(new TVVector(size.X - RightChromeWidth, 0));
-                sizeButton.Set<SizeTrait>(new TVVector(BarHeight, BarHeight));
+                sizeButton.Set<SizeTrait>(ChromeHidden ? new TVVector(0, 0) : new TVVector(BarHeight, BarHeight));
                 sizeButton.Set<TextTrait>(((ModalWindowElement)Parent).isFullScreen ? Resources.StaticResources.Theme.Icons.MinimizeIcon.ToTextTrait() : Resources.StaticResources.Theme.Icons.MaximizeIcon.ToTextTrait());
             }
 
