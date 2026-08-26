@@ -113,6 +113,18 @@ namespace GustUI
         public TVFont UiFontSubtitle = new() { Family = "segoeuisl.ttf", Size = 28, Border = 0 };    // panel/modal sub-titles
         public TVFont UiFontLarge = new() { Family = "segoeuisl.ttf", Size = 32, Border = 0 };       // top-level section headers only
 
+        /// <summary>
+        /// Menus — both the bar that opens them and the items inside.
+        ///
+        /// Deliberately off the 16/20/24/28/32 step above, and deliberately
+        /// ONE font for both: a menu bar whose labels do not match the menu
+        /// they open reads as two different controls. 18 is three quarters of
+        /// the body size; menus were drawn at full body size, which is a touch
+        /// target's proportions and in a dense app reads as a menu shouting.
+        /// The scale above governs prose and headings, not chrome this small.
+        /// </summary>
+        public TVFont MenuFont = new() { Family = "segoeuisl.ttf", Size = 18, Border = 0 };
+
         /// <summary>Segoe UI Bold (segoeuib.ttf) — the app's ONLY other font
         /// weight (everything else is Semilight): titles/headers that need
         /// to visually anchor a surface, used sparingly so weight actually

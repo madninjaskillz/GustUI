@@ -28,25 +28,15 @@ namespace GustUI.Elements
         ///
         /// Menus were sized for a touch target on a tablet: a 40px row with a
         /// 32px icon and body-sized text, which in a dense audio app reads as
-        /// a menu shouting. The label is 75% of the UI font and everything
-        /// around it is scaled to match — shrinking the type alone would have
-        /// left small text marooned in a tall row, which looks like a bug
-        /// rather than like a smaller menu.
+        /// a menu shouting. The label is Theme.MenuFont — shared with the bar
+        /// that opens it — and everything around it is scaled to match:
+        /// shrinking the type alone would have left small text marooned in a
+        /// tall row, which looks like a bug rather than like a smaller menu.
         /// </summary>
         public const int RowHeight = 30;
 
         private const int IconBox = 24;
         private const int LabelLeft = 38;
-        private const float FontScale = 0.75f;
-
-        internal static TVFont LabelFont
-        {
-            get
-            {
-                TVFont ui = Resources.StaticResources.Theme.UiFont;
-                return new TVFont { Family = ui.Family, Size = ui.Size * FontScale, Border = ui.Border };
-            }
-        }
 
         public FruitMenuItem(MenuItemModel menuItem, Action<ClickEventArgs> actionOverride = null, int width = 300, bool hideMore = false)
         {
@@ -146,7 +136,7 @@ namespace GustUI.Elements
                     var keyElement = this.AddChildElement<TextElement>();
                     keyElement.Set<PositionTrait>(new TVVector(ps, height));
                     keyElement.Set<SizeTrait>(new TVVector(22, iconHeight));
-                    keyElement.Set<FontTrait>(LabelFont);
+                    keyElement.Set<FontTrait>(Resources.StaticResources.Theme.MenuFont);
                     keyElement.Set<ForegroundColorTrait>(new TVColor(menuItem.Enabled ? Color.Black : Color.Black * 0.5f));
                     keyElement.Set<TextTrait>(new TVText(menuItem.Shortcut.Key.ToString()));
                 }
@@ -158,7 +148,7 @@ namespace GustUI.Elements
             // which lands on top of the next item. Anything too long is
             // ellipsised to the label column instead — the full text is still
             // available to a caller that wants it in a tooltip.
-            TVFont labelFont = LabelFont;
+            TVFont labelFont = Resources.StaticResources.Theme.MenuFont;
             float labelWidth = width - 54;
 
             textElement = this.AddChildElement<TextElement>();

@@ -38,7 +38,7 @@ namespace GustUI.Elements
             TextElement textElement = this.AddChildElement<TextElement>();
             textElement.Set<PositionTrait>(new TVVector(MenuBarElement.ItemPaddingX, textInset));
             textElement.Set<SizeTrait>(new TVVector(width - MenuBarElement.ItemPaddingX * 2, height));
-            textElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
+            textElement.Set<FontTrait>(Resources.StaticResources.Theme.MenuFont);
             // Theme.BodyText, NOT a fixed Color.Black (found 2026-08-17, live
             // user test: "black on grey" in dark mode) — FruitMenuItemStates'
             // fills (reused here for the hover/press highlight) were tuned

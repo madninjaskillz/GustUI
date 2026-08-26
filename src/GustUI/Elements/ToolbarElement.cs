@@ -21,11 +21,16 @@ namespace GustUI.Elements
     /// </summary>
     public class ToolbarElement : FilledRectangleElement
     {
-        /// <summary>Bar height in pixels — content below the bar starts
-        /// here. Matches the sequencer's own pre-existing transport row
-        /// height (also design-guide.md's "Toolbar button size / step: 30 /
-        /// 36" row, which already assumes a 40px-tall strip).</summary>
-        public const int BarHeight = 40;
+        /// <summary>
+        /// Bar height in pixels — content below the bar starts here.
+        ///
+        /// The SAME height as the menu bar it sits beside, and derived from it
+        /// so the two cannot drift: a toolbar taller than the menu makes one
+        /// row that is really two, with the menu labels floating in the middle
+        /// of it. It was 40 against the menu's 28 when both were sized for a
+        /// touch target.
+        /// </summary>
+        public const int BarHeight = MenuBarElement.BarHeight;
 
         private readonly Element host;
 
