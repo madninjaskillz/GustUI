@@ -57,7 +57,7 @@ namespace GustUI.Elements
             this.trigger = trigger;
             Depth = PopupDepth;
             menuItems = items;
-            Set<SizeTrait>(new TVVector(width, 40*items.Count));
+            Set<SizeTrait>(new TVVector(width, FruitMenuItem.RowHeight * items.Count));
             Set<PositionTrait>(new TVVector(0, 0));
             // Same translucent chrome family as the fruit menu bar it extends
             // from (design-guide.md §1.5) — was a flat, harsher near-white

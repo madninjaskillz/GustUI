@@ -23,6 +23,31 @@ namespace GustUI.Elements
         FruitPopupMenu popup = null;
         int hoverCounter = 0;
         int maxHover = 50;
+        /// <summary>
+        /// One row's height, and the type scale that goes with it.
+        ///
+        /// Menus were sized for a touch target on a tablet: a 40px row with a
+        /// 32px icon and body-sized text, which in a dense audio app reads as
+        /// a menu shouting. The label is 75% of the UI font and everything
+        /// around it is scaled to match — shrinking the type alone would have
+        /// left small text marooned in a tall row, which looks like a bug
+        /// rather than like a smaller menu.
+        /// </summary>
+        public const int RowHeight = 30;
+
+        private const int IconBox = 24;
+        private const int LabelLeft = 38;
+        private const float FontScale = 0.75f;
+
+        internal static TVFont LabelFont
+        {
+            get
+            {
+                TVFont ui = Resources.StaticResources.Theme.UiFont;
+                return new TVFont { Family = ui.Family, Size = ui.Size * FontScale, Border = ui.Border };
+            }
+        }
+
         public FruitMenuItem(MenuItemModel menuItem, Action<ClickEventArgs> actionOverride = null, int width = 300, bool hideMore = false)
         {
             _menuItem = menuItem;
@@ -50,7 +75,7 @@ namespace GustUI.Elements
 
             };
             var more = menuItem.SubItems?.Count > 0;
-            Set<SizeTrait>(new TVVector(width, 40));
+            Set<SizeTrait>(new TVVector(width, RowHeight));
             Set<BackgroundFillTrait>(new TVSmartFill { States = Resources.StaticResources.Theme.FruitMenuItemStates });
             Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) =>
             {
@@ -61,8 +86,8 @@ namespace GustUI.Elements
             if (icon != null)
             {
                 iconElement = this.AddChildElement<TextElement>();
-                iconElement.Set<PositionTrait>(new TVVector(10, 5));
-                iconElement.Set<SizeTrait>(new TVVector(32, 32));
+                iconElement.Set<PositionTrait>(new TVVector(8, 3));
+                iconElement.Set<SizeTrait>(new TVVector(IconBox, IconBox));
                 iconElement.Set<FontTrait>(Resources.StaticResources.Theme.SymbolFont);
                 iconElement.Set<ForegroundColorTrait>(new TVColor(Color.Black));
                 iconElement.Set<TextTrait>(new TVText(icon));
@@ -73,8 +98,8 @@ namespace GustUI.Elements
                 if (!hideMore)
                 {
                     moreElement = this.AddChildElement<TextElement>();
-                    moreElement.Set<PositionTrait>(new TVVector(width - 40, 5));
-                    moreElement.Set<SizeTrait>(new TVVector(32, 32));
+                    moreElement.Set<PositionTrait>(new TVVector(width - 30, 3));
+                    moreElement.Set<SizeTrait>(new TVVector(IconBox, IconBox));
                     moreElement.Set<FontTrait>(Resources.StaticResources.Theme.SymbolFont);
                     moreElement.Set<ForegroundColorTrait>(new TVColor(Color.Black));
                     moreElement.Set<TextTrait>(new TVText(UIFont.Symbol.More.Icon()));
@@ -103,10 +128,12 @@ namespace GustUI.Elements
             {
                 if (menuItem.Shortcut != null)
                 {
-                    float height = 8;
-                    float iconSize = 42;
-                    float iconHeight = 26;
-                    float ps = width - (30 + (menuItem.Shortcut.Modifiers.Count * iconSize));
+                    // Centred in the row, not a number left over from when the
+                    // row was 40 tall.
+                    float iconSize = 26;
+                    float iconHeight = 16;
+                    float height = (RowHeight - iconHeight) / 2f;
+                    float ps = width - (22 + (menuItem.Shortcut.Modifiers.Count * iconSize));
                     foreach (var mod in menuItem.Shortcut.Modifiers)
                     {
                         var modElement = this.AddChildElement<FilledRectangleElement>();
@@ -118,8 +145,8 @@ namespace GustUI.Elements
                     }
                     var keyElement = this.AddChildElement<TextElement>();
                     keyElement.Set<PositionTrait>(new TVVector(ps, height));
-                    keyElement.Set<SizeTrait>(new TVVector(30, iconHeight));
-                    keyElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
+                    keyElement.Set<SizeTrait>(new TVVector(22, iconHeight));
+                    keyElement.Set<FontTrait>(LabelFont);
                     keyElement.Set<ForegroundColorTrait>(new TVColor(menuItem.Enabled ? Color.Black : Color.Black * 0.5f));
                     keyElement.Set<TextTrait>(new TVText(menuItem.Shortcut.Key.ToString()));
                 }
@@ -131,13 +158,13 @@ namespace GustUI.Elements
             // which lands on top of the next item. Anything too long is
             // ellipsised to the label column instead — the full text is still
             // available to a caller that wants it in a tooltip.
-            TVFont labelFont = Resources.StaticResources.Theme.UiFont;
-            float labelWidth = width - 70;
+            TVFont labelFont = LabelFont;
+            float labelWidth = width - 54;
 
             textElement = this.AddChildElement<TextElement>();
             textElement.WordWrap = false;
-            textElement.Set<PositionTrait>(new TVVector(50, 6));
-            textElement.Set<SizeTrait>(new TVVector(labelWidth, 50));
+            textElement.Set<PositionTrait>(new TVVector(LabelLeft, 5));
+            textElement.Set<SizeTrait>(new TVVector(labelWidth, RowHeight));
             textElement.Set<FontTrait>(labelFont);
             textElement.Set<ForegroundColorTrait>(new TVColor(Color.Black));
             textElement.Set<TextTrait>(new TVText(TextElement.Ellipsise(text, labelWidth, labelFont)));
