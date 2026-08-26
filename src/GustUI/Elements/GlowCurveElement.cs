@@ -45,6 +45,42 @@ namespace GustUI.Elements
         /// <c>Tint</c> uses over its column rects.</summary>
         public Color FillColor = new Color(120, 220, 160);
 
+        /// <summary>
+        /// Per-column fill tint, by element-relative X — overrides
+        /// <see cref="FillColor"/> when set.
+        ///
+        /// For a curve whose MEANING changes along its length: a spectrum split
+        /// into bands wants each band's stretch of fill in that band's own
+        /// colour, so the picture and the controls under it read as the same
+        /// thing. The fill is already drawn one column at a time, so asking per
+        /// column costs a delegate call and nothing else.
+        /// </summary>
+        public Func<float, Color>? FillColorAt;
+
+        /// <summary>Per-column line tint, same contract as
+        /// <see cref="FillColorAt"/>; null keeps <see cref="LineColor"/>.</summary>
+        public Func<float, Color>? LineColorAt;
+
+        /// <summary>
+        /// Alpha at the top of the fill and at the bottom of the fade.
+        ///
+        /// The default fades to nothing over the ELEMENT, which is what an
+        /// envelope wants: its curve hugs the top of its box and the fill hangs
+        /// beneath. A spectrum's curve sits wherever the music is, so the same
+        /// fade starts faint and is gone before the baseline — the fill was
+        /// invisible and only the line read. Callers whose curve does not live
+        /// near the top should raise <see cref="FillBottomAlpha"/> or set
+        /// <see cref="FadeFillAcrossElement"/> false.
+        /// </summary>
+        public float FillTopAlpha = 0.55f;
+
+        public float FillBottomAlpha = 0f;
+
+        /// <summary>Whether the fade is measured across the whole element
+        /// (default, an envelope's shape) or across each column's OWN span from
+        /// the curve down to the baseline.</summary>
+        public bool FadeFillAcrossElement = true;
+
         /// <summary>Element-relative Y the fill drops to; null = the
         /// element's own bottom edge (the common case — a baseline knob is
         /// only useful for a curve that doesn't span the full height).</summary>
@@ -124,9 +160,17 @@ namespace GustUI.Elements
                 }
 
                 var dest = new Rectangle((int)origin.X + x, (int)origin.Y + y0, 1, fillHeight);
-                Color top = FillColor * FillAlphaAt(y0, height);
-                Color bottom = FillColor * FillAlphaAt(y0 + fillHeight, height);
-                manager.DrawFilledRectangleGradient(dest, top, bottom, Direction.Vertically);
+                Color tint = FillColorAt?.Invoke(x) ?? FillColor;
+
+                // Across the element, or across this column's own fill: the
+                // second keeps a fill readable wherever the curve happens to
+                // sit, which is what a spectrum needs.
+                float topAlpha = FadeFillAcrossElement ? FillAlphaAt(y0, height) : FillTopAlpha;
+                float bottomAlpha = FadeFillAcrossElement
+                    ? FillAlphaAt(y0 + fillHeight, height)
+                    : FillBottomAlpha;
+
+                manager.DrawFilledRectangleGradient(dest, tint * topAlpha, tint * bottomAlpha, Direction.Vertically);
             }
         }
 
@@ -134,11 +178,12 @@ namespace GustUI.Elements
         /// element's absolute row range — the same fade
         /// <see cref="GetFillGradientTexture"/> used to bake into a texture,
         /// now evaluated directly per column endpoint.</summary>
-        private static float FillAlphaAt(int y, int height)
+        private float FillAlphaAt(int y, int height)
         {
             return height <= 1
-                ? 0.55f
-                : MathHelper.Lerp(0.55f, 0f, MathHelper.Clamp(y, 0, height - 1) / (float)(height - 1));
+                ? FillTopAlpha
+                : MathHelper.Lerp(FillTopAlpha, FillBottomAlpha,
+                    MathHelper.Clamp(y, 0, height - 1) / (float)(height - 1));
         }
 
         /// <summary>Linear-interpolated curve Y at element-relative X (points
@@ -185,7 +230,16 @@ namespace GustUI.Elements
             for (int i = 1; i < Points.Count; i++)
             {
                 Vector2 next = origin + Points[i];
-                manager.DrawThickLine(previous, next, color, thickness);
+
+                // Tinted per SEGMENT when a caller asks, sampled at the
+                // segment's midpoint — a segment spans a few pixels, so one
+                // colour for it is indistinguishable from a gradient and costs
+                // one call instead of one per pixel.
+                Color segment = LineColorAt != null
+                    ? LineColorAt((Points[i - 1].X + Points[i].X) * 0.5f) * (color.A / 255f)
+                    : color;
+
+                manager.DrawThickLine(previous, next, segment, thickness);
                 previous = next;
             }
         }
