@@ -49,6 +49,23 @@ namespace GustUI.Elements
         // without reintroducing a fully colored bar.
         // Live Theme reads (not cached), so a title bar built after a theme
         // switch (design-guide.md §1) picks up the current palette.
+        /// <summary>
+        /// The close/maximise glyphs, sized to the BAR rather than to the
+        /// theme's symbol size.
+        ///
+        /// A symbol glyph fills its em square where a letter of the same
+        /// nominal size only fills the part above the baseline, so the theme's
+        /// 24 — correct in a sentence — came out around four fifths of a 30px
+        /// title bar. The squares stay full height: that is the hit target, and
+        /// a title bar's buttons are meant to be easy to hit.
+        /// </summary>
+        private static TVFont ButtonGlyphFont(TVFont family) => new TVFont
+        {
+            Family = family.Family,
+            Size = BarHeight * 0.5f,
+            Border = family.Border,
+        };
+
         private static Color BarFillTop => Color.Lerp(Resources.StaticResources.Theme.SurfaceRaised, Resources.StaticResources.Theme.AccentSelection, 0.18f);
         private static Color BarFillBottom => Color.Lerp(Resources.StaticResources.Theme.SurfaceHeader, Resources.StaticResources.Theme.AccentSelection, 0.05f);
         private static Color AccentUnderline => Resources.StaticResources.Theme.AccentSelection;
@@ -197,7 +214,7 @@ namespace GustUI.Elements
             {
                 closeButton.Set<SizeTrait>(new TVVector(size.Y, size.Y));
                 closeButton.Set<TextTrait>(Resources.StaticResources.Theme.Icons.CloseIcon.ToTextTrait());
-                closeButton.Set<FontTrait>(Resources.StaticResources.Theme.AltSymbolFont);
+                closeButton.Set<FontTrait>(ButtonGlyphFont(Resources.StaticResources.Theme.AltSymbolFont));
                 closeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
                 closeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
                 closeButton.Set<PositionTrait>(new TVVector(size.X - size.Y, 0));
@@ -231,7 +248,7 @@ namespace GustUI.Elements
                 // so it already safely covers BackToWindow. Both maximize/
                 // minimize states now render from the same font rather
                 // than one working and the other silently blank.
-                sizeButton.Set<FontTrait>(Resources.StaticResources.Theme.SymbolFont);
+                sizeButton.Set<FontTrait>(ButtonGlyphFont(Resources.StaticResources.Theme.SymbolFont));
                 sizeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
                 sizeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
                 sizeButton.Set<PositionTrait>(new TVVector(size.X - RightChromeWidth, 0));
