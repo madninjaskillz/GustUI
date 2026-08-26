@@ -265,6 +265,551 @@ namespace GustUI.Elements
         /// scratch.</summary>
         public Element Content => content;
 
+        // =============================================================== tabs
+
+        /// <summary>
+        /// Takes <paramref name="source"/>'s view and hosts it as one more tab
+        /// here, then kills the now-empty source shell.
+        ///
+        /// THIS window survives — it is not replaced. That is the whole point
+        /// of a window owning its tabs rather than being swapped for a
+        /// container: whoever holds a reference to it still holds a live one
+        /// afterwards.
+        /// </summary>
+        public void AddTab(ModalWindowElement source)
+        {
+            if (source == null || ReferenceEquals(source, this))
+            {
+                return;
+            }
+
+            // A tabbed source folds ALL of its tabs in, not just its active
+            // one — the alternative silently destroys the rest.
+            if (source.tabs.Count > 1)
+            {
+                foreach (Tab moving in source.DetachAllTabs())
+                {
+                    Adopt(moving);
+                }
+
+                source.Undock();
+                source.Kill();
+                return;
+            }
+
+            Element body = source.Content;
+            var entry = new Tab
+            {
+                Title = source.Title,
+                Content = body,
+                RehostCallback = source.OnContentRehosted,
+            };
+
+            body?.Parent?.Children?.Remove(body);
+            source.tabs.Clear();
+            source.Undock();
+            source.Kill();
+
+            Adopt(entry);
+        }
+
+        private void Adopt(Tab entry)
+        {
+            tabs.Add(entry);
+            BuildTabButton(entry);
+            ActivateTab(tabs.Count - 1);
+            entry.RehostCallback?.Invoke(this);
+        }
+
+        private List<Tab> DetachAllTabs()
+        {
+            var moving = new List<Tab>(tabs);
+            foreach (Tab entry in moving)
+            {
+                entry.Button?.Kill();
+                entry.Button = null;
+                entry.Content?.Parent?.Children?.Remove(entry.Content);
+            }
+
+            tabs.Clear();
+            return moving;
+        }
+
+        /// <summary>Shows the tab at <paramref name="index"/> — its content
+        /// becomes the window's body, which is what makes every sizing and
+        /// scrolling rule below apply to whichever tab is on screen.</summary>
+        private void ActivateTab(int index)
+        {
+            if (index < 0 || index >= tabs.Count)
+            {
+                return;
+            }
+
+            Element outgoing = content;
+            activeIndex = index;
+            content = tabs[index].Content;
+
+            if (ReferenceEquals(outgoing, content))
+            {
+                RefreshTabStrip();
+                return;
+            }
+
+            // Detach rather than kill: an inactive tab's view stays alive with
+            // all its state, it simply is not in the tree.
+            outgoing?.Parent?.Children?.Remove(outgoing);
+
+            if (contentScrolls && scrollViewport != null)
+            {
+                scrollViewport.AddChild(content, "content");
+            }
+            else
+            {
+                AddChild(content, "content");
+            }
+
+            content.Set<PositionTrait>(new TVVector(0, ContentTop));
+            RefreshTabStrip();
+        }
+
+        /// <summary>Brings the tab showing <paramref name="hosted"/> to the
+        /// front. False when this window does not host it.</summary>
+        public bool ShowTab(Element hosted)
+        {
+            for (int i = 0; i < tabs.Count; i++)
+            {
+                if (!ReferenceEquals(tabs[i].Content, hosted))
+                {
+                    continue;
+                }
+
+                ActivateTab(i);
+                MoveToFront();
+                return true;
+            }
+
+            return false;
+        }
+
+        private void RemoveTab(int index, bool killContent)
+        {
+            if (index < 0 || index >= tabs.Count)
+            {
+                return;
+            }
+
+            Tab entry = tabs[index];
+            entry.Button?.Kill();
+            tabs.RemoveAt(index);
+
+            if (killContent)
+            {
+                entry.RehostCallback?.Invoke(null);
+                if (ReferenceEquals(content, entry.Content))
+                {
+                    content = null;
+                }
+
+                entry.Content?.Kill();
+            }
+            else
+            {
+                entry.Content?.Parent?.Children?.Remove(entry.Content);
+                if (ReferenceEquals(content, entry.Content))
+                {
+                    content = null;
+                }
+            }
+
+            if (tabs.Count == 0)
+            {
+                Close();
+                return;
+            }
+
+            // Down to one is not a teardown any more, just a window without a
+            // strip. The old container had to dissolve itself into a
+            // replacement modal here, carrying its dock side, its inset and its
+            // owner callback across by hand.
+            int next = Math.Clamp(index >= tabs.Count ? tabs.Count - 1 : index, 0, tabs.Count - 1);
+            content = null;
+            ActivateTab(next);
+        }
+
+        private static Color TabStripFill => Resources.StaticResources.Theme.SurfaceHeader;
+
+        private static Color TabActiveTop
+            => Color.Lerp(Resources.StaticResources.Theme.SurfaceRaised, Resources.StaticResources.Theme.AccentSelection, 0.18f);
+
+        private static Color TabActiveBottom
+            => Color.Lerp(Resources.StaticResources.Theme.SurfaceHeader, Resources.StaticResources.Theme.AccentSelection, 0.05f);
+
+        private static Color TabAccent => Resources.StaticResources.Theme.AccentSelection;
+
+        /// <summary>
+        /// Builds, shows or hides the strip, and lays the tabs across it.
+        ///
+        /// One tab means no strip at all: the ordinary title bar underneath is
+        /// already a full-width bar carrying that view name, which is what a
+        /// lone tab would draw anyway. The strip appears at two.
+        /// </summary>
+        private void RefreshTabStrip()
+        {
+            if (tabs.Count < 2)
+            {
+                // The buttons are siblings of the strip, not children, so
+                // killing the strip alone would leave them on the title bar.
+                foreach (Tab stale in tabs)
+                {
+                    stale.Button?.Kill();
+                    stale.Button = null;
+                }
+
+                tabStrip?.Kill();
+                tabStrip = null;
+                if (titleBarElement != null)
+                {
+                    titleBarElement.LeftReserved = 0f;
+                }
+
+                if (tabs.Count == 1)
+                {
+                    Title = tabs[0].Title;
+                }
+
+                return;
+            }
+
+            if (tabStrip == null)
+            {
+                tabStrip = new FilledRectangleElement(0, 0, 10, ModalTitleBarElement.BarHeight,
+                    new TVFillSolidColor(TabStripFill));
+
+                // Above the title bar it covers, and with its own press guard:
+                // GustUI gives the event to EVERY element whose rect contains
+                // the point, so without this a tab click ALSO started a window
+                // drag, and that drag swallowed the tab release.
+                tabStrip.Depth = 10;
+                tabStrip.Set<OnMousePress>(new TVEvent<ClickEventArgs>(args =>
+                {
+                    if (!IsOverTab(args.GlobalMousePosition.AsXna))
+                    {
+                        HandleTitleBarPress(args);
+                    }
+                }));
+
+                AddChildElement(tabStrip);
+
+                foreach (Tab pending in tabs)
+                {
+                    BuildTabButton(pending);
+                }
+            }
+
+            TVVector size = ElementTrait<SizeTrait>().Value();
+
+            // The strip stops short of this window own close/maximise. Those
+            // are chrome, not a tab, and the gap beside them is what a tabbed
+            // window gets dragged by once the tabs have eaten the rest.
+            // Tabs take the bar, less this window's own buttons AND a gap
+            // beside them. That gap is the only thing left to drag a tabbed
+            // window by, so it is reserved rather than left to chance.
+            float chrome = titleBarElement?.RightChromeWidth ?? 0f;
+            float stripWidth = Math.Max(MinTabWidth, size.X - chrome - TabDragGap);
+            if (titleBarElement != null)
+            {
+                titleBarElement.LeftReserved = stripWidth;
+            }
+
+            Title = string.Empty;
+            tabStrip.Set<PositionTrait>(new TVVector(0, 0));
+            tabStrip.Set<SizeTrait>(new TVVector(stripWidth, ModalTitleBarElement.BarHeight));
+
+            bool active = IsFrontmostWindow(this);
+            tabStrip.Set<BackgroundFillTrait>(new TVFillSolidColor(active ? TabStripFill : Dim(TabStripFill)));
+
+            float shared = Math.Max(MinTabWidth, (stripWidth - (TabGap * (tabs.Count - 1))) / tabs.Count);
+
+            float x = 0f;
+            for (int i = 0; i < tabs.Count; i++)
+            {
+                Tab entry = tabs[i];
+                if (entry.Button == null)
+                {
+                    BuildTabButton(entry);
+                }
+
+                entry.Width = shared;
+                bool dragged = i == draggingIndex;
+                entry.Button.Depth = dragged ? 10 : 0;
+                entry.Button.Set<PositionTrait>(new TVVector(dragged ? dragTabX : x, 0));
+                entry.Button.Set<SizeTrait>(new TVVector(shared, ModalTitleBarElement.BarHeight));
+
+                bool isActive = i == activeIndex;
+                entry.Button.Set<BackgroundFillTrait>(isActive
+                    ? new TVFillSimpleGradient(
+                        active ? TabActiveTop : Dim(TabActiveTop),
+                        active ? TabActiveBottom : Dim(TabActiveBottom),
+                        Direction.Vertically)
+                    : new TVFillSolidColor(active ? TabStripFill : Dim(TabStripFill)));
+
+                entry.Underline.Set<PositionTrait>(new TVVector(0, ModalTitleBarElement.BarHeight - 2));
+                entry.Underline.Set<SizeTrait>(new TVVector(isActive ? shared : 0f, 2));
+                entry.Underline.Set<BackgroundFillTrait>(new TVFillSolidColor(active ? TabAccent : Dim(TabAccent)));
+
+                float labelWidth = Math.Max(10f, shared - TabPaddingX - TabCloseSize - 10);
+                entry.Label.Set<SizeTrait>(new TVVector(labelWidth, ModalTitleBarElement.BarHeight));
+                entry.Label.Set<TextTrait>(new TVText(TextElement.Ellipsise(
+                    entry.Title, labelWidth, Resources.StaticResources.Theme.UiFontSmall)));
+
+                entry.CloseX.Set<PositionTrait>(new TVVector(
+                    shared - TabCloseSize - 6, (ModalTitleBarElement.BarHeight - TabCloseSize) / 2f));
+
+                x += shared + TabGap;
+            }
+        }
+
+        private static Color Dim(Color c)
+        {
+            float grey = (c.R * 0.3f) + (c.G * 0.59f) + (c.B * 0.11f);
+            return new Color(
+                (int)MathHelper.Lerp(c.R, grey, 0.55f),
+                (int)MathHelper.Lerp(c.G, grey, 0.55f),
+                (int)MathHelper.Lerp(c.B, grey, 0.55f));
+        }
+
+        private void BuildTabButton(Tab entry)
+        {
+            if (tabStrip == null || entry.Button != null)
+            {
+                return;
+            }
+
+            var button = new FilledRectangleElement(0, 0, 100, ModalTitleBarElement.BarHeight,
+                new TVFillSolidColor(TabStripFill));
+
+            var label = new TextElement { WordWrap = false };
+            label.Set<PositionTrait>(new TVVector(TabPaddingX, 0));
+            label.Set<SizeTrait>(new TVVector(140, ModalTitleBarElement.BarHeight));
+            label.Set<FontTrait>(Resources.StaticResources.Theme.UiFontSmall);
+            label.Set<ForegroundColorTrait>(new TVColor(Resources.StaticResources.Theme.BodyText));
+            label.Set<VerticalAlignmentTrait>(new TVVerticalAlignment { Alignment = VerticalAlignment.Center });
+            label.Set<TextTrait>(new TVText(entry.Title));
+            button.AddChild(label, "label");
+            entry.Label = label;
+
+            entry.Underline = new FilledRectangleElement(0, ModalTitleBarElement.BarHeight - 2, 0, 2,
+                new TVFillSolidColor(TabAccent));
+
+            button.AddChild(entry.Underline, "accent-underline");
+
+            var close = new FilledRectangleElement(0, 0, TabCloseSize, TabCloseSize,
+                new TVFillSolidColor(Color.Transparent));
+
+            TextElement closeGlyph = close.AddChildElement<TextElement>();
+            closeGlyph.Set<SizeTrait>(new TVVector(TabCloseSize, TabCloseSize));
+            closeGlyph.Set<FontTrait>(new TVFont
+            {
+                Family = Resources.StaticResources.Theme.AltSymbolFont.Family,
+                Size = TabCloseSize * 0.75f,
+                Border = 0,
+            });
+
+            closeGlyph.Set<ForegroundColorTrait>(new TVColor(Resources.StaticResources.Theme.BodyText));
+            closeGlyph.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment { Alignment = HorizontalAlignment.Center });
+            closeGlyph.Set<VerticalAlignmentTrait>(new TVVerticalAlignment { Alignment = VerticalAlignment.Center });
+            closeGlyph.Set<TextTrait>(Resources.StaticResources.Theme.Icons.CloseIcon.ToTextTrait());
+            close.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>(_ => closeTabRequested = entry));
+            close.AddTrait<OnEnterTrait>().Set(new TVEvent<ClickEventArgs>(_ =>
+                close.Set<BackgroundFillTrait>(new TVFillSolidColor(Resources.StaticResources.Theme.AccentMuteOn))));
+            close.Set<OnExitTrait>(new TVEvent<ClickEventArgs>(_ =>
+                close.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent))));
+
+            button.AddChild(close, "close");
+            entry.CloseX = close;
+
+            button.Set<OnMousePress>(new TVEvent<ClickEventArgs>(args => BeginTabDrag(entry, args)));
+
+            entry.Button = button;
+
+            // A sibling of the strip, not a child of it. As a child, the strip
+            // sat between the button and the pointer and the close-X never got
+            // its release — the container this replaced had them as siblings
+            // for the same reason.
+            button.Depth = 11;
+            AddChild(button, "tab");
+        }
+
+        private bool IsOverTab(Vector2 mouse)
+        {
+            foreach (Tab entry in tabs)
+            {
+                if (entry.Button == null)
+                {
+                    continue;
+                }
+
+                Vector2 pos = entry.Button.GetActualXnaPosition();
+                TVVector size = entry.Button.GetSize();
+                if (mouse.X >= pos.X && mouse.X <= pos.X + size.X
+                    && mouse.Y >= pos.Y && mouse.Y <= pos.Y + size.Y)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void BeginTabDrag(Tab entry, ClickEventArgs args)
+        {
+            int index = tabs.IndexOf(entry);
+            if (index < 0 || tabStrip == null)
+            {
+                return;
+            }
+
+            Vector2 mouse = args.GlobalMousePosition.AsXna;
+
+            // A press on the close-X is not a drag. Let it through untouched:
+            // capturing here would swallow the release its own handler needs.
+            Vector2 closePos = entry.CloseX.GetActualXnaPosition();
+            TVVector closeSize = entry.CloseX.GetSize();
+            if (mouse.X >= closePos.X && mouse.X <= closePos.X + closeSize.X
+                && mouse.Y >= closePos.Y && mouse.Y <= closePos.Y + closeSize.Y)
+            {
+                return;
+            }
+
+            // Activate on PRESS, and before draggingIndex is set — its own
+            // guard is "not currently dragging", so setting that first would
+            // have this call checking a value it had just written, and a
+            // stationary click would never switch tabs. That exact bug was
+            // found and fixed once before, in the container this replaced;
+            // rewriting the activation as a release handler reintroduced it,
+            // because the capture taken below eats the release.
+            if (index != activeIndex)
+            {
+                ActivateTab(index);
+            }
+
+            draggingIndex = index;
+            previewIndex = index;
+            dragTabX = entry.Button.GetActualXnaPosition().X - tabStrip.GetActualXnaPosition().X;
+            dragGrabDx = mouse.X - entry.Button.GetActualXnaPosition().X;
+            dragMouseY = mouse.Y;
+            entry.Button.CapturePointer();
+        }
+
+        private void ContinueTabDrag(Vector2 mouse)
+        {
+            dragTabX = mouse.X - tabStrip.GetActualXnaPosition().X - dragGrabDx;
+            dragMouseY = mouse.Y;
+
+            float centre = dragTabX + (tabs[draggingIndex].Width / 2f);
+            previewIndex = Math.Clamp(
+                (int)Math.Floor(centre / Math.Max(1f, tabs[draggingIndex].Width + TabGap)),
+                0, tabs.Count - 1);
+
+            RefreshTabStrip();
+        }
+
+        /// <summary>Commits a tab drag: a reorder within the strip, or a
+        /// tear-off into its own window when released clear of it.</summary>
+        private void EndTabDrag()
+        {
+            if (draggingIndex < 0)
+            {
+                return;
+            }
+
+            float stripTop = tabStrip.GetActualXnaPosition().Y;
+            bool tornOff = dragMouseY < stripTop - TearOffThresholdPx
+                           || dragMouseY > stripTop + ModalTitleBarElement.BarHeight + TearOffThresholdPx;
+
+            int index = draggingIndex;
+            int target = previewIndex;
+            draggingIndex = -1;
+            previewIndex = -1;
+
+            if (tornOff)
+            {
+                MouseState mouse = Resources.StaticResources.InputManager.CurrentMouseState;
+                TVVector size = ElementTrait<SizeTrait>().Value();
+                int bottomInset = BottomInset;
+                Tab entry = DetachTab(index);
+
+                var modal = new ModalWindowElement(entry.Title, entry.Content,
+                    position: new TVVector(mouse.X - (size.X / 2f), mouse.Y - (ModalTitleBarElement.BarHeight / 2f)),
+                    size: size, fitToContent: false, resizable: true, closable: true,
+                    minSize: new Vector2(MinSize.X, MinSize.Y))
+                {
+                    Tabable = true,
+                    BottomInset = bottomInset,
+                };
+
+                Action<ModalWindowElement> rehost = entry.RehostCallback;
+                modal.OnCloseRequested = () =>
+                {
+                    rehost?.Invoke(null);
+                    modal.Kill();
+                };
+
+                modal.OnContentRehosted = rehost;
+                rehost?.Invoke(modal);
+                Resources.StaticResources.RootWindow.AddChild(modal, "tab-torn-off-" + Guid.NewGuid());
+                return;
+            }
+
+            if (target != index)
+            {
+                Tab reordered = tabs[index];
+                tabs.RemoveAt(index);
+                tabs.Insert(target, reordered);
+                activeIndex = target;
+            }
+
+            RefreshTabStrip();
+        }
+
+        /// <summary>Per-frame tab upkeep, called from Update.</summary>
+        private void UpdateTabs()
+        {
+            if (closeTabRequested != null)
+            {
+                Tab entry = closeTabRequested;
+                closeTabRequested = null;
+                RemoveTab(tabs.IndexOf(entry), killContent: true);
+                return;
+            }
+
+            if (draggingIndex >= 0)
+            {
+                MouseState mouse = Resources.StaticResources.InputManager.CurrentMouseState;
+                if (mouse.LeftButton == ButtonState.Released)
+                {
+                    EndTabDrag();
+                }
+                else
+                {
+                    ContinueTabDrag(new Vector2(mouse.X, mouse.Y));
+                }
+            }
+
+            if (tabs.Count > 1)
+            {
+                RefreshTabStrip();
+            }
+        }
+
+        private Tab DetachTab(int index)
+        {
+            Tab entry = tabs[index];
+            RemoveTab(index, killContent: false);
+            return entry;
+        }
+
+
         /// <summary>
         /// The window showing <paramref name="element"/> right now — its own
         /// shell, or the tab container that adopted it.
@@ -302,7 +847,7 @@ namespace GustUI.Elements
         {
             for (Element walk = element; walk != null; walk = walk.Parent)
             {
-                if (walk.Parent is TabContainerElement container && container.Activate(walk))
+                if (walk.Parent is ModalWindowElement holder && holder.ShowTab(walk))
                 {
                     return true;
                 }
@@ -540,7 +1085,19 @@ namespace GustUI.Elements
         /// the shared tab container — taking every other panel tabbed with
         /// it down too. Panels call this on their CURRENT shell (whatever
         /// OnContentRehosted last handed them).</summary>
-        public virtual void CloseContent(Element content) => Close();
+        public virtual void CloseContent(Element content)
+        {
+            for (int i = 0; i < tabs.Count; i++)
+            {
+                if (ReferenceEquals(tabs[i].Content, content))
+                {
+                    RemoveTab(i, killContent: true);
+                    return;
+                }
+            }
+
+            Close();
+        }
 
         /// <summary>Closes whatever window CURRENTLY hosts <paramref name="content"/>
         /// — found by walking its parent chain to the nearest ModalWindowElement
@@ -643,6 +1200,60 @@ namespace GustUI.Elements
         /// current mouse position each frame while <see cref="Element.BeingDragged"/>
         /// to decide whether this press has become a real drag yet.</summary>
         private Vector2? dockPressMouse;
+
+        /// <summary>
+        /// One hosted view. Every window has at least one — its own body — so
+        /// "a window" and "a tabbed window" are the same object in two states
+        /// rather than two classes.
+        ///
+        /// They used to be two: a TabContainerElement that EXTENDED the thing
+        /// it should have BEEN, passing a 10x10 transparent placeholder as its
+        /// own content and managing tabs beside the machinery it inherited.
+        /// Merging then had to build a container and destroy both shells, which
+        /// is why every view needed telling that its content had been rehosted.
+        /// A window now keeps its identity for its whole life.
+        /// </summary>
+        public sealed class Tab
+        {
+            public string Title;
+            public Element Content;
+
+            /// <summary>Told when this tab's content moves to another window or
+            /// is closed — see <see cref="OnContentRehosted"/>.</summary>
+            internal Action<ModalWindowElement> RehostCallback;
+
+            internal FilledRectangleElement Button;
+            internal TextElement Label;
+            internal FilledRectangleElement Underline;
+            internal FilledRectangleElement CloseX;
+            internal float Width;
+        }
+
+        private readonly List<Tab> tabs = new List<Tab>();
+        private int activeIndex;
+        private FilledRectangleElement tabStrip;
+        private Tab closeTabRequested;
+
+        // Reorder / tear-off drag, carried over from the old container.
+        private int draggingIndex = -1;
+        private float dragGrabDx;
+        private float dragTabX;
+        private float dragMouseY;
+        private int previewIndex = -1;
+
+        private const int TabPaddingX = 12;
+        private const int TabCloseSize = 16;
+        private const int TabGap = 2;
+        private const int MinTabWidth = 80;
+        private const float TearOffThresholdPx = 26f;
+
+        /// <summary>Grab area kept clear beside the window buttons, so a tabbed
+        /// window can still be moved and docked.</summary>
+        private const int TabDragGap = 44;
+
+        /// <summary>How many views this window hosts. One is an ordinary
+        /// window; the strip only appears at two or more.</summary>
+        public int TabCount => tabs.Count;
 
         private Element content;
         public ModalWindowElement()
@@ -785,6 +1396,7 @@ namespace GustUI.Elements
             }
 
             this.content = body;
+            tabs.Add(new Tab { Title = title, Content = body });
 
             this.AddChild(this.content, "content");
             content.Set<PositionTrait>(new TVVector(0, 0));
@@ -1154,6 +1766,7 @@ namespace GustUI.Elements
 
         public override void Update(Element parent = null)
         {
+            UpdateTabs();
             base.Update(parent);
 
             // Keeps the toolbar/menu wrap decision live across a resize —
@@ -1213,7 +1826,7 @@ namespace GustUI.Elements
             {
                 ModalWindowElement target = pendingMergeTarget;
                 pendingMergeTarget = null;
-                TabContainerElement.Merge(target, this);
+                target.AddTab(this);
                 return;
             }
 
@@ -1611,7 +2224,7 @@ namespace GustUI.Elements
                 ModalWindowElement occupant = TabableOccupant(side);
                 if (occupant != null)
                 {
-                    TabContainerElement.Merge(occupant, this);
+                    occupant.AddTab(this);
                     return;
                 }
             }

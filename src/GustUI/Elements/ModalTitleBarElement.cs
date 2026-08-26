@@ -123,7 +123,20 @@ namespace GustUI.Elements
         /// sizeButton from, so the two stay in sync as closable/
         /// hasMaximimizeButton vary per host instead of each hardcoding
         /// BarHeight/80.</summary>
-        private float RightChromeWidth => (closable ? BarHeight : 0) + (hasMaximimizeButton ? BarHeight : 0);
+        /// <summary>
+        /// Width at the LEFT of the bar that something else owns — the tab
+        /// strip. The drag bar starts after it.
+        ///
+        /// Without this the bar underneath the tabs still spanned the whole
+        /// width, and since GustUI gives a press to EVERY element containing
+        /// the point, the drag bar captured the pointer and a tab close never
+        /// received its release. The container this replaced dodged it by
+        /// switching its title bar off entirely, which is also why it had
+        /// nowhere for the window buttons to live.
+        /// </summary>
+        internal float LeftReserved { get; set; }
+
+        internal float RightChromeWidth => (closable ? BarHeight : 0) + (hasMaximimizeButton ? BarHeight : 0);
 
         public ModalTitleBarElement()
         {
@@ -281,8 +294,8 @@ namespace GustUI.Elements
                 }));
             }
 
-            dragBarElement.Set<SizeTrait>(new TVVector(size.X - RightChromeWidth, size.Y));
-            dragBarElement.Set<PositionTrait>(new TVVector(0, 0));
+            dragBarElement.Set<SizeTrait>(new TVVector(System.Math.Max(0f, size.X - RightChromeWidth - LeftReserved), size.Y));
+            dragBarElement.Set<PositionTrait>(new TVVector(LeftReserved, 0));
             dragBarElement.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
             dragBarElement.Set<TextTrait>(new TVText(title));
             dragBarElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFontSecondary);
@@ -355,7 +368,8 @@ namespace GustUI.Elements
                 sizeButton.Set<TextTrait>(((ModalWindowElement)Parent).isFullScreen ? Resources.StaticResources.Theme.Icons.MinimizeIcon.ToTextTrait() : Resources.StaticResources.Theme.Icons.MaximizeIcon.ToTextTrait());
             }
 
-            dragBarElement.Set<SizeTrait>(new TVVector(size.X - RightChromeWidth, BarHeight));
+            dragBarElement.Set<SizeTrait>(new TVVector(System.Math.Max(0f, size.X - RightChromeWidth - LeftReserved), BarHeight));
+            dragBarElement.Set<PositionTrait>(new TVVector(LeftReserved, 0));
         }
 
 
