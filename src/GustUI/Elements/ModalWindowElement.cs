@@ -877,6 +877,40 @@ namespace GustUI.Elements
             if (tabs.Count > 1)
             {
                 RefreshTabStrip();
+                SizeAllTabs();
+            }
+        }
+
+        /// <summary>
+        /// Gives every tab the client area, not just the one on screen.
+        ///
+        /// An inactive tab is detached from the tree, so the per-frame layout
+        /// never reaches it: resize a window and only the tab you were looking
+        /// at knew about it — the others came back the size they were when you
+        /// last left them. A view lays itself out from its own SizeTrait, so
+        /// setting that is enough even while it is detached.
+        /// </summary>
+        private void SizeAllTabs()
+        {
+            if (FitModalToContent || contentScrolls)
+            {
+                return;
+            }
+
+            TVVector size = ElementTrait<SizeTrait>().Value();
+            var box = new TVVector(size.X, Math.Max(0f, size.Y - ContentTop));
+
+            foreach (Tab entry in tabs)
+            {
+                if (entry.Content == null || ReferenceEquals(entry.Content, content))
+                {
+                    continue;
+                }
+
+                // SIZE only. Position is how a hidden tab is kept off screen,
+                // so writing it here drags the inactive tab back into view and
+                // draws two tabs at once.
+                entry.Content.Set<SizeTrait>(box);
             }
         }
 
