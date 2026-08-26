@@ -21,7 +21,10 @@ namespace GustUI.Elements
     /// </summary>
     public class TabContainerElement : ModalWindowElement
     {
-        public const int TabStripHeight = 32;
+        /// <summary>The strip IS this window's title bar, so it is exactly as
+        /// tall as one. Derived rather than restated so the two cannot drift
+        /// into looking like different kinds of window.</summary>
+        public const int TabStripHeight = ModalTitleBarElement.BarHeight;
         private const int TabPaddingX = 12;
         private const int TabCloseSize = 16;
         private const int TabGap = 2;

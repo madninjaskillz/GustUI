@@ -23,7 +23,18 @@ namespace GustUI.Elements
     public class ModalTitleBarElement : FilledRectangleElement
     {
         /// <summary>The chrome's fixed height (Update re-asserts it).</summary>
-        public const int BarHeight = 40;
+        /// <summary>
+        /// Title bar height. Everything on the bar derives from it — the close
+        /// and maximise squares, the drag bar, the accent underline — so this
+        /// one number sizes the whole thing.
+        ///
+        /// 30 rather than 40 (2026-08-26): the app stacks a title bar, a menu
+        /// row and often a tab strip before any content, and at 40 that chrome
+        /// was taking a visible bite out of every panel. The title also came
+        /// down a step, from subtitle to secondary, because type sized for the
+        /// taller bar does not fit this one.
+        /// </summary>
+        public const int BarHeight = 30;
 
         // A flat single-shade bar at the same brightness as the content
         // below it reads as "not there" (the "modal title bars have become
@@ -160,7 +171,7 @@ namespace GustUI.Elements
 
             Set<BackgroundFillTrait>(new TVFillSimpleGradient(BarFillTop, BarFillBottom, Direction.Vertically));
             Set<BorderSizeTrait>(new TVInt(0));
-            Set<FontTrait>(Resources.StaticResources.Theme.UiFontSubtitle);
+            Set<FontTrait>(Resources.StaticResources.Theme.UiFontSecondary);
             Set<PositionTrait>(position ?? new TVVector(0, 0));
             Set<SizeTrait>(size ?? new TVVector(0, 0));
 
@@ -257,7 +268,7 @@ namespace GustUI.Elements
             dragBarElement.Set<PositionTrait>(new TVVector(0, 0));
             dragBarElement.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
             dragBarElement.Set<TextTrait>(new TVText(title));
-            dragBarElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFontSubtitle);
+            dragBarElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFontSecondary);
             dragBarElement.Set<ForegroundColorTrait>(new TVColor(TitleText));
 
             // Drag-to-move is a ModalWindowElement behavior; other hosts
