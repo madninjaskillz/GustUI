@@ -25,10 +25,27 @@ namespace GustUI.Elements
         private const int TabPaddingX = 12;
         private const int TabCloseSize = 16;
         private const int TabGap = 2;
-        private const int OverallCloseWidth = 32;
+
+        /// <summary>A tab never gets narrower than this, even when sharing the
+        /// strip with many others: past it the title is gone and only the close
+        /// is left, which is a row of X's, not a tab strip.</summary>
+        private const int MinTabWidth = 80;
 
         private static Color StripFill => Resources.StaticResources.Theme.SurfaceHeader;
-        private static Color ActiveTabFill => Resources.StaticResources.Theme.SurfaceRaised;
+
+        // The active tab IS this window's title bar, so it is painted with the
+        // title bar's own gradient and accent underline (ModalTitleBarElement's
+        // BarFillTop/BarFillBottom/AccentUnderline). A tab strip whose active
+        // tab looked like a button left the window with no visible title
+        // treatment at all — nothing on screen said which window had focus.
+        private static Color ActiveTabTop
+            => Color.Lerp(Resources.StaticResources.Theme.SurfaceRaised, Resources.StaticResources.Theme.AccentSelection, 0.18f);
+
+        private static Color ActiveTabBottom
+            => Color.Lerp(Resources.StaticResources.Theme.SurfaceHeader, Resources.StaticResources.Theme.AccentSelection, 0.05f);
+
+        private static Color TabAccent => Resources.StaticResources.Theme.AccentSelection;
+
         private static Color InactiveTabFill => Resources.StaticResources.Theme.SurfaceHeader;
         private static Color TabTextColor => Resources.StaticResources.Theme.BodyText;
         private static Color CloseHoverFill => Resources.StaticResources.Theme.AccentMuteOn;
@@ -71,12 +88,19 @@ namespace GustUI.Elements
             /// (and OnCloseRequested) onto that replacement, so the chain
             /// keeps working no matter how many more times this happens.</summary>
             public System.Action<ModalWindowElement> OwnerRehostCallback;
+
+            /// <summary>The accent rule under the active tab — the same one a
+            /// window's own title bar draws. Zero-width while inactive.</summary>
+            public FilledRectangleElement Underline;
+
+            /// <summary>Kept so the title can be re-ellipsised when the tabs
+            /// resize; they share the strip's width, so it changes.</summary>
+            public TextElement Label;
         }
 
         private readonly List<TabEntry> tabs = new List<TabEntry>();
         private int activeIndex;
         private readonly FilledRectangleElement tabStrip;
-        private readonly FilledRectangleElement overallClose;
 
         // ---- tab reorder / tear-off drag state (mirrors StackPanelView's
         // own proven chain-entry reorder-drag shape: an anchor-based grab
@@ -156,45 +180,10 @@ namespace GustUI.Elements
                 HandleTitleBarRelease(args);
             }));
 
-            overallClose = new FilledRectangleElement(0, 0, OverallCloseWidth, TabStripHeight, new TVFillSolidColor(Color.Transparent));
-            TextElement closeGlyph = overallClose.AddChildElement<TextElement>();
-            closeGlyph.Set<PositionTrait>(new TVVector(0, 0));
-            closeGlyph.Set<SizeTrait>(new TVVector(OverallCloseWidth, TabStripHeight));
-            closeGlyph.Set<FontTrait>(Resources.StaticResources.Theme.AltSymbolFont);
-            closeGlyph.Set<ForegroundColorTrait>(new TVColor(TabTextColor));
-            closeGlyph.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment { Alignment = HorizontalAlignment.Center });
-            closeGlyph.Set<VerticalAlignmentTrait>(new TVVerticalAlignment { Alignment = VerticalAlignment.Center });
-            closeGlyph.Set<TextTrait>(Resources.StaticResources.Theme.Icons.CloseIcon.ToTextTrait());
-            overallClose.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((_) => closeAllRequested = true));
-            // AddTrait, not Set, for OnEnterTrait specifically — found live
-            // (2026-08-17, the user's own first real tab-merge drag):
-            // RectangleElement declares OnExitTrait but NOT OnEnterTrait in
-            // its own [ElementTraits(...)] set, so a plain FilledRectangleElement
-            // (this and `close` in BuildTabButton below — unlike
-            // BasicButtonElement, which declares both) throws
-            // MissingTraitException the first time Set<OnEnterTrait> runs.
-            // Never caught until now because a real tab-merge drag — the
-            // only path that ever calls this constructor — can't be
-            // scripted through the control API, only driven by hand.
-            //
-            // Hover-highlight AND the tooltip combined into these same two
-            // handlers, rather than a separate TooltipElement.Attach call
-            // afterward — Attach's own doc comment says outright that it
-            // REPLACES any existing enter/exit handlers on its target, which
-            // would have silently thrown away the highlight below (never
-            // actually reached before this fix; the constructor always
-            // threw first).
-            overallClose.AddTrait<OnEnterTrait>().Set(new TVEvent<ClickEventArgs>((args) =>
-            {
-                overallClose.Set<BackgroundFillTrait>(new TVFillSolidColor(CloseHoverFill));
-                TooltipElement.Show("Close all tabs", args.GlobalMousePosition.AsXna);
-            }));
-            overallClose.Set<OnExitTrait>(new TVEvent<ClickEventArgs>((_) =>
-            {
-                overallClose.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
-                TooltipElement.Hide();
-            }));
-            AddChildElement(overallClose);
+            // No close-all button. The top row is the tabs, the way a window's
+            // top row is its title: every tab already carries its own close,
+            // and closing the last one dissolves the container anyway, so a
+            // second close meant one row doing two jobs.
         }
 
         /// <summary>Merges two tabable windows: if <paramref name="target"/>
@@ -494,10 +483,19 @@ namespace GustUI.Elements
             label.Set<FontTrait>(Resources.StaticResources.Theme.UiFontSmall);
             label.Set<ForegroundColorTrait>(new TVColor(TabTextColor));
             label.Set<VerticalAlignmentTrait>(new TVVerticalAlignment { Alignment = VerticalAlignment.Center });
+            label.WordWrap = false;
             label.Set<TextTrait>(new TVText(entry.Title));
+            entry.Label = label;
 
+            // A starting width only; ReflowTabStrip shares the strip out and
+            // overwrites this before anything is drawn.
             float textWidth = Resources.StaticResources.FontManager.MeasureSdfText(Resources.StaticResources.Theme.UiFontSmall, entry.Title).X;
             entry.Width = TabPaddingX + textWidth + TabPaddingX + TabCloseSize + 6;
+
+            entry.Underline = new FilledRectangleElement(0, TabStripHeight - 2, 0, 2,
+                new TVFillSolidColor(TabAccent));
+
+            button.AddChild(entry.Underline, "accent-underline");
 
             var close = new FilledRectangleElement(0, 0, TabCloseSize, TabCloseSize, new TVFillSolidColor(Color.Transparent));
             TextElement closeGlyph = close.AddChildElement<TextElement>();
@@ -532,18 +530,12 @@ namespace GustUI.Elements
             }
         }
 
-        /// <summary>Whether <paramref name="mouse"/> falls within the
-        /// overall-close button or any tab's own button (which includes its
-        /// close-X — a child positioned within the button's bounds) — see
-        /// the constructor's own doc comment on tabStrip's press/release
-        /// wiring for why this matters.</summary>
+        /// <summary>Whether <paramref name="mouse"/> falls within any tab's own
+        /// button (which includes its close-X — a child positioned within the
+        /// button's bounds) — see the constructor's own doc comment on
+        /// tabStrip's press/release wiring for why this matters.</summary>
         private bool IsOverInteractiveStripElement(Vector2 mouse)
         {
-            if (Contains(overallClose, mouse))
-            {
-                return true;
-            }
-
             foreach (TabEntry entry in tabs)
             {
                 if (Contains(entry.Button, mouse))
@@ -786,15 +778,26 @@ namespace GustUI.Elements
         {
             TVVector size = ElementTrait<SizeTrait>().Value();
             tabStrip.Set<SizeTrait>(new TVVector(size.X, TabStripHeight));
-            overallClose.Set<PositionTrait>(new TVVector(size.X - OverallCloseWidth, 0));
 
             bool active = ModalWindowElement.IsFrontmostWindow(this);
             tabStrip.Set<BackgroundFillTrait>(new TVFillSolidColor(active ? StripFill : Desaturate(StripFill, InactiveDesaturation)));
+
+            // Tabs SHARE the width rather than each taking what its title
+            // needs. The strip is this window's title bar, and a title bar that
+            // stops two thirds of the way across, with bare strip after it,
+            // does not read as one — it reads as buttons sitting on a surface.
+            // Equal shares because they are peers; a long title ellipsises
+            // rather than earning more room than its neighbours.
+            float shared = tabs.Count > 0
+                ? Math.Max(MinTabWidth, (size.X - (TabGap * (tabs.Count - 1))) / tabs.Count)
+                : 0f;
 
             float x = 0f;
             for (int i = 0; i < tabs.Count; i++)
             {
                 TabEntry entry = tabs[i];
+                entry.Width = shared;
+
                 bool isDragged = i == draggingIndex;
                 float slotX;
                 if (isDragged)
@@ -808,10 +811,29 @@ namespace GustUI.Elements
                     slotX = x;
                 }
 
-                Color tabFill = i == activeIndex ? ActiveTabFill : InactiveTabFill;
                 entry.Button.Set<PositionTrait>(new TVVector(slotX, 0));
                 entry.Button.Set<SizeTrait>(new TVVector(entry.Width, TabStripHeight));
-                entry.Button.Set<BackgroundFillTrait>(new TVFillSolidColor(active ? tabFill : Desaturate(tabFill, InactiveDesaturation)));
+
+                bool isActive = i == activeIndex;
+                entry.Button.Set<BackgroundFillTrait>(isActive
+                    ? new TVFillSimpleGradient(
+                        active ? ActiveTabTop : Desaturate(ActiveTabTop, InactiveDesaturation),
+                        active ? ActiveTabBottom : Desaturate(ActiveTabBottom, InactiveDesaturation),
+                        Direction.Vertically)
+                    : new TVFillSolidColor(active ? InactiveTabFill : Desaturate(InactiveTabFill, InactiveDesaturation)));
+
+                entry.Underline.Set<PositionTrait>(new TVVector(0, TabStripHeight - 2));
+                entry.Underline.Set<SizeTrait>(new TVVector(isActive ? entry.Width : 0f, 2));
+                entry.Underline.Set<BackgroundFillTrait>(new TVFillSolidColor(
+                    active ? TabAccent : Desaturate(TabAccent, InactiveDesaturation)));
+
+                entry.Label.Set<SizeTrait>(new TVVector(
+                    Math.Max(10f, entry.Width - TabPaddingX - TabCloseSize - 10), TabStripHeight));
+
+                entry.Label.Set<TextTrait>(new TVText(TextElement.Ellipsise(
+                    entry.Title, Math.Max(10f, entry.Width - TabPaddingX - TabCloseSize - 10),
+                    Resources.StaticResources.Theme.UiFontSmall)));
+
                 entry.CloseX.Set<PositionTrait>(new TVVector(entry.Width - TabCloseSize - 6, (TabStripHeight - TabCloseSize) / 2f));
 
                 x += entry.Width + TabGap;
