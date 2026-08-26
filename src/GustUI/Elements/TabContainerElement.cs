@@ -216,7 +216,14 @@ namespace GustUI.Elements
         /// preserve here — by the time a real drag reaches this point it has
         /// always already been undocked itself (HandleTitleBarPress on
         /// press, or the very drag that got it here).</summary>
-        internal static void Merge(ModalWindowElement target, ModalWindowElement dragged)
+        /// <remarks>
+        /// Public (2026-08-26) because an app can want this WITHOUT the drag:
+        /// "open the editor for this panel as a tab beside it" is the same
+        /// operation a user performs by dropping one title bar on another, and
+        /// making the app rebuild it out of AddTab and a hand-made container
+        /// would be a second implementation of the docked-side handling above.
+        /// </remarks>
+        public static void Merge(ModalWindowElement target, ModalWindowElement dragged)
         {
             if (target is TabContainerElement existing)
             {
