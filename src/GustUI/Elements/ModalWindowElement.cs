@@ -1,4 +1,4 @@
-﻿using GustUI.Attributes;
+using GustUI.Attributes;
 using GustUI.Extensions;
 using GustUI.Managers;
 using GustUI.Models;
@@ -150,8 +150,9 @@ namespace GustUI.Elements
         /// and re-center if the window resizes). Defaults to true UNLESS an
         /// explicit position was passed at construction (treated as an
         /// intentional override). Turns off permanently the moment the user
-        /// drags the modal by its title bar — their placement wins from
-        /// then on, including across a later resize.</summary>
+        /// drags the modal by its title bar OR pulls one of its own resize
+        /// handles — their placement wins from then on, including across a
+        /// later window resize.</summary>
         public bool AutoCenter { get; set; } = true;
 
         /// <summary>Whether this modal continuously fills whatever space
@@ -2116,6 +2117,24 @@ namespace GustUI.Elements
             {
                 this.MoveToFront();
                 justSpawned = false;
+            }
+
+            // So is a RESIZE, and for the same reason it matters more.
+            // Auto-centering recomputes position FROM size every frame, so
+            // pulling an edge moved the modal out from under the cursor: the
+            // window appeared to grow from its middle rather than from the edge
+            // being dragged, and the edge never went where it was put. Moving
+            // the modal first made resizing behave, which is the tell —
+            // dragging the title bar already ended auto-centering, and pulling
+            // an edge is the same act of taking manual control.
+            //
+            // The modal's OWN handles only. IsResizing also covers the dock
+            // splitter, and a docked panel is placed by the dock rather than
+            // centred, so a boundary drag there is not the user overriding
+            // anything.
+            if (resizeHandles != null && resizeHandles.IsActive)
+            {
+                AutoCenter = false;
             }
 
             // A drag is the user taking manual control — auto-centering
