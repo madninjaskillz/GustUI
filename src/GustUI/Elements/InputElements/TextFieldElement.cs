@@ -75,6 +75,19 @@ namespace GustUI.Elements.InputElements
         }
 
         /// <summary>Child text size follows the field.</summary>
+        /// <summary>
+        /// The face the field draws its text in. Defaults to the theme's BODY
+        /// font, which is right for a dialog and too big for a dense form: an
+        /// inspector row gave its value the body face beside a small-face
+        /// label, so the value both outsized its own caption and overflowed the
+        /// row it was given, clipped along the bottom of every glyph.
+        /// </summary>
+        public TVFont Font
+        {
+            get => textElement.ElementTrait<FontTrait>().Value();
+            set => textElement.Set<FontTrait>(value);
+        }
+
         public void FitText()
         {
             TVVector size = this.GetSize();
