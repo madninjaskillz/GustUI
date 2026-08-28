@@ -437,6 +437,20 @@ namespace GustUI.Rendering
         /// picks text over nonText.
         /// </summary>
         public void AppendGlyphQuad(Texture2D atlas, Vector2 destPos, Vector2 destSize, Rectangle srcRect, Color color, float smoothing, float borderWidth, Color borderColor, Vector4 clipRect)
+            => AppendGlyphQuad(atlas, destPos, destSize, srcRect, color, smoothing, borderWidth, borderColor, clipRect, 0f, Vector2.Zero);
+
+        /// <summary>
+        /// A glyph quad, optionally ROTATED about a pivot.
+        ///
+        /// The four corners are rotated here rather than the string being
+        /// re-laid-out at an angle: a caller lays a line out along +X as it
+        /// always has and hands the same pivot to every glyph of it, so the
+        /// line comes out rotated as a whole with its spacing and kerning
+        /// untouched. The clip rectangle stays axis-aligned, because it is a
+        /// scissor and always was — a rotated label needs a box big enough to
+        /// hold it, which is the caller's business.
+        /// </summary>
+        public void AppendGlyphQuad(Texture2D atlas, Vector2 destPos, Vector2 destSize, Rectangle srcRect, Color color, float smoothing, float borderWidth, Color borderColor, Vector4 clipRect, float rotation, Vector2 pivot)
         {
             if (destSize.X <= 0f || destSize.Y <= 0f)
             {
@@ -456,14 +470,38 @@ namespace GustUI.Rendering
             float u1 = (float)(srcRect.X + srcRect.Width) / atlas.Width;
             float v1 = (float)(srcRect.Y + srcRect.Height) / atlas.Height;
 
+            Vector2 topLeft = destPos;
+            var topRight = new Vector2(destPos.X + destSize.X, destPos.Y);
+            var bottomRight = new Vector2(destPos.X + destSize.X, destPos.Y + destSize.Y);
+            var bottomLeft = new Vector2(destPos.X, destPos.Y + destSize.Y);
+
+            if (rotation != 0f)
+            {
+                float sin = (float)System.Math.Sin(rotation);
+                float cos = (float)System.Math.Cos(rotation);
+                topLeft = Rotate(topLeft, pivot, sin, cos);
+                topRight = Rotate(topRight, pivot, sin, cos);
+                bottomRight = Rotate(bottomRight, pivot, sin, cos);
+                bottomLeft = Rotate(bottomLeft, pivot, sin, cos);
+            }
+
             // Segment-relative — see CloseSegment's doc for why.
             int vBase = acc.VertexCount - acc.CurrentSegmentVertexStart;
-            acc.Vertices[acc.VertexCount++] = new GeometryVertex(destPos, color, new Vector2(u0, v0), clipRect);
-            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destPos.X + destSize.X, destPos.Y), color, new Vector2(u1, v0), clipRect);
-            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destPos.X + destSize.X, destPos.Y + destSize.Y), color, new Vector2(u1, v1), clipRect);
-            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destPos.X, destPos.Y + destSize.Y), color, new Vector2(u0, v1), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(topLeft, color, new Vector2(u0, v0), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(topRight, color, new Vector2(u1, v0), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(bottomRight, color, new Vector2(u1, v1), clipRect);
+            acc.Vertices[acc.VertexCount++] = new GeometryVertex(bottomLeft, color, new Vector2(u0, v1), clipRect);
 
             AppendQuadIndices(acc, vBase);
+        }
+
+        private static Vector2 Rotate(Vector2 point, Vector2 pivot, float sin, float cos)
+        {
+            float dx = point.X - pivot.X;
+            float dy = point.Y - pivot.Y;
+            return new Vector2(
+                pivot.X + (dx * cos) - (dy * sin),
+                pivot.Y + (dx * sin) + (dy * cos));
         }
 
         /// <summary>

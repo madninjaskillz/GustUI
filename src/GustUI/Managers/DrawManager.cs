@@ -900,6 +900,18 @@ namespace GustUI.Managers
         /// wrapping the caller in its own ClipChildren container.
         /// </summary>
         public void DrawSdfString(SdfFont sdfFont, string text, Vector2 position, float pixelSize, Color color, int borderSize, Color? borderColor, Rectangle? clipRectOverride)
+            => DrawSdfString(sdfFont, text, position, pixelSize, color, borderSize, borderColor, clipRectOverride, 0f);
+
+        /// <summary>
+        /// Same again, ROTATED about <paramref name="position"/>.
+        ///
+        /// The line is laid out along +X exactly as it always is and every
+        /// glyph of it is then rotated about the string's own origin, so
+        /// spacing and kerning are untouched and only the result is turned.
+        /// −π/2 gives a label reading bottom-to-top, which is what a narrow
+        /// vertical strip down the left of a panel wants.
+        /// </summary>
+        public void DrawSdfString(SdfFont sdfFont, string text, Vector2 position, float pixelSize, Color color, int borderSize, Color? borderColor, Rectangle? clipRectOverride, float rotation)
         {
             if (string.IsNullOrEmpty(text) || sdfFont == null || pixelSize <= 0)
             {
@@ -977,7 +989,7 @@ namespace GustUI.Managers
                     Vector2 destPos = new Vector2(cursorX + g.XOffset * glyphScale, position.Y + g.YOffset * glyphScale);
                     Vector2 destSize = new Vector2(g.Width * glyphScale, g.Height * glyphScale);
                     Rectangle src = new Rectangle(g.X, g.Y, g.Width, g.Height);
-                    GeometryBatch.AppendGlyphQuad(sdfFont.Atlas, destPos, destSize, src, color, smoothing, borderWidth, effectiveBorderColor, clipRect);
+                    GeometryBatch.AppendGlyphQuad(sdfFont.Atlas, destPos, destSize, src, color, smoothing, borderWidth, effectiveBorderColor, clipRect, rotation, position);
                 }
 
                 cursorX += g.XAdvance * glyphScale;

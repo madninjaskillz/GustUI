@@ -260,6 +260,21 @@ namespace GustUI.Elements
 
             return wrapped.ToString();
         }
+        /// <summary>
+        /// Turns the drawn text about its own origin, in radians. 0 is normal.
+        ///
+        /// −π/2 reads bottom-to-top, which is what a narrow vertical strip down
+        /// the left of a panel wants — a name that costs width instead of the
+        /// height the thing it names needs.
+        ///
+        /// It rotates the DRAWING, not the layout: the element still measures
+        /// and clips as the horizontal string it is, so a rotated label needs a
+        /// box big enough to hold its turned extent. Making the measurement
+        /// rotate too would mean every wrap, alignment and size-fit path
+        /// growing an angle, for a case that is always a short single line.
+        /// </summary>
+        public float Rotation { get; set; }
+
         public override void Draw()
         {
             using (GustUI.Managers.Telemetry.Scope("Draw.Text"))
@@ -323,7 +338,7 @@ namespace GustUI.Elements
                         }
 
                         Resources.StaticResources.DrawManager.DrawSdfString(
-                            sdfFont, line, p + offsetVector, fontValue.Size, foreground, border, fontValue.BorderColor, ClipRectOverride);
+                            sdfFont, line, p + offsetVector, fontValue.Size, foreground, border, fontValue.BorderColor, ClipRectOverride, Rotation);
                         p.Y += lineSize.Y;
                         p.X = pr.X;
                         ySize = ySize+  (int)lineSize.Y;

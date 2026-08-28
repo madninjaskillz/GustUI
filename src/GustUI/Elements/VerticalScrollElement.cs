@@ -20,6 +20,18 @@ namespace GustUI.Elements
         /// <summary>Content pixels scrolled per wheel notch (120 raw delta).</summary>
         public float WheelStep { get; set; } = 48f;
 
+        /// <summary>
+        /// How wide the scrollbar is, and therefore how much of the right edge
+        /// content must leave clear.
+        ///
+        /// The bar is drawn OVER the content rather than beside it, so a child
+        /// laid out to the full width loses its last twelve pixels — which on a
+        /// bordered box reads as the right edge simply missing. Named here
+        /// because the answer belongs to the scroll element; a caller guessing
+        /// 12 is a caller that gets it wrong the day this changes.
+        /// </summary>
+        public const float ScrollbarWidth = 12f;
+
         /// <summary>Current scroll offset in content pixels, clamped to
         /// [0, max]. Setting it moves the viewport programmatically (e.g.
         /// "scroll to top" when repopulating) without going through the
@@ -69,8 +81,8 @@ namespace GustUI.Elements
         public override void Update(Element parent = null)
         {
             var thisSize = this.GetSize().AsXna;
-            scrollBar.Set<PositionTrait>(new TVVector(thisSize.X - 12, 0));
-            scrollBar.Set<SizeTrait>(new TVVector(12, thisSize.Y));
+            scrollBar.Set<PositionTrait>(new TVVector(thisSize.X - ScrollbarWidth, 0));
+            scrollBar.Set<SizeTrait>(new TVVector(ScrollbarWidth, thisSize.Y));
             scrollBar.ContentSize = container.GetSize().Y;
             scrollBar.ViewportSize = thisSize.Y;
             base.Update(parent);

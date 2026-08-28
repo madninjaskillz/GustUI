@@ -53,6 +53,47 @@ namespace GustUI.Managers
         private KeyboardState previousKeyboardState;
         private int previousScrollWheelValue;
 
+        // ---- key auto-repeat ----------------------------------------------
+        // A HELD key keeps firing at the focused element after an initial
+        // delay, which every OS text field does and which nothing here did:
+        // Update only ever dispatched the press EDGE, so deleting a mistyped
+        // word meant tapping backspace once per character and there was no way
+        // at all to run the caret along a line. Only the typing path repeats -
+        // keyboard SHORTCUT hooks stay edge-only, because a held Ctrl+Z firing
+        // 30 times a second is a different thing entirely.
+        private readonly System.Diagnostics.Stopwatch keyClock = System.Diagnostics.Stopwatch.StartNew();
+        private Keys repeatKey = Keys.None;
+        private Element repeatFocus;
+        private double repeatNextSeconds;
+
+        /// <summary>How long a key must be held before it starts repeating.</summary>
+        public double KeyRepeatDelaySeconds { get; set; } = 0.4;
+
+        /// <summary>Gap between repeats once repeating has started. Capped in
+        /// practice by the frame rate - Update dispatches at most one repeat
+        /// per frame, so a stalled frame can never dump a burst of backlogged
+        /// keystrokes into a field.</summary>
+        public double KeyRepeatIntervalSeconds = 0.035;
+
+        // ---- multi-click counting ------------------------------------------
+        // Presses landing in the same spot, on the same element, in quick
+        // succession are a double/triple click; the count travels on
+        // ClickEventArgs.ClickCount and also fires OnDoubleClickTrait, which
+        // until now was a trait the toolkit declared and never dispatched.
+        private double lastPressSeconds = double.NegativeInfinity;
+        private Point lastPressPosition;
+        private Element lastPressElement;
+        private int pressRunCount;
+
+        /// <summary>Longest gap between two presses that still counts as one
+        /// multi-click run (Windows' own default).</summary>
+        public double MultiClickSeconds { get; set; } = 0.5;
+
+        /// <summary>How far a press may land from the one before it and still
+        /// continue the run - a double click is two presses in the same PLACE,
+        /// not two presses that happen to be close in time.</summary>
+        public int MultiClickSlopPixels { get; set; } = 4;
+
         /// <summary>Resyncs the scroll-delta baseline to <paramref name="value"/>
         /// WITHOUT firing an OnScroll/OnScrollWheelChanged event — for a
         /// caller that just drove one or more synthetic scroll frames (e.g.
@@ -141,18 +182,7 @@ namespace GustUI.Managers
         /// <summary>Drops keyboard focus (e.g. when a dialog holding a text
         /// field closes — a focused element would keep suppressing shortcut
         /// hooks forever otherwise).</summary>
-        public void ClearFocus()
-        {
-            if (CurrentlyFocused != null)
-            {
-                if (CurrentlyFocused.HasTrait<OnUnfocused>())
-                {
-                    CurrentlyFocused.ElementTrait<OnUnfocused>().Value().TriggerAction?.Invoke(new TVEventArgs());
-                }
-
-                CurrentlyFocused = null;
-            }
-        }
+        public void ClearFocus() => SetFocus(null);
 
         public void ReleasePointer(Element element)
         {
@@ -243,6 +273,145 @@ namespace GustUI.Managers
                     return Keys.LeftAlt;
                 default:
                     return Keys.None;
+            }
+        }
+
+        /// <summary>
+        /// Whether holding <paramref name="key"/> down should keep firing it
+        /// at the focused element.
+        ///
+        /// Everything a text field treats as EDITING repeats - characters,
+        /// backspace/delete, the caret keys. What must not is anything whose
+        /// handler is a one-shot decision: Enter submits a dialog, Escape
+        /// closes one, Tab moves focus, and a key resting on any of those for
+        /// half a second should do it once, not thirty times a second.
+        /// Modifier keys are held BY DEFINITION and carry no keystroke of
+        /// their own.
+        /// </summary>
+        private static bool CanAutoRepeat(Keys key)
+        {
+            switch (key)
+            {
+                case Keys.Enter:
+                case Keys.Escape:
+                case Keys.Tab:
+                case Keys.LeftShift:
+                case Keys.RightShift:
+                case Keys.LeftControl:
+                case Keys.RightControl:
+                case Keys.LeftAlt:
+                case Keys.RightAlt:
+                case Keys.LeftWindows:
+                case Keys.RightWindows:
+                case Keys.CapsLock:
+                case Keys.NumLock:
+                case Keys.Scroll:
+                case Keys.None:
+                    return false;
+                default:
+                    return true;
+            }
+        }
+
+        /// <summary>
+        /// Gives keyboard focus to <paramref name="element"/> (null to drop
+        /// it), firing the OnUnfocused/OnFocused pair the mouse path fires.
+        /// The single place focus changes - <see cref="ClearFocus"/>,
+        /// <see cref="FocusNext"/> and the press handler all route through
+        /// here so no path can leave a stale focused element behind.
+        /// </summary>
+        public void SetFocus(Element element)
+        {
+            if (CurrentlyFocused == element)
+            {
+                return;
+            }
+
+            if (CurrentlyFocused != null && CurrentlyFocused.HasTrait<OnUnfocused>())
+            {
+                CurrentlyFocused.ElementTrait<OnUnfocused>().Value()?.TriggerAction?.Invoke(new TVEventArgs());
+            }
+
+            CurrentlyFocused = element;
+
+            if (element != null && element.HasTrait<OnFocused>())
+            {
+                element.ElementTrait<OnFocused>().Value()?.TriggerAction?.Invoke(new TVEventArgs());
+            }
+        }
+
+        /// <summary>
+        /// Moves focus to the next (or, <paramref name="backwards"/>, the
+        /// previous) focusable element, wrapping at the ends - what Tab does
+        /// in every form ever written, and what a keyboard user needs in order
+        /// to fill one in without reaching for the mouse.
+        ///
+        /// The ring is scoped to the TOP-LEVEL element the focused one lives
+        /// under (the modal, the window), not the whole tree: tabbing out of a
+        /// dialog into a field on the screen behind it - which is still very
+        /// much in the tree, just covered up - would be worse than not tabbing
+        /// at all. Order is by position, top row first then left to right,
+        /// which is the order the fields were laid out in and the order they
+        /// read in; child order would depend on the order a view happened to
+        /// construct its controls.
+        /// </summary>
+        public bool FocusNext(bool backwards = false)
+        {
+            Element current = CurrentlyFocused;
+            if (current == null)
+            {
+                return false;
+            }
+
+            Element top = current;
+            while (top.Parent != null && top.Parent != Resources.StaticResources.RootWindow)
+            {
+                top = top.Parent;
+            }
+
+            var ring = new List<Element>();
+            CollectFocusable(top, ring);
+            if (ring.Count < 2)
+            {
+                return false;
+            }
+
+            ring.Sort((a, b) =>
+            {
+                Vector2 pa = a.GetActualXnaPosition();
+                Vector2 pb = b.GetActualXnaPosition();
+                int byRow = ((int)pa.Y).CompareTo((int)pb.Y);
+                return byRow != 0 ? byRow : ((int)pa.X).CompareTo((int)pb.X);
+            });
+
+            int index = ring.IndexOf(current);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            int next = (index + (backwards ? -1 : 1) + ring.Count) % ring.Count;
+            SetFocus(ring[next]);
+            return true;
+        }
+
+        private static void CollectFocusable(Element element, List<Element> into)
+        {
+            if (element.CanBeInputFocused && element.HasTrait<OnFocused>())
+            {
+                into.Add(element);
+            }
+
+            ChildrenTrait children = element.CachedChildrenTrait;
+            if (children == null)
+            {
+                return;
+            }
+
+            List<Element> items = children.Value().Items;
+            for (int i = 0; i < items.Count; i++)
+            {
+                CollectFocusable(items[i], into);
             }
         }
 
@@ -359,13 +528,53 @@ namespace GustUI.Managers
                 // already be released.
                 bool control = keyboardState.IsKeyDown(Keys.LeftControl) || keyboardState.IsKeyDown(Keys.RightControl);
 
+                if (repeatFocus != CurrentlyFocused)
+                {
+                    // Focus moved (Tab, or a click into another field): the
+                    // key still physically down belongs to the field that has
+                    // gone, not the one that just arrived.
+                    repeatKey = Keys.None;
+                    repeatFocus = CurrentlyFocused;
+                }
+
+                bool repeatKeyStillDown = false;
                 foreach (Keys key in keyboardState.GetPressedKeys())
                 {
+                    if (key == repeatKey)
+                    {
+                        repeatKeyStillDown = true;
+                    }
+
                     if (!previousKeyboardState.IsKeyDown(key))
                     {
                         CurrentlyFocused.HandleKeyInput(key, shift, control);
+
+                        if (CanAutoRepeat(key))
+                        {
+                            repeatKey = key;
+                            repeatKeyStillDown = true;
+                            repeatNextSeconds = keyClock.Elapsed.TotalSeconds + KeyRepeatDelaySeconds;
+                        }
                     }
                 }
+
+                if (!repeatKeyStillDown)
+                {
+                    repeatKey = Keys.None;
+                }
+                else if (keyClock.Elapsed.TotalSeconds >= repeatNextSeconds)
+                {
+                    // One repeat per frame, and the next one is scheduled from
+                    // NOW rather than from the deadline just missed: a frame
+                    // that took 200ms must not owe the field six keystrokes.
+                    CurrentlyFocused.HandleKeyInput(repeatKey, shift, control);
+                    repeatNextSeconds = keyClock.Elapsed.TotalSeconds + KeyRepeatIntervalSeconds;
+                }
+            }
+            else
+            {
+                repeatKey = Keys.None;
+                repeatFocus = null;
             }
 
             int activeScope = ActiveHookScope;
@@ -512,25 +721,32 @@ namespace GustUI.Managers
 
             if (mouseState.LeftButton == ButtonState.Pressed && previousMouseState.LeftButton == ButtonState.Released)
             {
-                foreach (Element element in ClickTargets(currentlyHovered).Where(e => e.HasTrait<OnMousePress>()))
+                IReadOnlyList<Element> pressTargets = ClickTargets(currentlyHovered);
+                int clickCount = CountPress(pressTargets, mouseState);
+
+                foreach (Element element in pressTargets.Where(e => e.HasTrait<OnMousePress>()))
                 {
-                    Dispatch(element, element.ElementTrait<OnMousePress>().Value(), mouseState);
+                    Dispatch(element, element.ElementTrait<OnMousePress>().Value(), mouseState, clickCount);
                 }
 
-
-                foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnFocused>()))
+                if (clickCount >= 2)
                 {
-                    if (CurrentlyFocused != element)
+                    foreach (Element element in pressTargets.Where(e => e.HasTrait<OnDoubleClickTrait>()))
                     {
-                        if (CurrentlyFocused != null)
-                        {
-                            CurrentlyFocused.ElementTrait<OnUnfocused>().Value().TriggerAction?.Invoke(new TVEventArgs());
-                        }
-                        CurrentlyFocused = element;
-                        element.ElementTrait<OnFocused>().Value().TriggerAction?.Invoke(new TVEventArgs());
+                        Dispatch(element, element.ElementTrait<OnDoubleClickTrait>().Value(), mouseState, clickCount);
                     }
                 }
 
+                // The TOPMOST focusable under the pointer takes focus, not
+                // every focusable in the stack in turn - focusing each one on
+                // the way up fires a focus/unfocus pair at every field the
+                // click passed over. (A press on nothing focusable leaves
+                // focus where it is, as it always has.)
+                Element focusTarget = currentlyHovered.LastOrDefault(e => e.HasTrait<OnFocused>());
+                if (focusTarget != null)
+                {
+                    SetFocus(focusTarget);
+                }
             }
             else if (mouseState.LeftButton == ButtonState.Pressed)
             {
@@ -573,6 +789,33 @@ namespace GustUI.Managers
         private List<Element> lastHoverList = new List<Element>();
 
         /// <summary>
+        /// Advances the double/triple-click run for a press that just landed,
+        /// and returns how many presses it now stands at.
+        ///
+        /// The run continues only while the presses stay on the same element
+        /// AND within a few pixels of each other - the time gap alone is not
+        /// enough, or clicking two adjacent list rows quickly would read as a
+        /// double click on the second one.
+        /// </summary>
+        private int CountPress(IReadOnlyList<Element> targets, MouseState mouseState)
+        {
+            Element target = targets.Count > 0 ? targets[targets.Count - 1] : null;
+            double now = keyClock.Elapsed.TotalSeconds;
+            Point position = new Point(mouseState.X, mouseState.Y);
+
+            bool continues = target == lastPressElement
+                && now - lastPressSeconds <= MultiClickSeconds
+                && Math.Abs(position.X - lastPressPosition.X) <= MultiClickSlopPixels
+                && Math.Abs(position.Y - lastPressPosition.Y) <= MultiClickSlopPixels;
+
+            pressRunCount = continues ? pressRunCount + 1 : 1;
+            lastPressElement = target;
+            lastPressSeconds = now;
+            lastPressPosition = position;
+            return pressRunCount;
+        }
+
+        /// <summary>
         /// Fires one mouse event at one element, tolerating the two states a
         /// dispatch loop can legitimately find mid-iteration.
         ///
@@ -588,7 +831,7 @@ namespace GustUI.Managers
         /// straight out of the game loop (found 2026-08-23, clicking "New
         /// project" on the welcome screen).
         /// </summary>
-        private static void Dispatch<T>(Element element, TVEvent<T> handler, MouseState mouseState)
+        private static void Dispatch<T>(Element element, TVEvent<T> handler, MouseState mouseState, int clickCount = 1)
             where T : TVEventArgs
         {
             if (handler?.TriggerAction == null)
@@ -605,6 +848,8 @@ namespace GustUI.Managers
             {
                 return; // torn down by an earlier handler in this same loop
             }
+
+            args.ClickCount = clickCount;
 
             if (args is T typed)
             {

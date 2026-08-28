@@ -358,5 +358,38 @@ namespace GustUI.Managers
 
             return new Vector2(maxWidth, targetPixelSize * lines.Length);
         }
+
+        /// <summary>
+        /// The x of every CARET POSITION in <paramref name="text"/>: entry i
+        /// is the offset of the caret sitting before character i, so the array
+        /// is one longer than the string and its last entry is the string's
+        /// full measured width.
+        ///
+        /// A text field needs the whole run, not one measurement: it converts
+        /// an index to an x (where to draw the caret, where a selection starts
+        /// and ends) and an x back to an index (where a click landed) many
+        /// times per edit, and doing that with MeasureString means re-walking
+        /// a prefix per query. One pass here, cached by the caller against the
+        /// string it was measured from, makes both directions O(1)/O(n) rather
+        /// than O(n) each.
+        ///
+        /// Single-line only — an embedded newline advances like any other
+        /// missing glyph (by nothing), because the callers that need caret
+        /// geometry are single-line fields.
+        /// </summary>
+        public float[] MeasureCaretOffsets(string text, float targetPixelSize)
+        {
+            int length = text?.Length ?? 0;
+            float[] offsets = new float[length + 1];
+            float scale = targetPixelSize / EmSize;
+            float x = 0f;
+            for (int i = 0; i < length; i++)
+            {
+                x += TryGetGlyph(text[i], out var g) ? g.XAdvance * scale : 0f;
+                offsets[i + 1] = x;
+            }
+
+            return offsets;
+        }
     }
 }

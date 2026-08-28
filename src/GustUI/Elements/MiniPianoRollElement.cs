@@ -69,6 +69,22 @@ namespace GustUI.Elements
 
         public Color NoteColor { get; set; } = new Color(230, 235, 250);
 
+        /// <summary>
+        /// A second set of notes drawn OVER <see cref="Notes"/> in
+        /// <see cref="OverlayNoteColor"/> — notes that belong to this roll's
+        /// bar but came from somewhere else, so they read as a layer rather
+        /// than as more of the same part.
+        ///
+        /// Its case is a grouped channel whose own pattern plays alongside its
+        /// children's (ezmuze studio's channel hierarchy). Two lists rather than
+        /// a colour per note: the distinction is between SOURCES, not between
+        /// individual notes, and a per-note colour would invite it to become
+        /// decoration.
+        /// </summary>
+        public List<MiniRollNote> OverlayNotes { get; } = new List<MiniRollNote>();
+
+        public Color OverlayNoteColor { get; set; } = new Color(150, 190, 240);
+
         /// <summary>Minimum drawn note width/height in px so a dense pattern
         /// (many short notes) or a wide pitch range (many semitones per
         /// pixel) still reads as note ticks instead of vanishing — the
@@ -90,7 +106,7 @@ namespace GustUI.Elements
             int totalWidth = (int)size.X;
             int height = (int)size.Y;
 
-            if (totalWidth >= 1 && height >= 2 && Notes.Count > 0 && BeatsVisible > 0)
+            if (totalWidth >= 1 && height >= 2 && (Notes.Count > 0 || OverlayNotes.Count > 0) && BeatsVisible > 0)
             {
                 var manager = Resources.StaticResources.DrawManager;
 
@@ -121,37 +137,44 @@ namespace GustUI.Elements
                         continue;
                     }
 
-                    foreach (MiniRollNote note in Notes)
-                    {
-                        float startT = (float)(note.StartBeats / BeatsVisible);
-                        float endT = (float)((note.StartBeats + note.LengthBeats) / BeatsVisible);
-                        if (endT <= 0f || startT >= 1f)
-                        {
-                            continue; // wholly outside this tile
-                        }
-
-                        startT = MathHelper.Clamp(startT, 0f, 1f);
-                        endT = MathHelper.Clamp(endT, 0f, 1f);
-
-                        int left = tileX + (int)(startT * thisWidth);
-                        int right = tileX + (int)(endT * thisWidth);
-                        int noteWidth = Math.Max(MinNotePx, right - left);
-
-                        float pitchT = range > 0f ? (note.Pitch - MinPitch) / range : 0.5f;
-                        pitchT = MathHelper.Clamp(pitchT, 0f, 1f);
-                        int centerY = (int)pos.Y + (int)((1f - pitchT) * height);
-                        int top = MathHelper.Clamp(
-                            centerY - noteHeight / 2,
-                            (int)pos.Y,
-                            (int)pos.Y + Math.Max(0, height - noteHeight));
-
-                        float alpha = 0.4f + 0.6f * MathHelper.Clamp(note.Velocity, 0f, 1f);
-                        manager.DrawFilledRectangle(new Rectangle(left, top, noteWidth, noteHeight), NoteColor * alpha);
-                    }
+                    DrawNotes(manager, Notes, NoteColor, tileX, thisWidth, pos, height, noteHeight, range);
+                    DrawNotes(manager, OverlayNotes, OverlayNoteColor, tileX, thisWidth, pos, height, noteHeight, range);
                 }
             }
 
             base.Draw();
+        }
+
+        private void DrawNotes(Managers.DrawManager manager, List<MiniRollNote> notes, Color color,
+            int tileX, int thisWidth, Vector2 pos, int height, int noteHeight, float range)
+        {
+            foreach (MiniRollNote note in notes)
+            {
+                float startT = (float)(note.StartBeats / BeatsVisible);
+                float endT = (float)((note.StartBeats + note.LengthBeats) / BeatsVisible);
+                if (endT <= 0f || startT >= 1f)
+                {
+                    continue; // wholly outside this tile
+                }
+
+                startT = MathHelper.Clamp(startT, 0f, 1f);
+                endT = MathHelper.Clamp(endT, 0f, 1f);
+
+                int left = tileX + (int)(startT * thisWidth);
+                int right = tileX + (int)(endT * thisWidth);
+                int noteWidth = Math.Max(MinNotePx, right - left);
+
+                float pitchT = range > 0f ? (note.Pitch - MinPitch) / range : 0.5f;
+                pitchT = MathHelper.Clamp(pitchT, 0f, 1f);
+                int centerY = (int)pos.Y + (int)((1f - pitchT) * height);
+                int top = MathHelper.Clamp(
+                    centerY - noteHeight / 2,
+                    (int)pos.Y,
+                    (int)pos.Y + Math.Max(0, height - noteHeight));
+
+                float alpha = 0.4f + 0.6f * MathHelper.Clamp(note.Velocity, 0f, 1f);
+                manager.DrawFilledRectangle(new Rectangle(left, top, noteWidth, noteHeight), color * alpha);
+            }
         }
     }
 }
