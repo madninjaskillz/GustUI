@@ -58,6 +58,21 @@ public class KnobElement : Element
     /// </summary>
     public float? ModDepth { get; set; }
 
+    /// <summary>
+    /// Where the value ACTUALLY is, 0..1, when something is modulating it — a
+    /// ghost of the pointer, riding the modulation.
+    ///
+    /// The pointer always shows the base position, which is the right thing
+    /// for dragging and the wrong thing for reading: a knob under an LFO sits
+    /// still while the sound moves, and the arc says only how far the movement
+    /// can go. This is the mark that says where it got to.
+    ///
+    /// Distinct from <see cref="LiveValue"/>, which is an automation LANE
+    /// moving the base itself. A control can have both, and they mean
+    /// different things — hence a second mark rather than a shared one.
+    /// </summary>
+    public float? ModValue { get; set; }
+
     /// <summary>Arc colour for a POSITIVE <see cref="ModDepth"/>.</summary>
     public Color ModColor { get; set; } = new Color(96, 224, 160);
 
@@ -331,6 +346,23 @@ public class KnobElement : Element
                         new Rectangle((int)(p.X - thickness / 2f), (int)(p.Y - thickness / 2f), thickness, thickness),
                         arcColor);
                 }
+            }
+
+            // Ghost pointer: where the modulation has actually put the value.
+            //
+            // UNDER the real pointer and dimmer than it, because the pointer
+            // is still what you grab and the ghost is what you read. Drawn
+            // only when it has separated from the pointer far enough to be a
+            // second mark rather than a fattening of the first.
+            if (ModValue.HasValue && Math.Abs(ModValue.Value - value) > 0.004f)
+            {
+                float ghostAngle = MathHelper.ToRadians(
+                    45f + MathHelper.Clamp(ModValue.Value, 0f, 1f) * SweepDegrees);
+
+                var ghostRect = new Rectangle((int)center.X, (int)center.Y, 3, (int)(diameter * PointerLength));
+                manager.DrawRotatedFilledRectangle(ghostRect,
+                    (ModDepth ?? 0f) >= 0f ? ModColor : ModNegativeColor,
+                    ghostAngle, new Vector2(0.5f, 0f));
             }
 
             // Pointer: thin rect rotated about its top-center, angle 0 = 6
