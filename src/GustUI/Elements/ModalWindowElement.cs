@@ -1844,6 +1844,14 @@ namespace GustUI.Elements
             {
                 buttonBackgroundElement.Set<PositionTrait>(new TVVector(0, size.Y - 80));
                 buttonBackgroundElement.Set<SizeTrait>(new TVVector(size.X, 80));
+                // The footer strip had no Depth of its own, so it sat at 0
+                // while its BUTTONS drew raised. Alone on screen that is
+                // invisible; over ANOTHER modal it means the strip sinks below
+                // the modal underneath while its own buttons stay above it, so
+                // the lower modal's footer reads straight through this one's and
+                // the two sets of buttons interleave. Matches the depth the
+                // rest of this element's chrome already uses.
+                buttonBackgroundElement.Depth = 30;
                 buttonBackgroundElement.Set<BackgroundFillTrait>(new TVFillSimpleGradient(FooterFillTop, FooterFillBottom, Direction.Vertically));
                 float xPos = size.X - 20;
                 int i = 0;
