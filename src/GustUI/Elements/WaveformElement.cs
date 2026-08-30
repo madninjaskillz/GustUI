@@ -15,20 +15,14 @@ namespace GustUI.Elements;
 /// and size are cheap to rebind every frame, and a null <see cref="Data"/>
 /// draws nothing (the host shows its flat background until data arrives).
 ///
-/// Two render modes (both zoom-responsive via the data's mip chain):
-///  - <see cref="WaveformRenderMode.BakedTexture"/> (default): one stretched
-///    sprite per element from a texture baked once per (data, mip level) and
-///    tinted at draw time — constant per-frame cost regardless of width.
-///  - <see cref="WaveformRenderMode.Columns"/>: one 1px rect per horizontal
-///    pixel, no textures — kept for comparison/measurement and for data that
-///    changes every frame (live meters) where baking would thrash.
-/// Measured on ezmuze's 597-block timeline (interpreter WASM): columns mode
-/// more than doubled worst-case frame time vs baked (≈4 800 extra sprite
-/// draws at max zoom-out), so BakedTexture is the default. For hundreds of
-/// solid tiles the even faster shape is skipping the element entirely and
-/// using the solid-background bake as a tinted TVFillImage on the tile rect
-/// (see <see cref="WaveformData.FromMinMax"/>), which draws one batchable
-/// sprite per tile.
+/// Renders as triangle geometry (zoom-responsive via the data's mip chain),
+/// never a baked Texture2D — so there is no 4096-texel size cap and no
+/// rasterize-then-stretch blur at any zoom. <see cref="WaveformRenderMode.GeometryBaked"/>
+/// (default) triangulates once per size and caches; <see cref="WaveformRenderMode.Geometry"/>
+/// re-triangulates every frame; <see cref="WaveformRenderMode.Columns"/> draws
+/// per-pixel rects. The former BakedTexture mode was removed (2026-08-30): a
+/// long clip's low-mip texture could exceed the GL HiDef profile's 4096 limit
+/// and crash the app, and geometry is crisper at comparable cost.
 /// </summary>
 [ElementTraits(typeof(PositionTrait), typeof(SizeTrait))]
 public class WaveformElement : Element
@@ -44,7 +38,7 @@ public class WaveformElement : Element
 
     public Color CenterLineColor { get; set; } = Color.White * 0.3f;
 
-    public WaveformRenderMode RenderMode { get; set; } = WaveformRenderMode.BakedTexture;
+    public WaveformRenderMode RenderMode { get; set; } = WaveformRenderMode.GeometryBaked;
 
     /// <summary>
     /// Repeats <see cref="Data"/> side-by-side this many times across the
@@ -117,21 +111,17 @@ public class WaveformElement : Element
                     var rect = new Rectangle((int)pos.X + drawnWidth, (int)pos.Y, thisWidth, height);
                     drawnWidth += thisWidth;
 
-                    if (RenderMode == WaveformRenderMode.BakedTexture)
-                    {
-                        manager.Draw(data.GetTexture(level), rect, Tint);
-                    }
-                    else if (RenderMode == WaveformRenderMode.GeometryBaked)
-                    {
-                        DrawGeometryBaked(manager, data, level, rect, Tint);
-                    }
-                    else if (RenderMode == WaveformRenderMode.Geometry)
+                    if (RenderMode == WaveformRenderMode.Geometry)
                     {
                         DrawGeometry(manager, data, level, rect, Tint);
                     }
-                    else
+                    else if (RenderMode == WaveformRenderMode.Columns)
                     {
                         DrawColumns(manager, data.LevelData(level), rect, Tint);
+                    }
+                    else
+                    {
+                        DrawGeometryBaked(manager, data, level, rect, Tint);
                     }
 
                     if (GhostData != null && t < tiles - 1)
@@ -140,21 +130,17 @@ public class WaveformElement : Element
                         if (ghostWidth > 0)
                         {
                             var ghostRect = new Rectangle((int)pos.X + drawnWidth, (int)pos.Y, ghostWidth, height);
-                            if (RenderMode == WaveformRenderMode.BakedTexture)
-                            {
-                                manager.Draw(GhostData.GetTexture(ghostLevel), ghostRect, GhostTint);
-                            }
-                            else if (RenderMode == WaveformRenderMode.GeometryBaked)
-                            {
-                                DrawGeometryBaked(manager, GhostData, ghostLevel, ghostRect, GhostTint);
-                            }
-                            else if (RenderMode == WaveformRenderMode.Geometry)
+                            if (RenderMode == WaveformRenderMode.Geometry)
                             {
                                 DrawGeometry(manager, GhostData, ghostLevel, ghostRect, GhostTint);
                             }
-                            else
+                            else if (RenderMode == WaveformRenderMode.Columns)
                             {
                                 DrawColumns(manager, GhostData.LevelData(ghostLevel), ghostRect, GhostTint);
+                            }
+                            else
+                            {
+                                DrawGeometryBaked(manager, GhostData, ghostLevel, ghostRect, GhostTint);
                             }
                         }
                     }
@@ -197,30 +183,26 @@ public class WaveformElement : Element
 
 public enum WaveformRenderMode
 {
-    /// <summary>Texture baked once per (data, mip level), stretched + tinted per draw.</summary>
-    BakedTexture,
-
-    /// <summary>Per-pixel column rects every frame (no textures).</summary>
-    Columns,
+    /// <summary>The default and standard mode. Same triangle geometry as
+    /// <see cref="Geometry"/>, but the TRIANGULATION
+    /// (WaveformData.GetGeometryVertices) runs ONCE per distinct size and the
+    /// resulting vertex/index arrays are cached and reused every later frame —
+    /// DrawManager.DrawCachedTriangles just translates + tints them into the
+    /// shared geometry batch, no re-triangulation, no Texture2D/RenderTarget2D
+    /// and so no 4096-texel size limit. Resolution-independent (no
+    /// rasterize-then-stretch blur) at low draw-time cost as long as the
+    /// caller's own width/height doesn't change.</summary>
+    GeometryBaked,
 
     /// <summary>Real triangle geometry (WaveformData.BuildGeometry),
     /// interleaved with the sprite batch via DrawManager.DrawTriangles —
-    /// resolution-independent (no bake, no upscale blur at any zoom), at
-    /// the cost of one sprite-batch flush per draw call, EVERY frame.
-    /// Prefer <see cref="GeometryBaked"/> for anything drawn more than a
-    /// couple of frames at the same size (i.e. basically everything).</summary>
+    /// re-triangulated EVERY frame. Same output as <see cref="GeometryBaked"/>;
+    /// prefer that one for anything drawn more than a couple of frames at the
+    /// same size (i.e. basically everything). Kept for data that changes every
+    /// frame and for comparison.</summary>
     Geometry,
 
-    /// <summary>Same triangle geometry as <see cref="Geometry"/>, but the
-    /// TRIANGULATION (WaveformData.GetGeometryVertices) runs ONCE per
-    /// distinct size and the resulting vertex/index arrays are cached and
-    /// reused every later frame — DrawManager.DrawCachedTriangles just
-    /// translates + tints them into the shared geometry batch, no
-    /// re-triangulation, no texture/RenderTarget2D. Geometry's crispness
-    /// (no CPU-rasterize-then-stretch blur) at close to BakedTexture's
-    /// draw-time cost, for as long as the caller's own width/height
-    /// doesn't change. The practical choice over bare Geometry for
-    /// anything scrolling/static rather than actively resizing every
-    /// frame.</summary>
-    GeometryBaked,
+    /// <summary>Per-pixel column rects every frame (no textures). Kept for
+    /// comparison/measurement only.</summary>
+    Columns,
 }

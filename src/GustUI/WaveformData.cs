@@ -16,21 +16,13 @@ namespace GustUI
     /// so a narrow draw samples a level close to its pixel width instead of
     /// skipping columns and turning the waveform into noise.
     ///
-    /// Also owns the lazily baked per-level textures used by the baked-texture
-    /// render mode — the KnobElement pattern: bake alpha-only art once, tint
-    /// with the draw color every frame.
+    /// Waveforms render as triangle geometry (see
+    /// <see cref="Elements.WaveformElement"/> / <see cref="GetGeometryVertices"/>),
+    /// not baked Texture2D — so there is no texture size limit and no
+    /// rasterize-then-stretch blur.
     /// </summary>
     public sealed class WaveformData
     {
-        /// <summary>Default baked texture height in texels; drawn stretched
-        /// to the element rect. A cheap approximation when the display
-        /// height is close to this — <see cref="EnsureMinimumTextureHeight"/>
-        /// raises it (and drops the stale bake) for callers that display
-        /// this data much taller, so the stretch ratio — and with it the
-        /// fixed-fraction "always show ≥1 texel of silence" floor below —
-        /// stays close to what a native bake at that height would show.</summary>
-        public const int DefaultTextureHeight = 64;
-
         /// <summary>Legacy "Pronounced Peaks" (Options > Display, checked by
         /// default): gamma-boosts quiet content so it doesn't read as a
         /// near-flat line, without artificially loudening true silence
@@ -47,12 +39,9 @@ namespace GustUI
         private const int MinLevelColumns = 8;
 
         private readonly List<float[]> levels = new List<float[]>();
-        private Texture2D[] textures;
         private bool solidBackground;
         private float waveShade;
         private float backgroundAlpha = 1f;
-        private int textureHeight = DefaultTextureHeight;
-        private int pendingTextureHeight = DefaultTextureHeight;
 
         private WaveformData()
         {
@@ -147,13 +136,6 @@ namespace GustUI
             return level;
         }
 
-        /// <summary>
-        /// The baked texture for a level: one texel column per data column,
-        /// antialiased (premultiplied alpha, matching the batch blend state),
-        /// tinted at draw time. Style per <see cref="FromMinMax"/>. Baked on
-        /// first use per level. Public so consumers can also use it directly
-        /// as an image fill (TVFillImage) on an existing rectangle element.
-        /// </summary>
         // ---- visual-fidelity pass (2026-08): legacy ezmuze3's waveform draw
         // (StorageEngine.cs RequestWaveFormData) applied two perceptual
         // touches this baker didn't: "PronouncedPeaks" (a gamma curve, 1 -
@@ -180,102 +162,6 @@ namespace GustUI
             return Math.Sign(clamped) * MathF.Pow(Math.Abs(clamped), ProminenceExponent);
         }
 
-        public Texture2D GetTexture(int level)
-        {
-            if (textures == null)
-            {
-                textures = new Texture2D[levels.Count];
-            }
-
-            if (textures[level] != null)
-            {
-                return textures[level];
-            }
-
-            float[] minMax = levels[level];
-            int columns = minMax.Length / 2;
-            int height = textureHeight;
-            var pixels = new Color[columns * height];
-
-            for (int c = 0; c < columns; c++)
-            {
-                float maxV = Prominent(minMax[c * 2 + 1]);
-                float minV = Prominent(minMax[c * 2]);
-
-                // Map min/max (−1..1) to a vertical band in texel space;
-                // y grows downward, so max maps to the top edge.
-                float top = (1f - maxV) * 0.5f * height;
-                float bottom = (1f - minV) * 0.5f * height;
-
-                // Silence still reads as a waveform: at least a 1-texel band.
-                if (bottom - top < 1f)
-                {
-                    float mid = (top + bottom) * 0.5f;
-                    top = mid - 0.5f;
-                    bottom = mid + 0.5f;
-                }
-
-                // Loudness cue (legacy VolumeBasedBrightness): this column's
-                // OWN band height, 0..1 of the full available half-height —
-                // a quiet column shades toward background, a loud one hits
-                // full prominence. Measured post-boost (matches what's about
-                // to be drawn), pre floor-clamp (a silent column stays flat 0).
-                float loudness = MathHelper.Clamp((maxV - minV) * 0.5f, 0f, 1f);
-
-                if (solidBackground)
-                {
-                    if (backgroundAlpha < 1f)
-                    {
-                        // Translucent face: dim see-through background, the
-                        // waveform at full tile brightness — quiet columns
-                        // ease toward the background so silence stays a
-                        // near-flat sliver, loud hits go fully solid. Both
-                        // background and wave are premultiplied white × v,
-                        // so a lerp of v covers color AND alpha at once.
-                        float strength = MathHelper.Lerp(0.35f, 1f, loudness);
-                        for (int y = 0; y < height; y++)
-                        {
-                            float coverage = MathHelper.Clamp(Math.Min(y + 1f, bottom) - Math.Max(y, top), 0f, 1f);
-                            float v = MathHelper.Lerp(backgroundAlpha, 1f, coverage * strength);
-                            pixels[y * columns + c] = new Color(v, v, v, v);
-                        }
-
-                        continue;
-                    }
-
-                    // Opaque face: background white, waveform band darkened —
-                    // shade eases from a near-background tint at silence to
-                    // the full requested waveShade at full loudness.
-                    float shade = MathHelper.Lerp(0.8f, waveShade, loudness);
-                    for (int y = 0; y < height; y++)
-                    {
-                        float coverage = MathHelper.Clamp(Math.Min(y + 1f, bottom) - Math.Max(y, top), 0f, 1f);
-                        float v = 1f - coverage * (1f - shade);
-                        pixels[y * columns + c] = new Color(v, v, v, 1f);
-                    }
-
-                    continue;
-                }
-
-                float brightness = PeakBrightWaveform ? MathHelper.Lerp(0.5f, 1f, loudness) : 1f;
-                int yStart = Math.Max(0, (int)Math.Floor(top));
-                int yEnd = Math.Min(height - 1, (int)Math.Ceiling(bottom) - 1);
-                for (int y = yStart; y <= yEnd; y++)
-                {
-                    // Coverage of texel row [y, y+1) by the band [top, bottom).
-                    float coverage = MathHelper.Clamp(Math.Min(y + 1f, bottom) - Math.Max(y, top), 0f, 1f);
-                    if (coverage > 0f)
-                    {
-                        pixels[y * columns + c] = Color.White * (coverage * brightness);
-                    }
-                }
-            }
-
-            var texture = new Texture2D(Resources.StaticResources.GraphicsDevice, columns, height);
-            texture.SetData(pixels);
-            textures[level] = texture;
-            return texture;
-        }
 
         /// <summary>
         /// Tessellates this waveform's min/max envelope into indexed
@@ -414,36 +300,5 @@ namespace GustUI
             return (geometryVertsCache, geometryIndicesCache, geometryPrimitiveCountCache);
         }
 
-        /// <summary>
-        /// Records that some caller wants this data displayed at least
-        /// <paramref name="height"/> texels tall — cheap, no rebake yet
-        /// (safe to call every frame, e.g. while a display height is being
-        /// dragged live). Call <see cref="FlushPendingTextureHeight"/> once
-        /// the caller settles to actually apply it.
-        /// </summary>
-        public void EnsureMinimumTextureHeight(int height)
-        {
-            if (height > pendingTextureHeight)
-            {
-                pendingTextureHeight = height;
-            }
-        }
-
-        /// <summary>
-        /// Applies the tallest height requested via
-        /// <see cref="EnsureMinimumTextureHeight"/> since the last flush,
-        /// dropping cached textures so they rebake at that height on next
-        /// <see cref="GetTexture"/> — the (deliberately rare, one-shot) real
-        /// cost of an accurate bake. Never shrinks: a larger bake still
-        /// downscales fine for callers displaying this data smaller.
-        /// </summary>
-        public void FlushPendingTextureHeight()
-        {
-            if (pendingTextureHeight > textureHeight)
-            {
-                textureHeight = pendingTextureHeight;
-                textures = null;
-            }
-        }
     }
 }
