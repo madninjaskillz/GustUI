@@ -46,6 +46,29 @@ namespace GustUI.Elements
         /// content 0.</summary>
         public const int ModalDepth = 60000;
 
+        /// <summary>
+        /// True while at least one full-screen modal is open — i.e. while
+        /// something opaque genuinely covers the content beneath.
+        ///
+        /// An app that hand-drives per-frame logic for the view underneath
+        /// (GustUI updates the ELEMENT tree itself, but a host's own view
+        /// objects are not elements) can use this to decide whether that
+        /// work is still worth doing. Asking here rather than enumerating
+        /// the host's own modal-ish views is the difference between a check
+        /// that stays true and a list that silently rots the next time one
+        /// of those views becomes a <see cref="ModalWindowElement"/> — a
+        /// real window you work ALONGSIDE, which covers nothing.
+        ///
+        /// Counted, not a bool: modals stack (a wave picker over a device
+        /// panel), so the last one to close is what uncovers the content.
+        /// Maintained by the constructor and <see cref="Close"/>, so it
+        /// inherits the same close-me-properly contract as the hook scope —
+        /// a bare <c>Kill()</c> leaks both.
+        /// </summary>
+        public static bool AnyOpen => openCount > 0;
+
+        private static int openCount;
+
         /// <summary>Window-bottom pixels left uncovered (the app's bottom
         /// chrome, e.g. a status bar). 0 = fill to the bottom edge.
         /// Setting re-lays-out immediately, so object-initializer assignment
@@ -257,6 +280,7 @@ namespace GustUI.Elements
             // constant rather than going back to full opacity.
             Set<BackgroundFillTrait>(new TVFillSolidColor(() => Resources.StaticResources.Theme.SurfaceBackdrop * Theme.ModalBackgroundAlpha));
             hookScopeToken = Resources.StaticResources.InputManager.PushHookScope();
+            openCount++;
             Layout();
         }
 
@@ -270,6 +294,7 @@ namespace GustUI.Elements
             }
 
             closed = true;
+            openCount--;
             Resources.StaticResources.InputManager.PopHookScope(hookScopeToken);
             Kill();
         }
