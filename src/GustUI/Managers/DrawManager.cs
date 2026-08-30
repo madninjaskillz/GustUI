@@ -37,7 +37,7 @@ namespace GustUI.Managers
         /// Uniform scale applied to every draw (1 = off, the default) —
         /// folded into GeometryBatch's own MatrixTransform/RenderScale
         /// effect parameters (see <see cref="FlushGeometryBatch"/>) and
-        /// DrawTriangles' geometryEffect.View, not a SpriteBatch transform
+        /// every geometry append, not a SpriteBatch transform
         /// (removed 2026-08-20 — nothing reads one anymore). Pairs with
         /// WindowElement.DevicePixelRatio: that keeps GustUI's own layout/
         /// hit-testing in the ORIGINAL logical space (unaware anything HiDPI
@@ -695,29 +695,38 @@ namespace GustUI.Managers
             Begin();
         }
 
-        private BasicEffect geometryEffect;
 
         /// <summary>
         /// Draws indexed triangle geometry (real vertices, not a baked
-        /// texture) interleaved with the sprite batch — the SetScissor/
-        /// BeginAdditive idiom (End, change GPU state, draw, Begin), since
-        /// SpriteBatch itself has no vertex-geometry primitive. Vertex
-        /// positions are in the SAME logical pixel space every other Draw
-        /// call on this class uses (GetActualXnaPosition()'s space):
-        /// RenderScale is folded into the projection the same way Begin()'s
-        /// transform folds it in for sprites, so geometry stays pixel-
-        /// aligned with whatever sprite-drawn UI surrounds it. Blend/
-        /// rasterizer (scissor) state carries over from the just-closed
-        /// batch, matching what a sprite drawn at this exact point in the
-        /// element tree would have seen.
+        /// texture). Vertex positions are in the SAME logical pixel space
+        /// every other Draw call on this class uses
+        /// (GetActualXnaPosition()'s space): RenderScale is folded into
+        /// GeometryBatch's MatrixTransform exactly as it is for every other
+        /// append, so geometry stays pixel-aligned with the UI around it.
         ///
-        /// Caller must already be inside a Begin()/End() batch. Every call
-        /// costs one batch flush (End+Begin) — cheap for a handful of
-        /// calls/frame (this pairs with the existing BeginAdditive/
-        /// SetScissor idiom's own cost), but callers drawing MANY small
-        /// shapes (e.g. one call per timeline block) should batch them into
-        /// as few DrawTriangles calls as the geometry allows rather than
-        /// calling this once per shape.
+        /// COSTS NO FLUSH (2026-08-30). This used to be a raw
+        /// DrawUserIndexedPrimitives through its own BasicEffect, wrapped in
+        /// the End/change-GPU-state/draw/Begin idiom SetScissor and
+        /// BeginAdditive still use — one full batch flush per call, and its
+        /// own doc told callers to merge shapes because of it. That was
+        /// written when SpriteBatch had no vertex-geometry primitive;
+        /// GeometryBatch is nothing BUT vertex geometry, and
+        /// AppendTriangles' own doc already named this method as the caller
+        /// it was waiting for.
+        ///
+        /// It matters more than "one flush": the callers are
+        /// WaveformElement (once per visible waveform, every frame, since
+        /// waveforms went geometry-only) and PianoRollElement's bend curves
+        /// — both per-element, so flush count scaled with how much of the
+        /// song was on screen.
+        ///
+        /// Two behaviour changes fall out, both corrections. Clipping is now
+        /// the per-vertex ClipRect the rest of the batch uses rather than
+        /// the device scissor rect, and Element.Opacity now applies (the raw
+        /// path ignored it, so geometry inside a fading element stayed at
+        /// full strength while everything around it faded).
+        ///
+        /// Caller must already be inside a Begin()/End() batch.
         /// </summary>
         // short indices, not int: KNI's default Reach graphics profile
         // throws NotSupportedException on 32-bit index buffers. A waveform
@@ -730,30 +739,17 @@ namespace GustUI.Managers
                 return;
             }
 
-            End();
+            AtlasRegion white = GeometryAtlas.WhiteRegion;
 
-            GraphicsDevice device = Resources.StaticResources.GraphicsDevice;
+            // The same half-texel collapse-to-centre DrawCachedTriangles
+            // uses: always the exact texel centre, so a triangle of any size
+            // samples pure opaque white.
+            Vector2 uv = new Vector2(
+                (white.Pixels.X + 0.5f) / white.Texture.Width,
+                (white.Pixels.Y + 0.5f) / white.Texture.Height);
 
-            if (geometryEffect == null)
-            {
-                geometryEffect = new BasicEffect(device) { VertexColorEnabled = true, World = Matrix.Identity };
-            }
-
-            Viewport viewport = device.Viewport;
-            geometryEffect.View = RenderScale != 1f ? Matrix.CreateScale(RenderScale, RenderScale, 1f) : Matrix.Identity;
-            geometryEffect.Projection = Matrix.CreateOrthographicOffCenter(0, viewport.Width, viewport.Height, 0, 0, 1);
-
-            device.BlendState = blendState ?? BlendState.AlphaBlend;
-            device.RasterizerState = rasterizerState;
-            device.DepthStencilState = DepthStencilState.None;
-
-            foreach (EffectPass pass in geometryEffect.CurrentTechnique.Passes)
-            {
-                pass.Apply();
-                device.DrawUserIndexedPrimitives(PrimitiveType.TriangleList, vertices, 0, vertices.Length, indices, 0, primitiveCount);
-            }
-
-            Begin();
+            GeometryBatch.AppendTriangles(
+                white.Texture, vertices, indices, primitiveCount, uv, GetClipRectForGeometry(), CurrentBlend);
         }
 
         // A single "big triangle" covering the whole clip space (-1,-1) to

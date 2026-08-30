@@ -547,6 +547,56 @@ namespace GustUI.Rendering
         }
 
         /// <summary>
+        /// The <see cref="VertexPositionColor"/> form, for
+        /// DrawManager.DrawTriangles' callers (WaveformElement's live
+        /// triangulation, PianoRollElement's MPE bend curves) — geometry
+        /// built by code that predates <see cref="GeometryVertex"/> and has
+        /// no UV or clip rect of its own to give.
+        ///
+        /// Converted WHILE copying into this batch's own vertex array rather
+        /// than through an intermediate GeometryVertex[], for the same reason
+        /// <see cref="AppendCachedTriangles"/> translates in place: this runs
+        /// per visible waveform block per frame, and the intermediate would be
+        /// a fresh allocation each time for data that only ever needed to
+        /// exist in this buffer.
+        ///
+        /// <paramref name="uv"/> is stamped on every vertex — the caller's
+        /// geometry is flat-coloured, so it samples the atlas's reserved white
+        /// texel.
+        /// </summary>
+        public void AppendTriangles(Texture2D texture, VertexPositionColor[] verts, short[] idx, int primitiveCount, Vector2 uv, Vector4 clipRect, BlendState blend)
+        {
+            if (primitiveCount <= 0 || verts == null || verts.Length == 0)
+            {
+                return;
+            }
+
+            int addVertices = verts.Length;
+            int addIndices = primitiveCount * 3;
+
+            Accumulator acc = SelectAccumulator(false);
+            acc.BeginSegmentIfNeeded(texture, blend, addVertices);
+            acc.EnsureCapacity(addVertices, addIndices);
+
+            int vBase = acc.VertexCount - acc.CurrentSegmentVertexStart;
+            for (int i = 0; i < addVertices; i++)
+            {
+                VertexPositionColor v = verts[i];
+
+                // Z is dropped, not carried: GeometryVertex.Position.Z is
+                // always 0 by contract (see its own doc for the layerDepth
+                // bug that reintroduces), and this geometry is flat anyway.
+                acc.Vertices[acc.VertexCount++] = new GeometryVertex(
+                    new Vector2(v.Position.X, v.Position.Y), Fade(v.Color), uv, clipRect);
+            }
+
+            for (int i = 0; i < addIndices; i++)
+            {
+                acc.Indices[acc.IndexCount++] = (short)(vBase + idx[i]);
+            }
+        }
+
+        /// <summary>
         /// Same shape as <see cref="AppendTriangles"/>, for one specific
         /// caller (WaveformData's cached-array "Geometry (Baked)" mode,
         /// DrawManager.DrawCachedTriangles): <paramref name="localVerts"/>
