@@ -53,6 +53,22 @@ public sealed class Toast
     /// </summary>
     public float Opacity { get; set; } = 1f;
 
+    /// <summary>
+    /// Holds its place in the stack and is never dropped to make room.
+    ///
+    /// Two things follow, and a pinned toast needs both. It is exempt from
+    /// MaxVisible culling, which takes the OLDEST toast -- and a toast that
+    /// stays up for a long time is by definition the oldest, so the transport
+    /// panel was being thrown away by the fourth notification to arrive during
+    /// a song. And it sits AT the corner rather than being pushed away from it
+    /// as newer toasts land, because something that stays on screen should
+    /// stay where it was put; transient toasts stack above it.
+    ///
+    /// It still expires, and still dismisses. Pinned is about not being
+    /// evicted by OTHER toasts, not about being permanent.
+    /// </summary>
+    public bool Pinned { get; set; }
+
     /// <summary>Seconds this toast has been up, used for its own expiry and
     /// for the entrance animation.</summary>
     internal double Age { get; set; }
@@ -137,6 +153,10 @@ public sealed class ToastHost
 
     private readonly WindowElement window;
     private readonly List<Toast> toasts = new();
+
+    /// <summary>Draw order, rebuilt each frame — pinned toasts first. A field
+    /// rather than a local so the per-frame layout allocates nothing.</summary>
+    private readonly List<Toast> ordered = new();
     private readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
 
     private double lastSeconds;
@@ -209,9 +229,22 @@ public sealed class ToastHost
         // One per arrival, oldest first: dismissing is animated, so the
         // over-count resolves itself over the next few frames rather than
         // needing a loop that would take several away at once.
+        //
+        // The oldest UNPINNED one. Pinned toasts still count towards the limit
+        // -- they take up just as much room, and the limit is about the stack
+        // becoming an obstruction -- but they are never the one thrown away. A
+        // stack that is entirely pinned drops nothing, which is what pinning
+        // means.
         if (toasts.Count > Math.Max(1, MaxVisible))
         {
-            toasts[0].Dismiss();
+            for (int i = 0; i < toasts.Count; i++)
+            {
+                if (!toasts[i].Pinned && !toasts[i].Closing)
+                {
+                    toasts[i].Dismiss();
+                    break;
+                }
+            }
         }
 
         return toast;
@@ -279,13 +312,38 @@ public sealed class ToastHost
 
         // Newest nearest the corner, older ones pushed away from it — so the
         // one that just arrived is where the eye already is.
+        //
+        // Except the pinned ones, which take the corner and keep it. A toast
+        // that stays up for the length of a song is not news, and letting the
+        // news shove it around the screen makes the thing you are trying to
+        // watch move every time something else happens.
+        //
+        // Built into a scratch list reused between frames rather than a LINQ
+        // ordering: this runs every frame, for a handful of items.
+        ordered.Clear();
+        for (int i = 0; i < toasts.Count; i++)
+        {
+            if (toasts[i].Pinned)
+            {
+                ordered.Add(toasts[i]);
+            }
+        }
+
+        for (int i = toasts.Count - 1; i >= 0; i--)
+        {
+            if (!toasts[i].Pinned)
+            {
+                ordered.Add(toasts[i]);
+            }
+        }
+
         float cursor = bottom
             ? windowSize.Y - Margin - EdgeInset
             : Margin + EdgeInset;
 
-        for (int i = toasts.Count - 1; i >= 0; i--)
+        for (int i = 0; i < ordered.Count; i++)
         {
-            Toast toast = toasts[i];
+            Toast toast = ordered[i];
             Element content = toast.Content;
             if (content == null)
             {
