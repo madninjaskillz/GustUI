@@ -31,6 +31,10 @@ namespace GustUI.Managers
         // worth culling for anyway.
         private RasterizerState rasterizerState = new RasterizerState() { MultiSampleAntiAlias = false, ScissorTestEnable = true, CullMode = CullMode.None };
         private BlendState blendState = null;
+
+        /// <summary>Offscreen renders queued for the top of the next frame —
+        /// see <see cref="QueuePrePass"/>.</summary>
+        private readonly List<Action> prePass = new List<Action>();
         private SamplerState samplerState = null;
 
         /// <summary>
@@ -178,8 +182,15 @@ namespace GustUI.Managers
             GeometryBatch.BeginFrame();
 
             SetRenderTarget(null);
-            Clear(Color.Transparent);
             Begin();
+
+            // Before the tree, so the batch is empty and the render-target
+            // swaps inside these cost no flush. Ahead of Clear as well, so
+            // whatever the swaps leave on the backbuffer is wiped rather than
+            // relied on to survive.
+            RunPrePass();
+
+            Clear(Color.Transparent);
             FrameProfiler.Begin(FrameProfiler.Bucket.DrawRoot);
             Elements.Element.BeginPositionCache();
             Resources.StaticResources.RootWindow.Draw();
@@ -471,6 +482,57 @@ namespace GustUI.Managers
             BeginSprite(mode);
         }
 
+        /// <summary>
+        /// Asks for <paramref name="render"/> to run at the top of the NEXT
+        /// frame, before anything has been drawn into the batch.
+        ///
+        /// For elements that render into their own RenderTarget2D and then
+        /// draw that texture like any other image (GustUI has no such element
+        /// itself; ezmuze studio's now-playing visualiser is the case this
+        /// exists for). Done inline from Draw(), the render-target swap forces
+        /// the batch to commit whatever the tree has drawn so far, so a single
+        /// small offscreen effect costs a full flush in the middle of the
+        /// frame. Run before the tree walk there is nothing to commit.
+        ///
+        /// Queued per frame from the element's own Draw() rather than
+        /// registered once, which is what makes visibility work: an element
+        /// that is not drawn does not ask, so nothing renders a texture for a
+        /// panel that is off screen or gone. The cost is that the texture is
+        /// one frame old -- invisible on anything animating, and the reason
+        /// this is a queue rather than a callback.
+        /// </summary>
+        public void QueuePrePass(Action render)
+        {
+            if (render != null)
+            {
+                prePass.Add(render);
+            }
+        }
+
+        private void RunPrePass()
+        {
+            if (prePass.Count == 0)
+            {
+                return;
+            }
+
+            for (int i = 0; i < prePass.Count; i++)
+            {
+                try
+                {
+                    prePass[i]();
+                }
+                catch (Exception ex)
+                {
+                    // One bad offscreen effect must not take the frame with
+                    // it -- the whole UI is drawn after this.
+                    Console.WriteLine("[draw] a pre-pass render failed: " + ex.Message);
+                }
+            }
+
+            prePass.Clear();
+        }
+
         public void End()
         {
             // Geometry flushes BEFORE the sprite batch commits, at every
@@ -682,17 +744,23 @@ namespace GustUI.Managers
         /// </summary>
         public void BeginAdditive()
         {
-            End();
+            // No End()/Begin() (2026-08-30). Blend state is a SEGMENT KEY in
+            // GeometryBatch -- every Append* passes CurrentBlend, and
+            // BeginSegmentIfNeeded opens a new segment when it changes -- so
+            // setting the field is the entire job. Additive geometry lands in
+            // its own segment and draws in append order, which is the order it
+            // was asked for.
+            //
+            // The flush was the SpriteBatch-era idiom for changing GPU state,
+            // kept after the backend could express blend per segment. It cost
+            // two flushes per glow (one here, one in EndAdditive) for nothing.
             blendState = BlendState.Additive;
-            Begin();
         }
 
         /// <summary>Restores normal alpha blending after <see cref="BeginAdditive"/>.</summary>
         public void EndAdditive()
         {
-            End();
             blendState = null;
-            Begin();
         }
 
 
