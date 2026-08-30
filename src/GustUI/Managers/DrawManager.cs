@@ -1066,21 +1066,46 @@ namespace GustUI.Managers
             // onto the geometry backend (SDF glyphs, Phase 7), so that
             // particular blocker no longer applies — but the crash above
             // means this still isn't safe to flip.
+            // 2026-08-30: the End()/Begin() pair is GONE, third attempt, this
+            // time with the failure above root-caused rather than retried.
+            //
+            // The crash was never really about scissor. Those flushes were
+            // accidentally the thing keeping GeometryBatch's arrays small --
+            // a clipped container every few elements meant they never grew.
+            // Remove them and a maximised timeline accumulates a whole frame
+            // into one pair of arrays; EnsureCapacity doubles them, and
+            // FlushAccumulator disposes and rebuilds the GPU buffers every
+            // time the CPU side grows, because it sizes them from
+            // Vertices.Length. Multi-MB LOH allocations plus mid-frame
+            // DynamicVertexBuffer churn -- which is exactly the reported
+            // signature: a 1.16s spike and heavy GC, then a native access
+            // violation in no managed frame.
+            //
+            // GeometryBatch.MaxVerticesBeforeFlush now bounds that growth
+            // directly, which is what the coupling was doing by accident.
+            //
+            // Nothing needs the GPU scissor rect any more either: geometry
+            // clips per-vertex (GeometryBatch.fx reads ClipRect; Flush leaves
+            // ScissorTestEnable off), and text became geometry in Phase 7.
+            // The rect is still set because the raw DrawFullScreenEffect path
+            // and anything else reading device state should see something
+            // sane, but setting it no longer costs a flush.
             if (rect.HasValue)
             {
-                End();
-                Begin();
                 Resources.StaticResources.GraphicsDevice.ScissorRectangle = rect.Value;
             }
             else
             {
-                End();
-
                 Resources.StaticResources.GraphicsDevice.ScissorRectangle = new Rectangle(
                     0, 0,
                     (int)(Resources.StaticResources.RootWindow.GetSize().X * RenderScale),
                     (int)(Resources.StaticResources.RootWindow.GetSize().Y * RenderScale));
-                Begin();
+            }
+
+            // The growth ceiling the coupling used to provide for free.
+            if (geometryBatch != null && geometryBatch.WantsFlush)
+            {
+                FlushGeometryBatch();
             }
         }
     }

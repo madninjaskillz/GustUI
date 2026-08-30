@@ -65,6 +65,29 @@ namespace GustUI.Rendering
         private const int MaxVerticesPerSegment = 65535;
 
         /// <summary>
+        /// Vertices one accumulator may hold before <see cref="WantsFlush"/>
+        /// asks the caller to flush.
+        ///
+        /// Exists because scissor changes stopped forcing a flush
+        /// (DrawManager.SetScissor, 2026-08-30). They were, accidentally, the
+        /// thing that kept these arrays small: a clipped container every few
+        /// elements meant the buffers never grew far. Without that, a
+        /// maximised timeline accumulates the whole frame into one pair of
+        /// arrays, EnsureCapacity doubles them, and FlushAccumulator throws
+        /// away and rebuilds the GPU buffers every time the CPU side grows --
+        /// multi-MB large-object allocations and mid-frame
+        /// DynamicVertexBuffer churn. That is the shape of the native access
+        /// violation that made the two earlier attempts at this
+        /// (2026-08-19, 2026-08-20) unsafe.
+        ///
+        /// 32768 vertices is ~1.4 MB per accumulator at 44 bytes a vertex --
+        /// under the large-object heap threshold's spirit, comfortably more
+        /// than a normal frame needs, and still far fewer flushes than one
+        /// per scissor change.
+        /// </summary>
+        private const int MaxVerticesBeforeFlush = 32768;
+
+        /// <summary>
         /// SDF-text-only per-segment uniforms (Phase 7: SDF glyphs share
         /// this same accumulator/vertex-buffer, just flushed through
         /// SdfText.fx instead of GeometryBatch.fx for segments where this is
@@ -231,6 +254,18 @@ namespace GustUI.Rendering
         }
 
         public bool IsEmpty => nonText.IsEmpty && text.IsEmpty && overlay.IsEmpty;
+
+        /// <summary>
+        /// True once any stream has accumulated more than
+        /// <see cref="MaxVerticesBeforeFlush"/> vertices. Advisory: the batch
+        /// cannot flush itself (it has no effects), so DrawManager checks this
+        /// and calls Flush. Bounds a frame's buffer growth now that scissor
+        /// changes no longer do it as a side effect.
+        /// </summary>
+        public bool WantsFlush =>
+            nonText.VertexCount > MaxVerticesBeforeFlush
+            || text.VertexCount > MaxVerticesBeforeFlush
+            || overlay.VertexCount > MaxVerticesBeforeFlush;
 
         public void PushOverlay() => overlayDepth++;
 
