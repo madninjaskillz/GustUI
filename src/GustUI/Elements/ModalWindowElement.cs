@@ -101,6 +101,19 @@ namespace GustUI.Elements
         private VerticalScrollElement scrollViewport;
         private bool contentScrolls;
 
+        /// <summary>The body's height as the CALLER authored it, captured once
+        /// at construction, before this class has stretched it to anything.
+        ///
+        /// Only meaningful for a non-fit-to-content modal, and only because
+        /// that is the case where the live height is not trustworthy:
+        /// PositionContent stretches such a body to the client area every
+        /// frame, so re-reading it in RefreshScrollMode measured this class's
+        /// own output rather than the caller's intent (ezmuze bug #20). A
+        /// fit-to-content modal keeps measuring live — its content genuinely
+        /// arrives late (pack templates, cloud demos) and must be able to earn
+        /// a scrollbar after the fact.</summary>
+        private float authoredContentHeight;
+
         /// <summary>
         /// How much of this modal's own CHROME is showing, 0..1 — the body
         /// fill, title bar, footer and drop shadow, plus the open-slide. 1 is
@@ -339,6 +352,7 @@ namespace GustUI.Elements
 
         private void Adopt(Tab entry)
         {
+            entry.AuthoredHeight = NaturalHeightOf(entry.Content);
             tabs.Add(entry);
             BuildTabButton(entry);
             ActivateTab(tabs.Count - 1);
@@ -372,6 +386,7 @@ namespace GustUI.Elements
             Element outgoing = content;
             activeIndex = index;
             content = tabs[index].Content;
+            authoredContentHeight = tabs[index].AuthoredHeight;
 
             if (ReferenceEquals(outgoing, content))
             {
@@ -1331,6 +1346,13 @@ namespace GustUI.Elements
             public string Title;
             public Element Content;
 
+            /// <summary>This tab's body height as its caller authored it,
+            /// captured when the tab is adopted — before this class stretches
+            /// it. Restored into <c>authoredContentHeight</c> on activation so
+            /// a tab switch does not leave the scroll decision reading the
+            /// previous tab's number. See that field's doc comment.</summary>
+            internal float AuthoredHeight;
+
             /// <summary>Told when this tab's content moves to another window or
             /// is closed — see <see cref="OnContentRehosted"/>.</summary>
             internal Action<ModalWindowElement> RehostCallback;
@@ -1510,6 +1532,13 @@ namespace GustUI.Elements
             this.content = body;
             tabs.Add(new Tab { Title = title, Content = body });
 
+            // Before AddChild and before the first RefreshScrollMode below —
+            // this must be the caller's own number, taken while nothing in
+            // this class has had a chance to resize the body. See the field's
+            // own doc comment.
+            authoredContentHeight = NaturalContentHeight();
+            tabs[0].AuthoredHeight = authoredContentHeight;
+
             this.AddChild(this.content, "content");
             content.Set<PositionTrait>(new TVVector(0, 0));
 
@@ -1677,8 +1706,34 @@ namespace GustUI.Elements
                 return;
             }
 
+            // Measure what the CALLER authored, never what we stretched it to
+            // (2026-08-30, ezmuze bug #20: two vertical scrollbars overlapping
+            // in the sequencer's bottom corner, the outer one scrolling
+            // nothing).
+            //
+            // A non-fit-to-content modal's body gets stretched to the full
+            // client area every frame — see the !FitModalToContent branch at
+            // the end of PositionContent, which exists so a panel that reflows
+            // inside a nominal 10x10 host is still hit-testable below that
+            // nominal height. Reading content.GetSize().Y back here therefore
+            // measured OUR OWN output from the previous frame: necessarily
+            // about as tall as the modal, hence reliably over MaxModalHeight(),
+            // hence promoted. The sequencer's placeholder — a transparent
+            // 10x10 rect it does not put anything inside — got wrapped in a
+            // viewport whose rail drew over the sequencer's own scrollbar,
+            // 10 of its 12 pixels overlapping, scrolling nothing at all.
+            //
+            // Note this is NOT "don't promote fill-available windows". Some
+            // genuinely need it: a device panel is authored at a real size
+            // (max(420, 70% of window)), and on a short window that 420 floor
+            // really is taller than the space, so it really must scroll.
+            // Suppressing promotion for those squeezes their content instead.
+            // The authored height is the honest input in both cases, so that
+            // is what gets measured.
+            float natural = FitModalToContent ? NaturalContentHeight() : authoredContentHeight;
+
             float buttonHeight = this.buttons.Count > 0 ? 80 : ContentMargin;
-            float naturalModalHeight = 40 + ContentMargin + NaturalContentHeight() + ContentMargin + buttonHeight;
+            float naturalModalHeight = 40 + ContentMargin + natural + ContentMargin + buttonHeight;
             if (naturalModalHeight <= MaxModalHeight())
             {
                 return;
@@ -1698,8 +1753,16 @@ namespace GustUI.Elements
             content.Set<PositionTrait>(new TVVector(0, 0));
         }
 
-        private float NaturalContentHeight() =>
-            content is TextElement textElement ? textElement.CalculatedSize().Y : content.GetSize().Y;
+        private float NaturalContentHeight() => NaturalHeightOf(content);
+
+        /// <summary>Word-wrap-aware natural height of any candidate body — the
+        /// measurement NaturalContentHeight has always done, factored out so a
+        /// tab being adopted is measured the same way the constructor measures
+        /// the first one.</summary>
+        private static float NaturalHeightOf(Element body) =>
+            body == null ? 0f
+            : body is TextElement textElement ? textElement.CalculatedSize().Y
+            : body.GetSize().Y;
 
         private float NaturalContentWidth() =>
             content is TextElement tx ? tx.CalculatedSize().X : content.GetSize().X;
