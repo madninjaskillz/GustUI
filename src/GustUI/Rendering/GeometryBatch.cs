@@ -798,6 +798,7 @@ namespace GustUI.Rendering
             }
 
             SegmentsThisFrame += acc.Segments.Count;
+            Managers.FrameProfiler.CountSegments(acc.Segments.Count);
 
             // Reset so the next Append* call after this mid-frame flush
             // starts a clean batch rather than accumulating on top of

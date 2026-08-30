@@ -50,13 +50,19 @@ namespace GustUI.Managers
         private static readonly double[] lastReportMs = new double[BucketCount];
 
         // per-frame counters
-        private static int spriteDraws;
-        private static int stringDraws;
         private static int batchFlushes;
+
+        /// <summary>DrawIndexedPrimitives calls -- one per GeometryBatch
+        /// segment. Replaced the sprite/string draw counters (2026-08-30),
+        /// which had been reporting 0 since SpriteBatch was retired. This is
+        /// the number that says how well the frame batched: flushes tell you
+        /// how often the batch was forced out, segments how many draw calls
+        /// it took when it went.</summary>
+        private static int segments;
         private static int elementsDrawn;
         private static int elementsUpdated;
 
-        private static long sumSprites, sumStrings, sumFlushes, sumElementsDrawn, sumElementsUpdated;
+        private static long sumSegments, sumFlushes, sumElementsDrawn, sumElementsUpdated;
 
         private static int frames;
         private static long worstFrameTicks;
@@ -86,9 +92,9 @@ namespace GustUI.Managers
             }
         }
 
-        public static void CountSprite() { if (Enabled) { spriteDraws++; } }
-        public static void CountString() { if (Enabled) { stringDraws++; } }
         public static void CountFlush() { if (Enabled) { batchFlushes++; } }
+
+        public static void CountSegments(int n) { if (Enabled) { segments += n; } }
         public static void CountElementDraw() { if (Enabled) { elementsDrawn++; } }
         public static void CountElementUpdate() { if (Enabled) { elementsUpdated++; } }
 
@@ -128,8 +134,7 @@ namespace GustUI.Managers
                 sumTicks[i] += frameTicks[i];
             }
 
-            sumSprites += spriteDraws;
-            sumStrings += stringDraws;
+            sumSegments += segments;
             sumFlushes += batchFlushes;
             sumElementsDrawn += elementsDrawn;
             sumElementsUpdated += elementsUpdated;
@@ -151,7 +156,7 @@ namespace GustUI.Managers
                 frames = 0;
                 worstFrameTicks = 0;
                 Array.Clear(sumTicks, 0, BucketCount);
-                sumSprites = sumStrings = sumFlushes = sumElementsDrawn = sumElementsUpdated = 0;
+                sumSegments = sumFlushes = sumElementsDrawn = sumElementsUpdated = 0;
                 sumAllocBytes = 0;
                 intervalStartTicks = now;
                 gc0Start = GC.CollectionCount(0);
@@ -163,8 +168,7 @@ namespace GustUI.Managers
         private static void ResetFrame()
         {
             Array.Clear(frameTicks, 0, BucketCount);
-            spriteDraws = 0;
-            stringDraws = 0;
+            segments = 0;
             batchFlushes = 0;
             elementsDrawn = 0;
             elementsUpdated = 0;
@@ -184,8 +188,7 @@ namespace GustUI.Managers
             }
 
             sb.Append(" | worst ").Append(TicksToMs(worstFrameTicks).ToString("0.0"));
-            sb.Append(" | sprites ").Append((sumSprites / f).ToString("0"));
-            sb.Append(" strings ").Append((sumStrings / f).ToString("0"));
+            sb.Append(" | segs ").Append((sumSegments / f).ToString("0"));
             sb.Append(" flushes ").Append((sumFlushes / f).ToString("0"));
             sb.Append(" | elems d").Append((sumElementsDrawn / f).ToString("0"));
             sb.Append("/u").Append((sumElementsUpdated / f).ToString("0"));
