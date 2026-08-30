@@ -817,16 +817,6 @@ public class Element : IDisposable
         return existing;
     }
 
-    public virtual void DrawOutOfProcess()
-    {
-        if (this.HasTrait<ChildrenTrait>())
-        {
-            foreach (var child in this.ElementTrait<ChildrenTrait>().Value().Items)
-            {
-                child.DrawOutOfProcess();
-            }
-        }
-    }
 
     MouseState previousMouseState = Mouse.GetState();
 

@@ -64,16 +64,6 @@ public class FilledRectangleElement : RectangleElement
             fillType = smartFill.Resolve(Resources.StaticResources.InputManager.GetElementState(this));
         }
 
-        if (fillType is TVBlurFill blurFill)
-        {
-            var rt = Resources.StaticResources.DrawManager.GetBlurredTargetClone(blurFill.Ratio);
-            if (rt != null)
-            {
-                Resources.StaticResources.DrawManager.Draw(rt, rect, rect, Color.White * blurFill.Opacity);
-            }
-            fillType = blurFill.OverlayFill;
-        }
-
         switch (fillType)
         {
             case TVFillSolidColor solidColor:

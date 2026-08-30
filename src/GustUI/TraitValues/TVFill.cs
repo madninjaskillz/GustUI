@@ -256,18 +256,6 @@ namespace GustUI.TraitValues
         }
     }
 
-    public class TVBlurFill : TVFill
-    {
-        public float Ratio { get; set; }
-        public TVBlurFill(float ratio, TVFill overlay)
-        {
-            Ratio = ratio;
-            OverlayFill = overlay;
-        }
-
-        public TVFill OverlayFill { get; set; }
-    }
-
     /// <summary>
     /// A linear 2-color gradient fill, drawn via per-vertex color
     /// interpolation on the shared white atlas texel (FilledRectangleElement/

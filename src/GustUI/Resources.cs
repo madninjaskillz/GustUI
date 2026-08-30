@@ -35,7 +35,6 @@ namespace GustUI
 
             FontManager = new FontManager(graphicsDevice, UUContent);
             InputManager = new InputManager();
-            DrawOOPManager = new DrawOOPManager();
             DrawManager = new DrawManager();
         }
 
@@ -52,7 +51,6 @@ namespace GustUI
 
         public FontManager FontManager;
         public InputManager InputManager;
-        public DrawOOPManager DrawOOPManager;
         public Theme Theme;
 
         public static Resources StaticResources;

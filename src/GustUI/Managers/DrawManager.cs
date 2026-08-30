@@ -18,7 +18,6 @@ namespace GustUI.Managers
     {
         private RenderTarget2D currentTarget;
         private RenderTarget2D renderTarget;
-        private RenderTarget2D renderTargetClone;
         public bool IsInBatch { get; private set; } = false;
         private FrameCounter _frameCounter = new FrameCounter();
         private SdfFont debugFont = null;
@@ -29,13 +28,11 @@ namespace GustUI.Managers
         // match after the 2D Y-down orthographic projection, i.e. an
         // invisible shape with no error. A 2D UI has no back-face concept
         // worth culling for anyway.
-        private RasterizerState rasterizerState = new RasterizerState() { MultiSampleAntiAlias = false, ScissorTestEnable = true, CullMode = CullMode.None };
         private BlendState blendState = null;
 
         /// <summary>Offscreen renders queued for the top of the next frame —
         /// see <see cref="QueuePrePass"/>.</summary>
         private readonly List<Action> prePass = new List<Action>();
-        private SamplerState samplerState = null;
 
         /// <summary>
         /// Uniform scale applied to every draw (1 = off, the default) —
@@ -159,16 +156,6 @@ namespace GustUI.Managers
 
         public DrawManager()
         {
-        }
-
-        private RenderTarget2D GetRT()
-        {
-            var sz = Resources.StaticResources.RootWindow.ElementTrait<SizeTrait>().Value();
-            if (renderTarget == null || renderTarget.Width != sz.X || renderTarget.Height != sz.Y)
-            {
-                renderTarget = new RenderTarget2D(Resources.StaticResources.GraphicsDevice, (int)sz.X, (int)sz.Y);
-            }
-            return renderTarget;
         }
 
         float debugBottom = 0;
@@ -399,87 +386,9 @@ namespace GustUI.Managers
 
 
 
-        public Texture2D GetTargetClone()
+        public void Begin()
         {
-            bool wasInBatch = IsInBatch;
-            if (wasInBatch)
-            {
-                End();
-            }
-
-            if (renderTargetClone == null || renderTargetClone.Width != renderTarget.Width || renderTargetClone.Height != renderTarget.Height)
-            {
-                renderTargetClone = new RenderTarget2D(Resources.StaticResources.GraphicsDevice, renderTarget.Width, renderTarget.Height);
-            }
-
-            var preTarget = currentTarget;
-            Resources.StaticResources.GraphicsDevice.SetRenderTarget(renderTargetClone);
-            Resources.StaticResources.GraphicsDevice.Clear(Microsoft.Xna.Framework.Color.Transparent);
-            Begin();
-            Draw(renderTarget, new Rectangle(0, 0, renderTarget.Width, renderTarget.Height), Microsoft.Xna.Framework.Color.White);
-            End();
-            Resources.StaticResources.GraphicsDevice.SetRenderTarget(preTarget);
-
-            if (wasInBatch)
-            {
-                Begin();
-            }
-
-            return renderTargetClone;
-        }
-
-        public Texture2D GetScaledTargetClone(float ratio)
-        {
-            bool wasInBatch = IsInBatch;
-            if (wasInBatch)
-            {
-                End();
-            }
-
-            var tempTarget = new RenderTarget2D(Resources.StaticResources.GraphicsDevice, (int)(renderTarget.Width * ratio), (int)(renderTarget.Height * ratio));
-
-
-            var preTarget = currentTarget;
-            Resources.StaticResources.GraphicsDevice.SetRenderTarget(tempTarget);
-            Resources.StaticResources.GraphicsDevice.Clear(Color.Transparent);
-            Begin();
-            Draw(renderTarget, new Rectangle(0, 0, (int)(renderTarget.Width * ratio), (int)(renderTarget.Height * ratio)), Microsoft.Xna.Framework.Color.White);
-            End();
-            Resources.StaticResources.GraphicsDevice.SetRenderTarget(preTarget);
-
-            if (wasInBatch)
-            {
-                Begin();
-            }
-
-            return tempTarget;
-        }
-
-        public Texture2D GetBlurredTargetClone(float ratio)
-        {
-            return null;
-
-            bool wasInBatch = IsInBatch;
-            if (wasInBatch)
-            {
-                End();
-            }
-            Color[] data = new Color[renderTarget.Width * renderTarget.Height];
-            renderTarget.GetData<Color>(data);
-            Texture2D texture = new Texture2D(Resources.StaticResources.GraphicsDevice, renderTarget.Width, renderTarget.Height);
-            texture.SetData<Color>(data);
-
-            if (wasInBatch)
-            {
-                Begin();
-            }
-            return texture;
-        }
-
-
-        public void Begin(SpriteSortMode mode = SpriteSortMode.Deferred)
-        {
-            BeginSprite(mode);
+            BeginSprite();
         }
 
         /// <summary>
@@ -564,15 +473,25 @@ namespace GustUI.Managers
         /// BeginAdditive/EndAdditive, End()/Begin()) so flush-count
         /// telemetry stays comparable.
         /// </summary>
-        private void BeginSprite(SpriteSortMode mode = SpriteSortMode.Deferred)
+        private void BeginSprite()
         {
+            // Just a lifetime flag now (2026-08-30).
+            //
+            // It used to call FrameProfiler.CountFlush() and set four pieces
+            // of GraphicsDevice state, both of which stopped meaning anything
+            // when SpriteBatch went away. The count made "flushes" the sum of
+            // batch-begins AND geometry flushes, which reads as a draw-call
+            // measure and is not one. The state is set again, per segment, by
+            // GeometryBatch.Flush (blend from the segment, CullNone,
+            // DepthStencilState.None) and explicitly by the raw
+            // DrawFullScreenEffect path; nothing draws outside those two.
+            //
+            // ScissorTestEnable went with it. It was true here and false in
+            // every actual draw -- Flush uses RasterizerState.CullNone -- so
+            // scissor testing has been off for a while. Clipping is the
+            // per-vertex ClipRect, which is why SetScissor no longer writes
+            // GraphicsDevice.ScissorRectangle either.
             IsInBatch = true;
-            FrameProfiler.CountFlush();
-            GraphicsDevice device = Resources.StaticResources.GraphicsDevice;
-            device.BlendState = blendState ?? BlendState.AlphaBlend;
-            device.SamplerStates[0] = samplerState ?? SamplerState.LinearClamp;
-            device.DepthStencilState = DepthStencilState.None;
-            device.RasterizerState = rasterizerState;
         }
 
         private void EndSprite()
@@ -1158,19 +1077,19 @@ namespace GustUI.Managers
             // The rect is still set because the raw DrawFullScreenEffect path
             // and anything else reading device state should see something
             // sane, but setting it no longer costs a flush.
-            if (rect.HasValue)
-            {
-                Resources.StaticResources.GraphicsDevice.ScissorRectangle = rect.Value;
-            }
-            else
-            {
-                Resources.StaticResources.GraphicsDevice.ScissorRectangle = new Rectangle(
-                    0, 0,
-                    (int)(Resources.StaticResources.RootWindow.GetSize().X * RenderScale),
-                    (int)(Resources.StaticResources.RootWindow.GetSize().Y * RenderScale));
-            }
+            // No GraphicsDevice.ScissorRectangle write either (2026-08-30).
+            // Scissor testing is off in every draw -- GeometryBatch.Flush uses
+            // RasterizerState.CullNone, and BeginSprite stopped setting a
+            // ScissorTestEnable rasterizer state -- so the rect was read by
+            // nothing. It was pure device chatter on every clipped container,
+            // and there are a lot of those.
+            //
+            // What clips is GeometryVertex.ClipRect, stamped by every Append*
+            // from GetClipRectForGeometry() and tested in the fragment
+            // shader. scissorStack is still the source of truth for that; it
+            // just no longer has a GPU-side shadow.
 
-            // The growth ceiling the coupling used to provide for free.
+            // The growth ceiling the flush-coupling used to provide for free.
             if (geometryBatch != null && geometryBatch.WantsFlush)
             {
                 FlushGeometryBatch();
