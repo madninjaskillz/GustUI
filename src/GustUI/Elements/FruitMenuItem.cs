@@ -96,11 +96,25 @@ namespace GustUI.Elements
 
 
                     Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => clickMore(x, menuItem.SubItems)));
+                    // Leaving the item closes its submenu — UNLESS the
+                    // pointer is already over the submenu, which is what
+                    // moving diagonally into it looks like. That decision is
+                    // final: OnExitTrait is an edge, so nothing re-asks once
+                    // the pointer leaves the submenu again. The level's own
+                    // ownership (FruitPopupMenu.OpenSubmenu) is what closes
+                    // it in that case, when a sibling opens its own.
                     Set<OnExitTrait>(new TVEvent<ClickEventArgs>((x) =>
                     {
-                        if (popup != null)
+                        if (popup != null && !popup.IsMouseOver())
                         {
-                            if (!popup.IsMouseOver())
+                            if (OwningPopup != null)
+                            {
+                                // Goes through the level so its record of
+                                // "what is open here" clears too; that call
+                                // is what nulls `popup`, via ForgetSubmenu.
+                                OwningPopup.CloseSubmenu();
+                            }
+                            else
                             {
                                 popup.Kill();
                                 popup = null;
@@ -173,6 +187,23 @@ namespace GustUI.Elements
 
         }
 
+        /// <summary>Called by the popup this item lives on when it closes
+        /// this item's submenu on someone else's behalf. Clears the latch
+        /// below, without which <see cref="clickMore"/> would see a stale
+        /// non-null reference and refuse to ever reopen the submenu.</summary>
+        internal void ForgetSubmenu()
+        {
+            popup = null;
+        }
+
+        /// <summary>The popup this item is a row of, or null for an item
+        /// that isn't inside one — the legacy <see cref="FruitMenuElement"/>
+        /// bar's own top-level items, which are children of the BAR. Those
+        /// are built with hideMore:true and so never reach this code, but
+        /// the null path stays a quiet no-op rather than a throw, because
+        /// callers outside GustUI construct FruitMenuItems too.</summary>
+        private FruitPopupMenu OwningPopup => Parent as FruitPopupMenu;
+
         private void clickMore(ClickEventArgs x, List<MenuItemModel> subItems)
         {
             if (x is ClickEventArgs clickEventArgs)
@@ -182,6 +213,15 @@ namespace GustUI.Elements
                     popup = new FruitPopupMenu(subItems, 300);
                     var ps = clickEventArgs.Element.GetActualPosition();
                     popup.Set<PositionTrait>(new TVVector(ps.X + clickEventArgs.Element.GetSize().X, ps.Y));
+
+                    // Registered with the LEVEL, not kept private to this
+                    // item — opening this submenu closes whichever sibling's
+                    // submenu was open (bug #24). Done BEFORE the popup joins
+                    // the window so the outgoing one is gone by the time the
+                    // new one is drawable, rather than both existing for a
+                    // frame.
+                    OwningPopup?.OpenSubmenu(this, popup);
+
                     Resources.StaticResources.RootWindow.AddChild(popup, "popup");
                     popup.Set<BorderFillTrait>(new TVBorder9Grid());
 
@@ -202,17 +242,17 @@ namespace GustUI.Elements
 
             if (hoverCounter == maxHover)
             {
+                // Auto-pop on dwell. There used to be a sweep here that
+                // killed every root popup flagged WasAutoPopped, meaning to
+                // clear a sibling's submenu — but that flag was only ever
+                // set from the constructor and every call site passed false,
+                // so it never killed anything and two siblings could both
+                // stay open (bug #24). clickMore now registers with the
+                // owning popup, which closes the sibling's for real.
                 clickMore(new ClickEventArgs
                 {
                     Element = this,
                 }, _menuItem.SubItems);
-
-                var autoPops = Resources.StaticResources.RootWindow.Children.Items.Where(x => x is FruitPopupMenu fpu && fpu.WasAutoPopped).ToList();
-                foreach (var ap in autoPops)
-                {
-                    ap.Kill();
-                }
-
             }
             base.Update(parent);
         }

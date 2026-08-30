@@ -24,7 +24,23 @@ namespace GustUI.Elements
         public const int PopupDepth = 500000;
 
         private List<MenuItemModel> menuItems;
-        public bool WasAutoPopped { get; set; }
+
+        /// <summary>
+        /// The ONE submenu currently open beneath this popup, and the item
+        /// that opened it. A popup owns its open submenu rather than each
+        /// item owning its own, because an item can only ever learn that the
+        /// pointer left it ONCE (OnExitTrait is an edge, not a state), and
+        /// it deliberately spends that one notification declining to close
+        /// while the pointer is heading INTO the submenu. Nothing ever
+        /// revisits it after that, so an item-owned submenu is stranded open
+        /// the moment the pointer wanders through it and back — and the next
+        /// item opens a second one alongside (2026-08-30, bug #24: "sub
+        /// menus can stack and things become unreadable"). Ownership here
+        /// makes "one submenu per level" an invariant of the level itself
+        /// instead of a promise every item has to keep on its own.
+        /// </summary>
+        private FruitMenuItem submenuOwner;
+        private FruitPopupMenu submenu;
 
         /// <summary>Every item with the Y it would sit at if the popup were
         /// tall enough to show them all. See <see cref="ApplyScroll"/>.</summary>
@@ -51,9 +67,8 @@ namespace GustUI.Elements
         /// the button that just opened it.</summary>
         private readonly Element trigger;
 
-        public FruitPopupMenu(List<MenuItemModel> items, int width, bool autoPopped = false, Element trigger = null)
+        public FruitPopupMenu(List<MenuItemModel> items, int width, Element trigger = null)
         {
-            WasAutoPopped = autoPopped;
             this.trigger = trigger;
             Depth = PopupDepth;
             menuItems = items;
@@ -175,6 +190,56 @@ namespace GustUI.Elements
             }
 
             eligibleToAutoClose = true;
+        }
+
+        /// <summary>
+        /// Records <paramref name="opening"/> as this level's open submenu,
+        /// closing whatever was open here first. Called by the
+        /// <see cref="FruitMenuItem"/> that just built it: the item
+        /// registers its submenu with the level it lives on instead of
+        /// keeping it to itself, which is what keeps two siblings from both
+        /// having one open. Re-registering the SAME owner is a no-op, so an
+        /// item re-asserting its already-open submenu doesn't flicker it
+        /// shut and back.
+        /// </summary>
+        public void OpenSubmenu(FruitMenuItem owner, FruitPopupMenu opening)
+        {
+            if (ReferenceEquals(submenuOwner, owner) && ReferenceEquals(submenu, opening))
+            {
+                return;
+            }
+
+            CloseSubmenu();
+            submenuOwner = owner;
+            submenu = opening;
+        }
+
+        /// <summary>
+        /// Closes this level's submenu, and — through that submenu's own
+        /// <see cref="Kill"/> — everything nested below it. Without the
+        /// cascade a third-level submenu outlives the second-level popup it
+        /// hangs off, which is the same defect one level down.
+        /// </summary>
+        public void CloseSubmenu()
+        {
+            FruitMenuItem owner = submenuOwner;
+            FruitPopupMenu open = submenu;
+            submenuOwner = null;
+            submenu = null;
+
+            // The owner is told first, and unconditionally: its own "do I
+            // already have one open?" latch has to be cleared even if the
+            // popup was already gone, or the item refuses to ever reopen.
+            owner?.ForgetSubmenu();
+            open?.Kill();
+        }
+
+        /// <summary>Takes this popup's own submenu down with it, so closing
+        /// a level closes the whole tail below it however deep it goes.</summary>
+        public override void Kill()
+        {
+            CloseSubmenu();
+            base.Kill();
         }
 
         private void HandleWheel(ScrollEventArgs args)

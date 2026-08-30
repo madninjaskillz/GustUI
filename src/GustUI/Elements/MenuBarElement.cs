@@ -133,7 +133,7 @@ namespace GustUI.Elements
                 open.Kill();
             }
 
-            FruitPopupMenu popup = new FruitPopupMenu(section.SubItems, 300, false, this);
+            FruitPopupMenu popup = new FruitPopupMenu(section.SubItems, 300, this);
             TVVector ps = args.Element.GetActualPosition();
             TVVector sz = args.Element.GetSize();
             popup.Set<PositionTrait>(new TVVector(ps.X, ps.Y + sz.Y));
