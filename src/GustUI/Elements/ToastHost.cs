@@ -38,6 +38,21 @@ public sealed class Toast
 
     public bool IsOpen { get; internal set; } = true;
 
+    /// <summary>
+    /// Resting opacity, 0..1. Defaults to fully opaque, which is what a toast
+    /// that is only up for a few seconds wants.
+    ///
+    /// MULTIPLIED INTO the enter/exit fade rather than replacing it, so a
+    /// half-opaque toast still animates all the way from nothing up to its own
+    /// resting level and back down. Setting Content.Opacity directly cannot
+    /// work: the host overwrites it every frame to drive that fade.
+    ///
+    /// For a toast that STAYS UP -- one showing transport or progress rather
+    /// than reporting an event -- so it reads as a layer over the app instead
+    /// of a panel bolted onto it.
+    /// </summary>
+    public float Opacity { get; set; } = 1f;
+
     /// <summary>Seconds this toast has been up, used for its own expiry and
     /// for the entrance animation.</summary>
     internal double Age { get; set; }
@@ -304,7 +319,7 @@ public sealed class ToastHost
                 toast.DrawnAt += (y - toast.DrawnAt) * 0.35f;
             }
 
-            content.Opacity = Math.Clamp(eased * (1f - exit), 0f, 1f);
+            content.Opacity = Math.Clamp(eased * (1f - exit) * toast.Opacity, 0f, 1f);
             content.Set<PositionTrait>(new TVVector(x, toast.DrawnAt));
 
             cursor = bottom
