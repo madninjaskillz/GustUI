@@ -214,9 +214,9 @@ public sealed class ToastHost
         {
             SizeFitsChildren = true,
 
-            // Over everything, including modals — a toast that a dialog can
-            // hide is a toast nobody reads.
-            IsOverlay = true,
+            // Over everything, including modals (ModalDepth is 60000) — a
+            // toast a dialog can hide is a toast nobody reads. Depth alone
+            // settles it now that the batch draws in strict order.
             Depth = 90000,
         };
 

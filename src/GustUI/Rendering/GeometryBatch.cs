@@ -28,37 +28,45 @@ namespace GustUI.Rendering
     /// index ceiling (65535) — the same hard limit DrawManager.DrawTriangles
     /// already documents; Reach's index buffers are 16-bit only.
     ///
-    /// THREE PARALLEL STREAMS (2026-08-20): appends route into one of
-    /// nonText/text/overlay instead of one shared stream in strict draw
-    /// order. Found profiling ezmuze-studio's sequencer: ~2000 segments/
-    /// frame at ~4300 visible elements, roughly one per two elements,
-    /// because tree-walk draw order constantly interleaves text (a hard
-    /// shader boundary — SDF glyphs need SdfText.fx, everything else needs
-    /// GeometryBatch.fx, so a text draw ALWAYS closes whatever segment was
-    /// open) with non-text content. Sorting the SEGMENT LIST alone can't
-    /// fix this: a segment is just an index range into a buffer already
-    /// laid out in original append order, so two same-key segments
-    /// separated by a different-key one aren't physically adjacent —
-    /// merging them into one DrawIndexedPrimitives call needs the
-    /// underlying vertex data to actually BE contiguous. Routing appends
-    /// into separate accumulators achieves that for free: each stream's
-    /// own content lands contiguously regardless of how it was interleaved
-    /// in tree order, so within-stream segment count drops to genuine
-    /// texture/blend/border-state changes only.
+    /// ONE STREAM, STRICT APPEND ORDER (2026-08-30). What is drawn is
+    /// exactly what the tree walk asked for, in the order it asked, and
+    /// Element.Draw has already sorted that walk by Depth. This class does
+    /// not reorder anything.
     ///
-    /// Flush() draws nonText, then text, then overlay. "nonText before
-    /// text" is safe for ordinary tiled content (a label sits on top of
-    /// its own container's fill, siblings in a grid don't overlap each
-    /// other) but is NOT a general reordering guarantee — anything that
-    /// must render on top of OTHER text breaks it (found via
-    /// SequencerView's own Depth constants: dragDropGhost/dragDropBadge/
-    /// playhead are the only elements placed above DepthRunLabel, i.e. the
-    /// only ones actually relying on rendering over other elements' text).
-    /// Those opt into `overlay` via Element.IsOverlay, which Element.Draw()
-    /// turns into PushOverlay/PopOverlay around that element's ENTIRE
-    /// subtree (see PushOverlay's own doc) — so this is not "GeometryBatch
-    /// decides what's safe to reorder," it's "the app declares what needs
-    /// strict order, GeometryBatch keeps that separate from what doesn't."
+    /// It used to (2026-08-20 to 2026-08-30): three parallel streams,
+    /// nonText/text/overlay, flushed in that order. The reason was real —
+    /// a text draw is a hard shader boundary (SDF glyphs need SdfText.fx,
+    /// everything else GeometryBatch.fx, so a glyph ALWAYS closes the open
+    /// segment), tree order interleaves text with non-text constantly, and
+    /// the sequencer was fragmenting into ~2000 segments a frame at ~4300
+    /// elements. Sorting the segment list could not fix it, since a segment
+    /// is an index range into a buffer already laid out in append order;
+    /// only separate accumulators make same-key content physically
+    /// contiguous.
+    ///
+    /// The cost was that the frame no longer drew in the order it was
+    /// written. That is harmless for ordinary tiled content — a label sits
+    /// on its own container's fill, grid siblings do not overlap — and
+    /// wrong for anything that must cover ANOTHER element's text, which is
+    /// most of what a UI does when it puts something on top of something
+    /// else. Depth stopped deciding that, and Element.IsOverlay appeared to
+    /// opt a subtree back into strict order. Thirteen call sites ended up
+    /// setting it, four of them modals, which is the tell: a modal should
+    /// not have to know how the renderer batches in order to cover what is
+    /// beneath it. Text went on showing through solid panels regardless.
+    ///
+    /// So it was measured rather than argued about. Maximised sequencer,
+    /// 1232 elements: three streams gave 80 segments and 1.69 ms of draw
+    /// time; one stream gave 257 segments and 1.57 ms. Triple the draw
+    /// calls, no cost that shows up in a frame — 257 DrawIndexedPrimitives
+    /// is simply not a lot. The split was defending a number that had
+    /// stopped mattering, and charging correctness for it.
+    ///
+    /// If segment count ever does start mattering, the fix is to remove the
+    /// shader boundary rather than reorder around it: give glyphs and shapes
+    /// one shader and one atlas so they share segments outright. That is a
+    /// real project (per-vertex text params, multi-atlas binding) and this
+    /// note is here so nobody reaches for the reordering again first.
     /// </summary>
     public class GeometryBatch
     {
@@ -229,31 +237,42 @@ namespace GustUI.Rendering
         }
 
         private readonly GraphicsDevice device;
-        private readonly Accumulator nonText = new Accumulator();
-        private readonly Accumulator text = new Accumulator();
-
-        // Third stream for content that must NOT be subject to the
-        // "all non-text, then all text" reordering above — anything whose
-        // Depth places it above DepthRunLabel in SequencerView's own
-        // layering (dragDropGhost, dragDropBadge, playhead: the only
-        // elements there that need to render on top of OTHER text, not
-        // just their own). Draws last, in original append order, exactly
-        // like the single accumulator this class used to be — no reorder
-        // risk, just kept separate so the other two streams stay free to
-        // batch. Toggled by Element.Draw() (see Element.IsOverlay) via
-        // PushOverlay/PopOverlay around one child's whole subtree, so
-        // everything a flagged element draws — including its own children,
-        // e.g. dragDropBadge's label — lands here together, preserving
-        // their OWN relative order (rect under its own text) correctly.
-        private readonly Accumulator overlay = new Accumulator();
-        private int overlayDepth;
+        // ONE stream, in strict append order (2026-08-30). Append order is
+        // tree draw order, which Element.Draw has already sorted by Depth --
+        // so what is drawn is exactly what the app asked for, and Depth means
+        // what it says.
+        //
+        // There were three (nonText/text/overlay), because a text draw is a
+        // hard shader boundary and tree order interleaves text with non-text
+        // constantly, so one stream fragmented into a segment every couple of
+        // elements. Routing them apart made each stream's content contiguous
+        // and cut the segment count hard.
+        //
+        // It also silently reordered the frame: all non-text, then all text,
+        // then the overlay stream. That is fine until something has to sit on
+        // top of ANOTHER element's text, at which point Depth stopped meaning
+        // anything and the only way out was Element.IsOverlay, a flag opting a
+        // subtree into the last stream. Thirteen places ended up setting it --
+        // four modals among them, which is the tell: a modal should not need
+        // to know how the renderer batches in order to cover what is under it.
+        // Their own comments recorded the damage ("neither depth nor parenting
+        // was ever going to be", "non-text always draws before text now, Depth
+        // or not") and text was still showing through solid panels.
+        //
+        // Measured before removing it, maximised sequencer, 1232 elements:
+        // three streams 80 segments and 1.69 ms of draw; one stream 257
+        // segments and 1.57 ms. Triple the draw calls and no cost that shows
+        // up in a frame -- 257 is simply not a lot for a GPU. The split was
+        // optimising a number that had stopped mattering, and paying for it in
+        // correctness.
+        private readonly Accumulator stream = new Accumulator();
 
         public GeometryBatch(GraphicsDevice device)
         {
             this.device = device;
         }
 
-        public bool IsEmpty => nonText.IsEmpty && text.IsEmpty && overlay.IsEmpty;
+        public bool IsEmpty => stream.IsEmpty;
 
         /// <summary>
         /// True once any stream has accumulated more than
@@ -262,14 +281,7 @@ namespace GustUI.Rendering
         /// and calls Flush. Bounds a frame's buffer growth now that scissor
         /// changes no longer do it as a side effect.
         /// </summary>
-        public bool WantsFlush =>
-            nonText.VertexCount > MaxVerticesBeforeFlush
-            || text.VertexCount > MaxVerticesBeforeFlush
-            || overlay.VertexCount > MaxVerticesBeforeFlush;
-
-        public void PushOverlay() => overlayDepth++;
-
-        public void PopOverlay() => overlayDepth--;
+        public bool WantsFlush => stream.VertexCount > MaxVerticesBeforeFlush;
 
         // Segment count (one DrawIndexedPrimitives call each in Flush) is
         // NOT the same as flush count (FrameProfiler's "flushes") — many
@@ -290,14 +302,9 @@ namespace GustUI.Rendering
         /// <summary>Call once at the start of each frame, before any Append* calls.</summary>
         public void BeginFrame()
         {
-            nonText.BeginFrame();
-            text.BeginFrame();
-            overlay.BeginFrame();
-            overlayDepth = 0;
+            stream.BeginFrame();
             SegmentsThisFrame = 0;
         }
-
-        private Accumulator SelectAccumulator(bool isText) => overlayDepth > 0 ? overlay : (isText ? text : nonText);
 
         private static void UVRect(Texture2D texture, Rectangle srcRect, out float u0, out float v0, out float u1, out float v1)
         {
@@ -356,7 +363,7 @@ namespace GustUI.Rendering
 
             color = Fade(color);
 
-            Accumulator acc = SelectAccumulator(false);
+            Accumulator acc = stream;
             acc.BeginSegmentIfNeeded(texture, blend, 4);
             acc.EnsureCapacity(4, 6);
 
@@ -393,7 +400,7 @@ namespace GustUI.Rendering
                 return;
             }
 
-            Accumulator acc = SelectAccumulator(false);
+            Accumulator acc = stream;
             acc.BeginSegmentIfNeeded(texture, blend, 4);
             acc.EnsureCapacity(4, 6);
 
@@ -424,7 +431,7 @@ namespace GustUI.Rendering
                 return;
             }
 
-            Accumulator acc = SelectAccumulator(false);
+            Accumulator acc = stream;
             acc.BeginSegmentIfNeeded(texture, blend, 4);
             acc.EnsureCapacity(4, 6);
 
@@ -495,7 +502,7 @@ namespace GustUI.Rendering
             color = Fade(color);
             borderColor = Fade(borderColor);
 
-            Accumulator acc = SelectAccumulator(true);
+            Accumulator acc = stream;
             var textParams = new TextParams { Smoothing = smoothing, BorderWidth = borderWidth, BorderColor = borderColor };
             acc.BeginSegmentIfNeeded(atlas, null, 4, true, textParams);
             acc.EnsureCapacity(4, 6);
@@ -557,7 +564,7 @@ namespace GustUI.Rendering
             int addVertices = verts.Length;
             int addIndices = primitiveCount * 3;
 
-            Accumulator acc = SelectAccumulator(false);
+            Accumulator acc = stream;
             acc.BeginSegmentIfNeeded(texture, blend, addVertices);
             acc.EnsureCapacity(addVertices, addIndices);
 
@@ -609,7 +616,7 @@ namespace GustUI.Rendering
             int addVertices = verts.Length;
             int addIndices = primitiveCount * 3;
 
-            Accumulator acc = SelectAccumulator(false);
+            Accumulator acc = stream;
             acc.BeginSegmentIfNeeded(texture, blend, addVertices);
             acc.EnsureCapacity(addVertices, addIndices);
 
@@ -657,7 +664,7 @@ namespace GustUI.Rendering
             int addVertices = localVerts.Length;
             int addIndices = primitiveCount * 3;
 
-            Accumulator acc = SelectAccumulator(false);
+            Accumulator acc = stream;
             acc.BeginSegmentIfNeeded(texture, blend, addVertices);
             acc.EnsureCapacity(addVertices, addIndices);
 
@@ -720,20 +727,16 @@ namespace GustUI.Rendering
         /// </summary>
         public void Flush(Effect flatEffect, Effect textEffect)
         {
-            nonText.CloseSegment();
-            text.CloseSegment();
-            overlay.CloseSegment();
+            stream.CloseSegment();
 
-            if (nonText.IndexCount == 0 && text.IndexCount == 0 && overlay.IndexCount == 0)
+            if (stream.IndexCount == 0)
             {
                 return;
             }
 
             using (Managers.Telemetry.Scope("Draw.GeometryFlush.Submit"))
             {
-                FlushAccumulator(nonText, flatEffect, textEffect);
-                FlushAccumulator(text, flatEffect, textEffect);
-                FlushAccumulator(overlay, flatEffect, textEffect);
+                FlushAccumulator(stream, flatEffect, textEffect);
             }
 
             FrameProfiler.CountFlush();
