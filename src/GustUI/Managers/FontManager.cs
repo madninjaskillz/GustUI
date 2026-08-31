@@ -127,6 +127,12 @@ namespace GustUI.Managers
         private static readonly char[] ProsePunctuation =
         {
             '\u00A0',  // no-break space
+            '\u01A9',  // SIGMA - ezmuze central prices in it. A price drawn
+                       // without its currency is not a smaller fault than a
+                       // blank glyph: "3.00" states a different thing from
+                       // the price actually being asked. Baked here rather
+                       // than worked around in one caller, because every
+                       // future price has exactly the same problem.
             '\u00B0',  // degree — used by anything showing an angle
             '\u00D7',  // multiplication sign, for "2 × 4"
             '\u2013',  // en dash
