@@ -112,6 +112,30 @@ namespace GustUI
         /// </summary>
         public bool SolidBackground => solidBackground;
 
+        /// <summary>
+        /// Roughly how much memory this holds, for a caller that caches these
+        /// and has to bound the cache.
+        ///
+        /// The mipmap is the whole of it: a base level of interleaved min/max
+        /// plus successively halved levels, so the total is about twice the
+        /// base. Approximate because it ignores the object headers and the
+        /// list itself, which are noise beside the sample arrays — a caller
+        /// wants this to decide what to evict, not to audit the heap.
+        /// </summary>
+        public long ApproximateBytes
+        {
+            get
+            {
+                long total = 0;
+                for (int i = 0; i < levels.Count; i++)
+                {
+                    total += (long)levels[i].Length * sizeof(float);
+                }
+
+                return total;
+            }
+        }
+
         public int LevelCount => levels.Count;
 
         public int BaseColumns => levels[0].Length / 2;
