@@ -1,4 +1,5 @@
 ﻿using GustUI.Extensions;
+using Microsoft.Xna.Framework;
 using GustUI.Traits;
 using GustUI.TraitValues;
 using System;
@@ -31,6 +32,27 @@ namespace GustUI.Elements
         /// class entirely) previously left a permanent gap where it used to
         /// sit, and the stack never shrank back down.</summary>
         private List<Element> lastLayoutItems;
+
+        /// <summary>The child sizes <see cref="RecalculatePositions"/> last
+        /// laid out against, parallel to <see cref="lastLayoutItems"/>.
+        ///
+        /// Needed because the <see cref="Subscribe"/> event below only fires
+        /// for a child that WRITES its SizeTrait, and a whole class of child
+        /// never does: one using <see cref="Element.SizeFitsChildren"/>
+        /// computes its size live inside <c>GetSize()</c> and leaves the trait
+        /// untouched for ever (see ElementExtensions.GetSize, and
+        /// InputManager's own note on the same asymmetry). Such a child can
+        /// grow by hundreds of pixels without this stack hearing a thing.
+        ///
+        /// That was ezmuze bug #29: the welcome screen's whole body sits in a
+        /// SizeFitsChildren container, its "What's new" list fills in when the
+        /// change log finishes loading a moment after the modal is built, and
+        /// the stack above it went on reporting the height it had before that
+        /// arrived. The modal sized itself from the stale number, so the demo
+        /// grid hung out of the bottom of the dialog, unclipped -- and the
+        /// modal's own "have I overflowed?" check read the same stale number,
+        /// so it never grew a scrollbar either.</summary>
+        private readonly List<Vector2> lastChildSizes = new List<Vector2>();
 
         public VerticalStackElement()
         {
@@ -76,10 +98,39 @@ namespace GustUI.Elements
         {
             base.Update(parent);
 
-            if (!ReferenceEquals(this.Children.Items, lastLayoutItems))
+            if (!ReferenceEquals(this.Children.Items, lastLayoutItems) || ChildSizesChanged())
             {
                 RecalculatePositions();
             }
+        }
+
+        /// <summary>Whether any child is a different size than it was when
+        /// this stack last laid out -- the poll that catches the children
+        /// <see cref="Subscribe"/> cannot hear from (see
+        /// <see cref="lastChildSizes"/>).
+        ///
+        /// Compares every child rather than just the total height: two
+        /// children changing by equal and opposite amounts in one frame leaves
+        /// the total identical while everything below the first one is in the
+        /// wrong place.</summary>
+        private bool ChildSizesChanged()
+        {
+            List<Element> items = this.Children.Items;
+            if (items.Count != lastChildSizes.Count)
+            {
+                return true;
+            }
+
+            for (int i = 0; i < items.Count; i++)
+            {
+                TVVector size = items[i].GetSize();
+                if (size.X != lastChildSizes[i].X || size.Y != lastChildSizes[i].Y)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void RecalculatePositions()
@@ -87,10 +138,21 @@ namespace GustUI.Elements
             var currentY = 0f;
             var maxWidth = 0f;
             var items = this.Children.Items;
+            lastChildSizes.Clear();
             foreach (var child in items)
             {
-                child.Set<PositionTrait>(new TVVector(0, currentY));
+                // Only WRITE a position that actually moved. This runs from
+                // Update now, so it can run every frame while something in the
+                // stack is still settling, and a trait write fires listeners
+                // whether or not the value changed.
+                TVVector at = child.GetRelativePosition();
+                if (at.X != 0f || at.Y != currentY)
+                {
+                    child.Set<PositionTrait>(new TVVector(0, currentY));
+                }
+
                 TVVector size = child.GetSize();
+                lastChildSizes.Add(new Vector2(size.X, size.Y));
                 currentY += size.Y + Spacing;
                 maxWidth = Math.Max(maxWidth, size.X);
             }
@@ -110,7 +172,15 @@ namespace GustUI.Elements
             // stack doesn't just clip visually, it makes every child
             // silently unclickable, not merely a cosmetic default).
             float width = Math.Max(maxWidth, this.GetSize().X);
-            this.Set<SizeTrait>(new TVVector(width, currentY));
+            TVVector own = this.GetSize();
+            if (own.X != width || own.Y != currentY)
+            {
+                // Same guard, and it matters more here: this write is what
+                // notifies a PARENT stack, so an unguarded one every frame
+                // would walk the whole ancestor chain for no change.
+                this.Set<SizeTrait>(new TVVector(width, currentY));
+            }
+
             lastLayoutItems = items;
         }
     }
