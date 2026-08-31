@@ -676,7 +676,7 @@ namespace GustUI.Elements
             label.Set<PositionTrait>(new TVVector(TabPaddingX, 0));
             label.Set<SizeTrait>(new TVVector(140, ModalTitleBarElement.BarHeight));
             label.Set<FontTrait>(Resources.StaticResources.Theme.UiFontSmall);
-            label.Set<ForegroundColorTrait>(new TVColor(Resources.StaticResources.Theme.BodyText));
+            label.Set<ForegroundColorTrait>(new TVColor(() => Resources.StaticResources.Theme.BodyText));
             label.Set<VerticalAlignmentTrait>(new TVVerticalAlignment { Alignment = VerticalAlignment.Center });
             label.Set<TextTrait>(new TVText(entry.Title));
             button.AddChild(label, "label");
@@ -699,7 +699,7 @@ namespace GustUI.Elements
                 Border = 0,
             });
 
-            closeGlyph.Set<ForegroundColorTrait>(new TVColor(Resources.StaticResources.Theme.BodyText));
+            closeGlyph.Set<ForegroundColorTrait>(new TVColor(() => Resources.StaticResources.Theme.BodyText));
             closeGlyph.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment { Alignment = HorizontalAlignment.Center });
             closeGlyph.Set<VerticalAlignmentTrait>(new TVVerticalAlignment { Alignment = VerticalAlignment.Center });
             closeGlyph.Set<TextTrait>(Resources.StaticResources.Theme.Icons.CloseIcon.ToTextTrait());
@@ -752,7 +752,7 @@ namespace GustUI.Elements
                 Border = 0,
             });
 
-            element.Set<ForegroundColorTrait>(new TVColor(Resources.StaticResources.Theme.BodyText));
+            element.Set<ForegroundColorTrait>(new TVColor(() => Resources.StaticResources.Theme.BodyText));
             element.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment { Alignment = HorizontalAlignment.Center });
             element.Set<VerticalAlignmentTrait>(new TVVerticalAlignment { Alignment = VerticalAlignment.Center });
             element.Set<TextTrait>(glyph);

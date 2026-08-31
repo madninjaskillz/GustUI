@@ -43,6 +43,23 @@ namespace GustUI.Elements
         private readonly ArrowSegment segment;
         private readonly int arrowWidth;
 
+        /// <summary>Live-colour form — see BasicButtonElement's own overload
+        /// and ezmuze bug board #66.</summary>
+        public SplitButtonElement(
+            string text,
+            Func<Color> foreground,
+            TVFill background,
+            TVVector position = null,
+            TVVector size = null,
+            TVEvent<ClickEventArgs> onClick = null,
+            TVEvent<ClickEventArgs> onMore = null,
+            TVFill segmentFill = null,
+            int arrowWidth = DefaultArrowWidth)
+            : this(text, Color.White, background, position, size, onClick, onMore, segmentFill, arrowWidth)
+        {
+            Set<ForegroundColorTrait>(new TVColor(foreground));
+        }
+
         public SplitButtonElement(
             string text,
             Color foreground,

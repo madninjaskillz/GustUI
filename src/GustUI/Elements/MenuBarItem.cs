@@ -51,7 +51,13 @@ namespace GustUI.Elements
             // text). A snapshot at construction, not a live re-read every
             // frame — matches that same title-text precedent (a menu bar
             // built before a theme switch keeps its old color until rebuilt).
-            textElement.Set<ForegroundColorTrait>(new TVColor(menuItem.Enabled ? Resources.StaticResources.Theme.BodyText : Resources.StaticResources.Theme.BodyText * 0.5f));
+            // LIVE: the menu bar is built once and lives for the whole session, so a
+            // captured colour left File/Edit/View/Help painted in the palette that
+            // was current at startup — invisible after a switch to Light (#66).
+            bool enabled = menuItem.Enabled;
+            textElement.Set<ForegroundColorTrait>(new TVColor(() => enabled
+                ? Resources.StaticResources.Theme.BodyText
+                : Color.Lerp(Resources.StaticResources.Theme.SurfacePanel, Resources.StaticResources.Theme.BodyText, 0.5f)));
             textElement.Set<TextTrait>(new TVText(menuItem.Text));
         }
     }

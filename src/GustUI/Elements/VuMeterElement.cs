@@ -29,7 +29,12 @@ namespace GustUI.Elements;
 [ElementTraits(typeof(PositionTrait), typeof(SizeTrait))]
 public class VuMeterElement : Element
 {
-    public Color BackColor { get; set; } = new Color(12, 12, 16);
+    /// <summary>The unlit well. Null (the default) means "ask the theme",
+    /// which is what makes the meter follow a palette switch — it used to be a
+    /// hardcoded near-black and stayed a black slab under the light theme
+    /// (ezmuze bug board #66). Resolved on every draw rather than captured at
+    /// construction, for the same reason.</summary>
+    public Color? BackColor { get; set; }
 
     /// <summary>Bar color when <see cref="UseLevelColor"/> is false.</summary>
     public Color BarColor { get; set; } = new Color(90, 200, 110);
@@ -151,7 +156,7 @@ public class VuMeterElement : Element
         {
             var manager = Resources.StaticResources.DrawManager;
 
-            manager.DrawFilledRectangle(new Rectangle((int)pos.X, (int)pos.Y, w, h), BackColor);
+            manager.DrawFilledRectangle(new Rectangle((int)pos.X, (int)pos.Y, w, h), BackColor ?? Resources.StaticResources.Theme.MeterWell);
 
             int gap = Math.Min(BarGap, w - 2);
             int barW = (w - gap) / 2;

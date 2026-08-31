@@ -94,6 +94,13 @@ namespace GustUI
         /// less opacity in light mode to read the same way against a bright
         /// backdrop than in dark mode.</summary>
         public Color ElevationShadow;
+
+        /// <summary>The unlit well behind a meter's bars, and behind the piano
+        /// roll's keys. A RECESSED surface, so it is darker than the panel in
+        /// the dark palette and lighter-grey in the light one — it was a
+        /// hardcoded near-black, which read as a black slab cut into a white
+        /// dialog the moment the light theme was selected (ezmuze #66).</summary>
+        public Color MeterWell;
     }
 
     public class Theme
@@ -195,6 +202,8 @@ namespace GustUI
             AccentVolume = new Color(96, 224, 160),
             AccentPan = new Color(224, 199, 64),
 
+            MeterWell = new Color(12, 12, 16),
+
             PositiveBase = new Color(58, 108, 74), PositiveHover = new Color(74, 138, 94), PositivePress = new Color(96, 168, 116),
             NegativeBase = new Color(120, 58, 58), NegativeHover = new Color(158, 72, 72), NegativePress = new Color(196, 92, 92),
             NeutralBase = new Color(52, 52, 60), NeutralHover = new Color(66, 66, 76), NeutralPress = new Color(80, 80, 92),
@@ -225,6 +234,8 @@ namespace GustUI
             AccentVolume = new Color(30, 150, 95),
             AccentPan = new Color(170, 140, 10),
 
+            MeterWell = new Color(214, 216, 222),
+
             PositiveBase = new Color(70, 130, 90), PositiveHover = new Color(88, 158, 110), PositivePress = new Color(108, 182, 134),
             NegativeBase = new Color(160, 72, 72), NegativeHover = new Color(184, 90, 90), NegativePress = new Color(206, 112, 112),
             NeutralBase = new Color(224, 225, 230), NeutralHover = new Color(210, 212, 218), NeutralPress = new Color(198, 200, 208),
@@ -242,6 +253,7 @@ namespace GustUI
         // tuning (a module's own per-section accents, a specific knob's
         // hand-picked face color) is still fine to keep local to its view.
         public Color SurfaceBackdrop, SurfacePanel, SurfaceHeader, SurfaceRaised, SurfaceBorder, BodyText;
+        public Color MeterWell;
         public Color MenuBarFillTop, MenuBarFillBottom;
         public Color AccentSelection, AccentLiveAutomation, AccentModPositive, AccentModNegative, AccentPlayhead, AccentMuteOn, AccentMuteOff, AccentWarning, AccentVolume, AccentPan;
         public Color CategorySource, CategoryEffects, CategoryModulation, CategoryUtility, CategoryComposite;
@@ -280,6 +292,7 @@ namespace GustUI
             SurfaceRaised = p.SurfaceRaised;
             SurfaceBorder = p.SurfaceBorder;
             BodyText = p.BodyText;
+            MeterWell = p.MeterWell;
 
             MenuBarFillTop = p.MenuBarFillTop;
             MenuBarFillBottom = p.MenuBarFillBottom;

@@ -74,6 +74,30 @@ namespace GustUI.Elements
 
         }
 
+        /// <summary>
+        /// Same, with a LIVE label colour — pass <c>() =&gt; Theme.BodyText</c>
+        /// and the label follows a palette change instead of freezing at the
+        /// value it was built with.
+        ///
+        /// A label on the neutral fill has to do this: neutral is a dark grey
+        /// in the dark palette and a near-white in the light one, so a fixed
+        /// colour is unreadable in one of them whichever you pick (ezmuze bug
+        /// board #66). Positive and negative fills stay dark enough in both
+        /// that a fixed white is still correct there.
+        /// </summary>
+        public BasicButtonElement(string text, Func<Color> foreground, TVFill background, TVVector position = null, TVVector size = null, TVEvent<ClickEventArgs> onClick = null, TVFill hoverFill = null, TVFill clickFill = null)
+            : this(Resources.StaticResources.Theme.UiFont, text, Color.White, background, position, size, onClick, hoverFill, clickFill)
+        {
+            Set<ForegroundColorTrait>(new TVColor(foreground));
+        }
+
+        /// <summary>Live-colour form of the ButtonStates constructor.</summary>
+        public BasicButtonElement(string text, Func<Color> foreground, ButtonStates buttonStates, TVVector position = null, TVVector size = null, TVEvent<ClickEventArgs> onClick = null)
+            : this(text, Color.White, buttonStates, position, size, onClick)
+        {
+            Set<ForegroundColorTrait>(new TVColor(foreground));
+        }
+
         public BasicButtonElement(TVFont font, string text, Color foreground, TVFill background, TVVector position = null, TVVector size = null, TVEvent<ClickEventArgs> onClick = null, TVFill hoverFill = null, TVFill clickFill = null)
         {
             textElement = this.AddChildElement<TextElement>();
