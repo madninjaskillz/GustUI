@@ -53,6 +53,24 @@ public class WaveformElement : Element
     public int TileCount { get; set; } = 1;
 
     /// <summary>
+    /// How much of <see cref="Data"/> the LAST tile covers, 0..1 (1 = a whole
+    /// tile like all the others, the unchanged default). Everything before it
+    /// is always a full tile.
+    ///
+    /// This is what makes a tile count of "3.25" expressible: the host sets
+    /// <see cref="TileCount"/> 4 and this to 0.25, and the final tile draws
+    /// the leading quarter of the data in a quarter-width slot instead of the
+    /// whole thing squeezed into it. Without it a clip whose length isn't an
+    /// exact multiple of its tile's shows the entire source crammed into a
+    /// fraction of the width — a picture of audio that plays several times
+    /// too fast, rather than of the beginning of the audio (ezmuze-studio bug
+    /// board #38: trimming a clip made its waveform unrecognisable). The
+    /// caller supplies no source OFFSET because its counterpart doesn't need
+    /// one — a partial tile is always a leading window.
+    /// </summary>
+    public float LastTileFraction { get; set; } = 1f;
+
+    /// <summary>
     /// Optional decay-tail "ghost" waveform (ezmuze-studio pattern
     /// render-cache rearchitecture, item 5): drawn at reduced opacity
     /// (<see cref="GhostTint"/>) immediately after each INTERNAL tile
@@ -99,29 +117,50 @@ public class WaveformElement : Element
                 }
 
                 int tiles = Math.Max(1, TileCount);
-                int tileWidth = Math.Max(1, totalWidth / tiles);
+                float lastFraction = MathHelper.Clamp(LastTileFraction, 0f, 1f);
+
+                // Tile widths are proportional to the SPAN, not the count: a
+                // 3.25-tile block gives three full tiles and a quarter-width
+                // one, so a full tile is the same width whether or not the
+                // block ends mid-tile. Dividing by the count instead would
+                // stretch every full tile to cover the shortfall.
+                float span = Math.Max(0.0001f, tiles - 1 + lastFraction);
+                int tileWidth = Math.Max(1, (int)(totalWidth / span));
+
+                // One level serves every tile, partial included: the partial
+                // draws fraction × columns across fraction × tileWidth, so
+                // its columns-per-pixel is the full tile's and the mip that
+                // suits one suits the other.
                 int level = data.SelectLevel(tileWidth);
+
                 int ghostLevel = GhostData != null ? GhostData.SelectLevel(Math.Max(1, GhostWidthPx)) : 0;
                 int drawnWidth = 0;
                 for (int t = 0; t < tiles; t++)
                 {
                     // The last tile absorbs integer-division rounding so the
                     // tiles exactly cover totalWidth with no gap/overhang.
-                    int thisWidth = t == tiles - 1 ? totalWidth - drawnWidth : tileWidth;
+                    bool last = t == tiles - 1;
+                    int thisWidth = last ? totalWidth - drawnWidth : tileWidth;
+                    float fraction = last ? lastFraction : 1f;
                     var rect = new Rectangle((int)pos.X + drawnWidth, (int)pos.Y, thisWidth, height);
                     drawnWidth += thisWidth;
 
+                    if (thisWidth <= 0)
+                    {
+                        continue;
+                    }
+
                     if (RenderMode == WaveformRenderMode.Geometry)
                     {
-                        DrawGeometry(manager, data, level, rect, Tint);
+                        DrawGeometry(manager, data, level, rect, Tint, fraction);
                     }
                     else if (RenderMode == WaveformRenderMode.Columns)
                     {
-                        DrawColumns(manager, data.LevelData(level), rect, Tint);
+                        DrawColumns(manager, data.LevelData(level), rect, Tint, fraction);
                     }
                     else
                     {
-                        DrawGeometryBaked(manager, data, level, rect, Tint);
+                        DrawGeometryBaked(manager, data, level, rect, Tint, fraction);
                     }
 
                     if (GhostData != null && t < tiles - 1)
@@ -132,15 +171,15 @@ public class WaveformElement : Element
                             var ghostRect = new Rectangle((int)pos.X + drawnWidth, (int)pos.Y, ghostWidth, height);
                             if (RenderMode == WaveformRenderMode.Geometry)
                             {
-                                DrawGeometry(manager, GhostData, ghostLevel, ghostRect, GhostTint);
+                                DrawGeometry(manager, GhostData, ghostLevel, ghostRect, GhostTint, 1f);
                             }
                             else if (RenderMode == WaveformRenderMode.Columns)
                             {
-                                DrawColumns(manager, GhostData.LevelData(ghostLevel), ghostRect, GhostTint);
+                                DrawColumns(manager, GhostData.LevelData(ghostLevel), ghostRect, GhostTint, 1f);
                             }
                             else
                             {
-                                DrawGeometryBaked(manager, GhostData, ghostLevel, ghostRect, GhostTint);
+                                DrawGeometryBaked(manager, GhostData, ghostLevel, ghostRect, GhostTint, 1f);
                             }
                         }
                     }
@@ -151,21 +190,26 @@ public class WaveformElement : Element
         base.Draw();
     }
 
-    private static void DrawGeometry(Managers.DrawManager manager, WaveformData data, int level, Rectangle rect, Color tint)
+    private static void DrawGeometry(
+        Managers.DrawManager manager, WaveformData data, int level, Rectangle rect, Color tint, float sourceFraction)
     {
-        (VertexPositionColor[] vertices, short[] indices, int primitiveCount) = data.BuildGeometry(level, rect, tint);
+        (VertexPositionColor[] vertices, short[] indices, int primitiveCount) = data.BuildGeometry(level, rect, tint, sourceFraction);
         manager.DrawTriangles(vertices, indices, primitiveCount);
     }
 
-    private static void DrawGeometryBaked(Managers.DrawManager manager, WaveformData data, int level, Rectangle rect, Color tint)
+    private static void DrawGeometryBaked(
+        Managers.DrawManager manager, WaveformData data, int level, Rectangle rect, Color tint, float sourceFraction)
     {
-        (GeometryVertex[] vertices, short[] indices, int primitiveCount) = data.GetGeometryVertices(level, rect.Width, rect.Height);
+        (GeometryVertex[] vertices, short[] indices, int primitiveCount) =
+            data.GetGeometryVertices(level, rect.Width, rect.Height, sourceFraction);
         manager.DrawCachedTriangles(vertices, indices, primitiveCount, new Vector2(rect.X, rect.Y), tint);
     }
 
-    private void DrawColumns(Managers.DrawManager manager, float[] minMax, Rectangle rect, Color tint)
+    private void DrawColumns(
+        Managers.DrawManager manager, float[] minMax, Rectangle rect, Color tint, float sourceFraction)
     {
-        int columns = minMax.Length / 2;
+        // Same leading-window rule as BuildGeometry's, in the per-pixel path.
+        int columns = Math.Clamp((int)Math.Round(minMax.Length / 2 * sourceFraction), 1, minMax.Length / 2);
         int height = rect.Height;
 
         for (int x = 0; x < rect.Width; x++)

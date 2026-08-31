@@ -62,6 +62,14 @@ namespace GustUI.Elements
         /// tiling convention).</summary>
         public int TileCount { get; set; } = 1;
 
+        /// <summary>How much of one tile's beat domain the LAST tile covers,
+        /// 0..1 (1 = a whole tile, the unchanged default) — WaveformElement's
+        /// <c>LastTileFraction</c> in the note domain, and set from the same
+        /// host-side number so a block's notes and its waveform never
+        /// disagree about where the clip ends. Notes past the fraction are
+        /// simply not drawn: a clip cut short does not play them.</summary>
+        public float LastTileFraction { get; set; } = 1f;
+
         /// <summary>Opaque background fill; Transparent (default) draws no
         /// background — the host's own block face shows through, matching
         /// the waveform overlay style rather than the baked-texture style.</summary>
@@ -116,7 +124,13 @@ namespace GustUI.Elements
                 }
 
                 int tiles = Math.Max(1, TileCount);
-                int tileWidth = Math.Max(1, totalWidth / tiles);
+                float lastFraction = MathHelper.Clamp(LastTileFraction, 0f, 1f);
+
+                // Widths proportional to the SPAN, not the count — see
+                // WaveformElement.DrawWaveform, which this mirrors exactly so
+                // the two views of a block line up bar for bar.
+                float span = Math.Max(0.0001f, tiles - 1 + lastFraction);
+                int tileWidth = Math.Max(1, (int)(totalWidth / span));
                 float range = MaxPitch - MinPitch;
 
                 // A semitone-ish sliver: dense/wide-range patterns still read
@@ -128,7 +142,9 @@ namespace GustUI.Elements
                 {
                     // The last tile absorbs integer-division rounding, same
                     // as WaveformElement's tiling loop.
-                    int thisWidth = t == tiles - 1 ? totalWidth - drawnWidth : tileWidth;
+                    bool last = t == tiles - 1;
+                    int thisWidth = last ? totalWidth - drawnWidth : tileWidth;
+                    float fraction = last ? lastFraction : 1f;
                     int tileX = (int)pos.X + drawnWidth;
                     drawnWidth += thisWidth;
 
@@ -137,8 +153,8 @@ namespace GustUI.Elements
                         continue;
                     }
 
-                    DrawNotes(manager, Notes, NoteColor, tileX, thisWidth, pos, height, noteHeight, range);
-                    DrawNotes(manager, OverlayNotes, OverlayNoteColor, tileX, thisWidth, pos, height, noteHeight, range);
+                    DrawNotes(manager, Notes, NoteColor, tileX, thisWidth, pos, height, noteHeight, range, fraction);
+                    DrawNotes(manager, OverlayNotes, OverlayNoteColor, tileX, thisWidth, pos, height, noteHeight, range, fraction);
                 }
             }
 
@@ -146,12 +162,19 @@ namespace GustUI.Elements
         }
 
         private void DrawNotes(Managers.DrawManager manager, List<MiniRollNote> notes, Color color,
-            int tileX, int thisWidth, Vector2 pos, int height, int noteHeight, float range)
+            int tileX, int thisWidth, Vector2 pos, int height, int noteHeight, float range, float sourceFraction)
         {
+            // A partial tile shows only the LEADING sourceFraction of the
+            // tile's beat domain, spread across its (proportionally narrower)
+            // width — so the visible domain shrinks and the pixels-per-beat
+            // stays put. Notes beyond it fall out through the same
+            // "wholly outside this tile" test that already existed.
+            double visible = BeatsVisible * Math.Max(0.0001f, sourceFraction);
+
             foreach (MiniRollNote note in notes)
             {
-                float startT = (float)(note.StartBeats / BeatsVisible);
-                float endT = (float)((note.StartBeats + note.LengthBeats) / BeatsVisible);
+                float startT = (float)(note.StartBeats / visible);
+                float endT = (float)((note.StartBeats + note.LengthBeats) / visible);
                 if (endT <= 0f || startT >= 1f)
                 {
                     continue; // wholly outside this tile

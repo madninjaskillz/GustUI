@@ -176,7 +176,8 @@ namespace GustUI
         /// solidBackground data isn't supported here (geometry has no
         /// "tile face" concept — draw the block's own fill separately).
         /// </summary>
-        public (VertexPositionColor[] Vertices, short[] Indices, int PrimitiveCount) BuildGeometry(int level, Rectangle rect, Color tint)
+        public (VertexPositionColor[] Vertices, short[] Indices, int PrimitiveCount) BuildGeometry(
+            int level, Rectangle rect, Color tint, float sourceFraction = 1f)
         {
             float[] minMax = levels[level];
             int columns = minMax.Length / 2;
@@ -184,6 +185,16 @@ namespace GustUI
             {
                 return (Array.Empty<VertexPositionColor>(), Array.Empty<short>(), 0);
             }
+
+            // A PARTIAL draw: only the leading sourceFraction of the data,
+            // spread across the whole rect. The caller has already narrowed
+            // the rect proportionally, so this is a WINDOW into the data, not
+            // a squeeze of all of it — the difference between "this clip
+            // plays the first quarter of the pattern" and "this clip plays
+            // the pattern four times as fast". At least one column survives,
+            // so a vanishingly thin sliver still reads as a waveform rather
+            // than disappearing.
+            columns = Math.Clamp((int)Math.Round(columns * sourceFraction), 1, columns);
 
             // short indices (DrawManager.DrawTriangles) cap this at 32767
             // vertices — a block would need >16383 columns to hit that,
@@ -241,17 +252,39 @@ namespace GustUI
             return (vertices, indices, Math.Max(0, columns - 1) * 2);
         }
 
-        private GeometryVertex[] geometryVertsCache;
-        private short[] geometryIndicesCache;
-        private int geometryPrimitiveCountCache;
-        private int geometryVertsLevel = -1;
-        private int geometryVertsWidth = -1;
-        private int geometryVertsHeight = -1;
+        /// <summary>
+        /// TWO cache slots, not one, and that count is load-bearing rather
+        /// than arbitrary generosity: a tiled block draws N-1 identical FULL
+        /// tiles plus (when its length isn't an exact multiple of the tile's)
+        /// ONE partial tile with a different width and fraction. A one-slot
+        /// cache alternates between those two keys and so re-triangulates
+        /// twice on every single frame — the exact cost this cache exists to
+        /// avoid. Two slots make that pattern hit 100%, and nothing draws a
+        /// third distinct key in one pass.
+        /// </summary>
+        private readonly GeometrySlot[] geometrySlots = { new GeometrySlot(), new GeometrySlot() };
+        private int geometrySlotNext;
+
+        private sealed class GeometrySlot
+        {
+            public GeometryVertex[] Vertices;
+            public short[] Indices;
+            public int PrimitiveCount;
+            public int Level = -1;
+            public int Width = -1;
+            public int Height = -1;
+            public float Fraction = float.NaN;
+
+            public bool Matches(int level, int width, int height, float fraction)
+                => Vertices != null && Level == level && Width == width && Height == height
+                    && Fraction.Equals(fraction);
+        }
 
         /// <summary>
         /// Triangulated-once-then-cached alternative to <see cref="GetTexture"/>:
         /// runs this waveform's geometry (<see cref="BuildGeometry"/>) through
-        /// the triangulation math ONCE per (level, width, height) and caches
+        /// the triangulation math ONCE per (level, width, height,
+        /// sourceFraction) and caches
         /// the resulting vertex/index arrays (in LOCAL space, origin at
         /// (0,0)) — reused on every later call with the same key via
         /// <see cref="Managers.DrawManager.DrawCachedTriangles"/>, which
@@ -269,35 +302,47 @@ namespace GustUI
         /// Baked WHITE (color already carries per-column loudness
         /// brightness) — callers still supply their own tint at draw time,
         /// applied by DrawCachedTriangles. Scrolling and clipping never
-        /// touch this cache — only a genuine (level, width, height) change
-        /// (zoom, row resize) does, exactly the input this method's own
-        /// cache key already is.
+        /// touch this cache — only a genuine (level, width, height,
+        /// sourceFraction) change (zoom, row resize, a re-trim) does, exactly
+        /// the input this method's own cache key already is.
         /// </summary>
-        public (GeometryVertex[] Vertices, short[] Indices, int PrimitiveCount) GetGeometryVertices(int level, int width, int height)
+        public (GeometryVertex[] Vertices, short[] Indices, int PrimitiveCount) GetGeometryVertices(
+            int level, int width, int height, float sourceFraction = 1f)
         {
-            bool hit = geometryVertsCache != null && geometryVertsLevel == level && geometryVertsWidth == width && geometryVertsHeight == height;
-            if (!hit)
+            foreach (GeometrySlot hit in geometrySlots)
             {
-                (VertexPositionColor[] raw, short[] indices, int primitiveCount) = BuildGeometry(level, new Rectangle(0, 0, width, height), Color.White);
-                var verts = new GeometryVertex[raw.Length];
-                for (int i = 0; i < raw.Length; i++)
+                if (hit.Matches(level, width, height, sourceFraction))
                 {
-                    // UV/ClipRect are placeholders — DrawCachedTriangles
-                    // overwrites both (UV from the atlas's current white
-                    // region, ClipRect from the current scissor) every time
-                    // it translates this cache into the batch.
-                    verts[i] = new GeometryVertex(new Vector2(raw[i].Position.X, raw[i].Position.Y), raw[i].Color, Vector2.Zero, Vector4.Zero);
+                    return (hit.Vertices, hit.Indices, hit.PrimitiveCount);
                 }
-
-                geometryVertsCache = verts;
-                geometryIndicesCache = indices;
-                geometryPrimitiveCountCache = primitiveCount;
-                geometryVertsLevel = level;
-                geometryVertsWidth = width;
-                geometryVertsHeight = height;
             }
 
-            return (geometryVertsCache, geometryIndicesCache, geometryPrimitiveCountCache);
+            (VertexPositionColor[] raw, short[] indices, int primitiveCount) =
+                BuildGeometry(level, new Rectangle(0, 0, width, height), Color.White, sourceFraction);
+            var verts = new GeometryVertex[raw.Length];
+            for (int i = 0; i < raw.Length; i++)
+            {
+                // UV/ClipRect are placeholders — DrawCachedTriangles
+                // overwrites both (UV from the atlas's current white
+                // region, ClipRect from the current scissor) every time
+                // it translates this cache into the batch.
+                verts[i] = new GeometryVertex(new Vector2(raw[i].Position.X, raw[i].Position.Y), raw[i].Color, Vector2.Zero, Vector4.Zero);
+            }
+
+            // Round-robin eviction. The two live keys of a tiled block (full
+            // tile, partial tile) alternate, so the slot that is NOT the one
+            // just written is exactly the one wanted next.
+            GeometrySlot slot = geometrySlots[geometrySlotNext];
+            geometrySlotNext = (geometrySlotNext + 1) % geometrySlots.Length;
+            slot.Vertices = verts;
+            slot.Indices = indices;
+            slot.PrimitiveCount = primitiveCount;
+            slot.Level = level;
+            slot.Width = width;
+            slot.Height = height;
+            slot.Fraction = sourceFraction;
+
+            return (slot.Vertices, slot.Indices, slot.PrimitiveCount);
         }
 
     }
