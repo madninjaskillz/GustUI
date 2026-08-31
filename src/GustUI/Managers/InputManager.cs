@@ -170,6 +170,13 @@ namespace GustUI.Managers
 
         public void CaptureMiddlePointer(Element element) => CapturedMiddleElement = element;
 
+        /// <summary>While set, RIGHT-button held/release events route here
+        /// regardless of hover. A third slot, for the same reason the middle
+        /// button got the second one.</summary>
+        public Element CapturedRightElement { get; private set; }
+
+        public void CaptureRightPointer(Element element) => CapturedRightElement = element;
+
         // ---- synthetic input override -------------------------------------
         // Lets an external driver (e.g. an in-process remote-control server)
         // author authoritative MouseState/KeyboardState for a frame instead
@@ -204,6 +211,11 @@ namespace GustUI.Managers
             if (CapturedMiddleElement == element)
             {
                 CapturedMiddleElement = null;
+            }
+
+            if (CapturedRightElement == element)
+            {
+                CapturedRightElement = null;
             }
         }
         
@@ -700,6 +712,7 @@ namespace GustUI.Managers
             // drag keeps getting frames even while something else holds the
             // left-button capture.
             ProcessMiddleButton(mouseState);
+            ProcessRightButton(mouseState);
 
             if (CapturedPointerElement != null)
             {
@@ -869,6 +882,73 @@ namespace GustUI.Managers
                 foreach (Element element in ClickTargets(currentlyHovered).Where(e => e.HasTrait<OnMiddleMouseRelease>()))
                 {
                     Dispatch(element, element.ElementTrait<OnMiddleMouseRelease>().Value(), mouseState);
+                }
+            }
+        }
+
+        /// <summary>
+        /// The right button's press/held/release dispatch, the same shape as
+        /// <see cref="ProcessMiddleButton"/>.
+        ///
+        /// This does NOT replace the <see cref="OnRightClickTrait"/> dispatch
+        /// further down: that one has consumers all over the app which want a
+        /// press edge and nothing else, and it stays exactly where it was so
+        /// their behaviour is untouched. An element declaring both simply hears
+        /// about the press twice, which is what a context menu that also wants
+        /// to know about dragging actually needs.
+        /// </summary>
+        private void ProcessRightButton(MouseState mouseState)
+        {
+            bool down = mouseState.RightButton == ButtonState.Pressed;
+            bool wasDown = previousMouseState.RightButton == ButtonState.Pressed;
+
+            if (CapturedRightElement != null)
+            {
+                Element captured = CapturedRightElement;
+
+                if (down)
+                {
+                    HaveInteracted = true;
+                    if (captured.HasTrait<OnRightMouseHeldDown>())
+                    {
+                        captured.ElementTrait<OnRightMouseHeldDown>().Value().TriggerAction?.Invoke(captured.GetClickArgs(mouseState));
+                    }
+                }
+                else
+                {
+                    if (wasDown && captured.HasTrait<OnRightMouseRelease>())
+                    {
+                        captured.ElementTrait<OnRightMouseRelease>().Value().TriggerAction?.Invoke(captured.GetClickArgs(mouseState));
+                    }
+
+                    CapturedRightElement = null;
+                }
+
+                return;
+            }
+
+            if (down && !wasDown)
+            {
+                HaveInteracted = true;
+                foreach (Element element in ClickTargets(currentlyHovered).Where(e => e.HasTrait<OnRightMousePress>()))
+                {
+                    Dispatch(element, element.ElementTrait<OnRightMousePress>().Value(), mouseState);
+                }
+            }
+            else if (down)
+            {
+                HaveInteracted = true;
+                foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnRightMouseHeldDown>()))
+                {
+                    Dispatch(element, element.ElementTrait<OnRightMouseHeldDown>().Value(), mouseState);
+                }
+            }
+            else if (wasDown)
+            {
+                HaveInteracted = true;
+                foreach (Element element in ClickTargets(currentlyHovered).Where(e => e.HasTrait<OnRightMouseRelease>()))
+                {
+                    Dispatch(element, element.ElementTrait<OnRightMouseRelease>().Value(), mouseState);
                 }
             }
         }

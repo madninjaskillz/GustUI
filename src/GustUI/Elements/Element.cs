@@ -505,6 +505,10 @@ public class Element : IDisposable
     /// InputManager.CaptureMiddleElement.</summary>
     public void CaptureMiddlePointer() => Resources.StaticResources.InputManager.CaptureMiddlePointer(this);
 
+    /// <summary>The right button's capture, in its own slot again - see
+    /// InputManager.CaptureRightElement.</summary>
+    public void CaptureRightPointer() => Resources.StaticResources.InputManager.CaptureRightPointer(this);
+
     public void ReleasePointer() => Resources.StaticResources.InputManager.ReleasePointer(this);
 
     /// <summary>Logical-space (unscaled — same units as PositionTrait/
