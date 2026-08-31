@@ -160,6 +160,16 @@ namespace GustUI.Managers
 
         public void CapturePointer(Element element) => CapturedPointerElement = element;
 
+        /// <summary>While set, MIDDLE-button held/release events route here
+        /// regardless of hover. Deliberately a second slot rather than a mode
+        /// on <see cref="CapturedPointerElement"/>: the two buttons drive
+        /// unrelated gestures (the sequencer marquees with the left button and
+        /// pans with the middle one), and sharing a slot would let starting
+        /// either one silently cancel the other.</summary>
+        public Element CapturedMiddleElement { get; private set; }
+
+        public void CaptureMiddlePointer(Element element) => CapturedMiddleElement = element;
+
         // ---- synthetic input override -------------------------------------
         // Lets an external driver (e.g. an in-process remote-control server)
         // author authoritative MouseState/KeyboardState for a frame instead
@@ -189,6 +199,11 @@ namespace GustUI.Managers
             if (CapturedPointerElement == element)
             {
                 CapturedPointerElement = null;
+            }
+
+            if (CapturedMiddleElement == element)
+            {
+                CapturedMiddleElement = null;
             }
         }
         
@@ -433,13 +448,15 @@ namespace GustUI.Managers
             public readonly int X;
             public readonly int Y;
             public readonly bool Left;
+            public readonly bool Middle;
             public readonly bool Right;
 
-            public PointerEdge(int x, int y, bool left, bool right)
+            public PointerEdge(int x, int y, bool left, bool middle, bool right)
             {
                 X = x;
                 Y = y;
                 Left = left;
+                Middle = middle;
                 Right = right;
             }
         }
@@ -459,9 +476,9 @@ namespace GustUI.Managers
         /// polled state, so no click is ever lost. Optional: platforms that
         /// push nothing behave exactly as before.
         /// </summary>
-        public void PushPointerEdge(int x, int y, bool leftDown, bool rightDown)
+        public void PushPointerEdge(int x, int y, bool leftDown, bool rightDown, bool middleDown = false)
         {
-            pointerEdges.Add(new PointerEdge(x, y, leftDown, rightDown));
+            pointerEdges.Add(new PointerEdge(x, y, leftDown, middleDown, rightDown));
         }
 
         /// <summary>
@@ -627,7 +644,7 @@ namespace GustUI.Managers
                     MouseState edgeState = new MouseState(
                         edge.X, edge.Y, polledState.ScrollWheelValue,
                         edge.Left ? ButtonState.Pressed : ButtonState.Released,
-                        ButtonState.Released,
+                        edge.Middle ? ButtonState.Pressed : ButtonState.Released,
                         edge.Right ? ButtonState.Pressed : ButtonState.Released,
                         ButtonState.Released, ButtonState.Released);
                     ProcessMouseState(edgeState, isFinal: false);
@@ -678,6 +695,11 @@ namespace GustUI.Managers
                 }
                 previousScrollWheelValue = scrollWheel;
             }
+
+            // Before the LEFT button's capture early-return below, so a middle
+            // drag keeps getting frames even while something else holds the
+            // left-button capture.
+            ProcessMiddleButton(mouseState);
 
             if (CapturedPointerElement != null)
             {
@@ -782,6 +804,73 @@ namespace GustUI.Managers
 
             UpdateHoverTransitions(mouseState);
             previousMouseState = mouseState;
+        }
+
+        /// <summary>
+        /// The middle button's own press/held/release dispatch, mirroring the
+        /// left button's but against <see cref="CapturedMiddleElement"/>.
+        ///
+        /// Separate from the left-button path rather than folded into it: that
+        /// path returns early while a capture is live, and a middle drag has to
+        /// survive that (the sequencer pans with the middle button while its
+        /// own left-button marquee logic is wired to the same element). Nothing
+        /// here touches the left button's state, so the two gestures are
+        /// independent in both directions.
+        /// </summary>
+        private void ProcessMiddleButton(MouseState mouseState)
+        {
+            bool down = mouseState.MiddleButton == ButtonState.Pressed;
+            bool wasDown = previousMouseState.MiddleButton == ButtonState.Pressed;
+
+            if (CapturedMiddleElement != null)
+            {
+                Element captured = CapturedMiddleElement;
+
+                if (down)
+                {
+                    HaveInteracted = true;
+                    if (captured.HasTrait<OnMiddleMouseHeldDown>())
+                    {
+                        captured.ElementTrait<OnMiddleMouseHeldDown>().Value().TriggerAction?.Invoke(captured.GetClickArgs(mouseState));
+                    }
+                }
+                else
+                {
+                    if (wasDown && captured.HasTrait<OnMiddleMouseRelease>())
+                    {
+                        captured.ElementTrait<OnMiddleMouseRelease>().Value().TriggerAction?.Invoke(captured.GetClickArgs(mouseState));
+                    }
+
+                    CapturedMiddleElement = null;
+                }
+
+                return;
+            }
+
+            if (down && !wasDown)
+            {
+                HaveInteracted = true;
+                foreach (Element element in ClickTargets(currentlyHovered).Where(e => e.HasTrait<OnMiddleMousePress>()))
+                {
+                    Dispatch(element, element.ElementTrait<OnMiddleMousePress>().Value(), mouseState);
+                }
+            }
+            else if (down)
+            {
+                HaveInteracted = true;
+                foreach (Element element in currentlyHovered.Where(e => e.HasTrait<OnMiddleMouseHeldDown>()))
+                {
+                    Dispatch(element, element.ElementTrait<OnMiddleMouseHeldDown>().Value(), mouseState);
+                }
+            }
+            else if (wasDown)
+            {
+                HaveInteracted = true;
+                foreach (Element element in ClickTargets(currentlyHovered).Where(e => e.HasTrait<OnMiddleMouseRelease>()))
+                {
+                    Dispatch(element, element.ElementTrait<OnMiddleMouseRelease>().Value(), mouseState);
+                }
+            }
         }
 
         // Previous frame's hover list is cached rather than recomputed with a

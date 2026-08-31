@@ -500,6 +500,11 @@ public class Element : IDisposable
     /// <summary>Routes held/release mouse events to this element regardless of hover until the button releases (or ReleasePointer).</summary>
     public void CapturePointer() => Resources.StaticResources.InputManager.CapturePointer(this);
 
+    /// <summary>The middle button's own capture, held in a slot of its own so
+    /// a middle drag and a left drag do not evict each other - see
+    /// InputManager.CaptureMiddleElement.</summary>
+    public void CaptureMiddlePointer() => Resources.StaticResources.InputManager.CaptureMiddlePointer(this);
+
     public void ReleasePointer() => Resources.StaticResources.InputManager.ReleasePointer(this);
 
     /// <summary>Logical-space (unscaled — same units as PositionTrait/
