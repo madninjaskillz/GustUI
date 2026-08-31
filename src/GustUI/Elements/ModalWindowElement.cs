@@ -1397,6 +1397,7 @@ namespace GustUI.Elements
             buttonBackgroundElement = this.AddChildElement<FilledRectangleElement>();
 
             Setup();
+            LiveDialogs.Add(this);
         }
         public ModalWindowElement(string title, string body, List<BasicButtonElement> buttons = null, TVVector position = null, TVVector size = null)
         {
@@ -1447,6 +1448,7 @@ namespace GustUI.Elements
             }
 
             Setup();
+            LiveDialogs.Add(this);
         }
 
         public ModalWindowElement(string title, Element body, List<BasicButtonElement> buttons = null, TVVector position = null, TVVector size = null, bool fitToContent = true, bool resizable = false, bool closable = true, Vector2? minSize = null, bool pushHookScope = false, bool interactiveTitleBar = true)
@@ -1554,6 +1556,7 @@ namespace GustUI.Elements
             }
 
             Setup();
+            LiveDialogs.Add(this);
         }
 
         // Themed body/footer fill (was a near-white gradient — a bright
@@ -1616,6 +1619,213 @@ namespace GustUI.Elements
         /// every frame; <see cref="TabContainerElement"/> reuses it for its
         /// tab strip, since that IS a container's visible "title bar" once
         /// its own inert one is fully covered.</summary>
+        // ---- keyboard dismissal (bug board #68) -------------------------
+        //
+        // Every full-screen editor binds Escape to back out, so the app
+        // teaches that Escape means "get me out of here" — and then every
+        // dialog ignored it, because ModalWindowElement registered no
+        // keyboard hooks at all and no dialog registered its own. Done here
+        // once rather than in each of the seven-plus hosts, so a dialog
+        // written tomorrow gets it without anybody remembering to.
+        //
+        // NOT a KeyboardHook, deliberately, for two reasons:
+        //
+        //  - Hooks in the same scope ALL fire. The sequencer binds Escape in
+        //    the base scope (clear selection, else close the loop browser)
+        //    and most dialogs deliberately do not push a scope, so a hook
+        //    here would close the dialog AND clear the selection underneath
+        //    it, on one keypress.
+        //  - The hook loop is gated on !typing, so a hook would not fire at
+        //    all while a text field is focused — and Escape has to work
+        //    mid-word, which is most of when you want it.
+        //
+        // Instead InputManager gives dialogs FIRST REFUSAL, ahead of both the
+        // typing gate and the hook loop, and skips the rest of that key when
+        // a dialog takes it.
+        private static readonly List<ModalWindowElement> LiveDialogs = new List<ModalWindowElement>();
+
+        /// <summary>
+        /// Whether this window takes part at all. True by default, but see the
+        /// buttons.Count check in <see cref=HandleDialogKey/>: a window with
+        /// no footer buttons is not a DIALOG, it is a view that happens to be
+        /// built out of the same element — the sequencer, a docked panel — and
+        /// those must never be dismissed by a keystroke.
+        /// </summary>
+        private readonly bool keyboardDismiss = true;
+
+        /// <summary>Labels treated as "this is the way out". Matched
+        /// case-insensitively against the footer buttons.</summary>
+        private static readonly string[] CancelLabels = { "cancel", "close", "not now", "no thanks" };
+
+        /// <summary>
+        /// Labels that must NEVER be what Enter presses.
+        ///
+        /// Enter takes the first button that is not a cancel, which is the
+        /// confirm on every dialog we have — but a dialog whose primary action
+        /// destroys something must not acquire a keyboard shortcut for it by
+        /// accident. Belt and braces rather than a rule: if the only candidate
+        /// is one of these, Enter simply does nothing.
+        /// </summary>
+        private static readonly string[] DestructiveLabels =
+        {
+            "delete", "remove", "discard", "overwrite", "replace",
+        };
+
+        /// <summary>
+        /// Gives the frontmost dialog first refusal on a key. Returns true
+        /// when it took it, in which case the caller must not dispatch that
+        /// key any further.
+        /// </summary>
+        internal static bool HandleDialogKey(Keys key, bool typing)
+        {
+            if (key != Keys.Escape && key != Keys.Enter)
+            {
+                return false;
+            }
+
+            // Frontmost WINS, and only it: a stack of dialogs must peel one at
+            // a time rather than all at once.
+            ModalWindowElement front = null;
+            long best = long.MinValue;
+
+            for (int i = 0; i < LiveDialogs.Count; i++)
+            {
+                ModalWindowElement dialog = LiveDialogs[i];
+                if (!dialog.keyboardDismiss || dialog.Parent == null || dialog.buttons.Count == 0)
+                {
+                    continue;
+                }
+
+                if (dialog.FrontSequence > best)
+                {
+                    best = dialog.FrontSequence;
+                    front = dialog;
+                }
+            }
+
+            return front != null && front.TryDialogKey(key, typing);
+        }
+
+        private bool TryDialogKey(Keys key, bool typing)
+        {
+            if (key == Keys.Escape)
+            {
+                // The cancel button where there is one, so a dialog that
+                // cleans up in its Cancel handler cleans up identically by
+                // key. The title bar's own close action otherwise — which is
+                // what the X does, so it is dismissed exactly as if clicked.
+                // The cancel button, and ONLY the cancel button. There is no
+                // fallback to the title bar-s close action, and that is the
+                // safety property: the sequencer and the docked panels are
+                // ModalWindowElements too, with an OnCloseRequested and no
+                // footer buttons, so a fallback would have let Escape shut the
+                // SEQUENCER — and this app exits once the last window is gone.
+                // Caught before shipping only because a docked panel happened
+                // to be in front the first time it was tried.
+                BasicButtonElement cancel = FindCancelButton();
+                return cancel != null && Press(cancel);
+            }
+
+            // Enter confirms, but NEVER while typing: pressing it after typing
+            // a name into a field must reach the field, not accept the dialog.
+            // The hook loop already suppresses shortcuts while a text element
+            // is focused; this mirrors that rather than inheriting it, because
+            // this path deliberately runs ahead of that gate for Escape.
+            if (typing)
+            {
+                return false;
+            }
+
+            BasicButtonElement confirm = FindConfirmButton();
+            return confirm != null && Press(confirm);
+        }
+
+        /// <summary>
+        /// Runs a button’s click path, exactly as a mouse release does —
+        /// including whatever the button does to its own fill.
+        ///
+        /// The args come from <see cref="Element.GetClickArgs"/>, the same
+        /// builder a real click uses, and NOT from a bare
+        /// <c>new ClickEventArgs()</c>. That distinction is not tidiness: a
+        /// handler is entitled to read <c>args.Element</c>, and several do —
+        /// the share dialog’s own Close is
+        /// <c>args.Element.Parent.Parent.Kill()</c>, which threw a
+        /// NullReferenceException and took the whole app down the first time
+        /// Escape reached it. A synthetic press has to carry what a real one
+        /// carries.
+        /// </summary>
+        private static bool Press(BasicButtonElement button)
+        {
+            if (button == null || !button.Enabled)
+            {
+                return false;
+            }
+
+            button.ElementTrait<OnMouseRelease>()?.Value()?.TriggerAction?.Invoke(
+                button.GetClickArgs(Mouse.GetState()));
+            return true;
+        }
+
+        private static bool IsCancelLabel(string text)
+        {
+            foreach (string candidate in CancelLabels)
+            {
+                if (string.Equals(text, candidate, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private BasicButtonElement FindCancelButton()
+        {
+            foreach (BasicButtonElement button in buttons)
+            {
+                string text = LabelOf(button);
+                if (text != null && IsCancelLabel(text))
+                {
+                    return button;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>The first button that is not a way out — the confirm on
+        /// every dialog here. Null when the only buttons are cancels (an
+        /// acknowledgement, where Enter has nothing to do), or when the
+        /// candidate is destructive.</summary>
+        private BasicButtonElement FindConfirmButton()
+        {
+            foreach (BasicButtonElement button in buttons)
+            {
+                string text = LabelOf(button);
+                if (text == null || IsCancelLabel(text))
+                {
+                    continue;
+                }
+
+                foreach (string danger in DestructiveLabels)
+                {
+                    if (text.IndexOf(danger, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        return null;
+                    }
+                }
+
+                return button;
+            }
+
+            return null;
+        }
+
+        private static string LabelOf(BasicButtonElement button) =>
+            button != null && button.HasTrait<TextTrait>()
+                ? button.ElementTrait<TextTrait>()?.Value()?.Text?.Trim()
+                : null;
+
         internal static bool IsFrontmostWindow(Element host)
         {
             if (host?.Parent == null)
@@ -1812,6 +2022,12 @@ namespace GustUI.Elements
         /// calls base.Kill() once it finishes.</summary>
         public override void Kill()
         {
+            // First, and ahead of the closing early-return: a modal on its way
+            // out must stop taking Escape immediately, or a second press
+            // during the close animation reaches a window the user has
+            // already dismissed.
+            LiveDialogs.Remove(this);
+
             if (closing)
             {
                 return;

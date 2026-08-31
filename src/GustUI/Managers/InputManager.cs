@@ -150,6 +150,11 @@ namespace GustUI.Managers
         /// way "z" doesn't trigger undo while renaming something.</summary>
         public bool IsTyping => CurrentlyFocused != null && CurrentlyFocused.CanBeInputFocused;
 
+        /// <summary>The keys a modal dialog is offered before anything else
+        /// sees them. See the note at the call site for why the order
+        /// matters.</summary>
+        private static readonly Keys[] DialogKeys = { Keys.Escape, Keys.Enter };
+
         /// <summary>True only during the frame that observed the left button's
         /// press edge (elements can react to "a click started somewhere",
         /// e.g. popups closing on an outside press).</summary>
@@ -547,6 +552,36 @@ namespace GustUI.Managers
             // it and keyboard SHORTCUT hooks are suppressed (typing "z" must
             // not trigger an undo hook).
             bool typing = CurrentlyFocused != null && CurrentlyFocused.CanBeInputFocused;
+
+            // ---- dialogs get first refusal on Escape and Enter (#68) ----
+            //
+            // Ahead of BOTH the typing gate and the hook loop, and that
+            // ordering is the point:
+            //
+            //  - Ahead of the typing gate, because Escape has to back out of
+            //    a dialog while a field is focused, which is most of when
+            //    somebody reaches for it. (Enter checks typing itself, and
+            //    declines — a name being typed must reach the field.)
+            //  - Ahead of the hook loop, and consuming the key, because hooks
+            //    in one scope ALL fire: the sequencer binds Escape too, so
+            //    without this a single press would close the dialog and clear
+            //    the selection behind it.
+            Keys consumed = Keys.None;
+            foreach (Keys dialogKey in DialogKeys)
+            {
+                if (!keyboardState.IsKeyDown(dialogKey) || previousKeyboardState.IsKeyDown(dialogKey))
+                {
+                    continue;
+                }
+
+                if (Elements.ModalWindowElement.HandleDialogKey(dialogKey, typing))
+                {
+                    consumed = dialogKey;
+                }
+
+                break;
+            }
+
             if (typing)
             {
                 bool shift = keyboardState.IsKeyDown(Keys.LeftShift) || keyboardState.IsKeyDown(Keys.RightShift);
@@ -613,6 +648,11 @@ namespace GustUI.Managers
                 if (hook.Scope != activeScope)
                 {
                     continue; // belongs to a view beneath (or above) the active modal scope
+                }
+
+                if (hook.Shortcut.Key == consumed)
+                {
+                    continue; // a dialog took this key above
                 }
 
                 if (!keyboardState.IsKeyDown(hook.Shortcut.Key) || previousKeyboardState.IsKeyDown(hook.Shortcut.Key))
