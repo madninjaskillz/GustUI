@@ -2139,9 +2139,26 @@ namespace GustUI.Elements
                 Set<PositionTrait>(new TVVector(windowSize.X - calculatedModalSize.X, ElementTrait<PositionTrait>().Value().Y));
             }
 
+            // Floored at TopLimit(), because a modal TALLER than the window
+            // cannot satisfy both edges and the top is the one that matters:
+            // that is where its title bar and menu bar are. Unfloored, this
+            // pulled the whole modal up by the overflow — a 420-high sequencer
+            // in a 376-high window went to y = -44, putting its title bar
+            // entirely above the client area and slicing the top half off
+            // File/Edit/View/Help, with no way to close the window from its own
+            // chrome (ezmuze bug board #65).
+            //
+            // The Y-clamp below does NOT catch that, because it tests
+            // `actualPosition`, which was snapshotted before this block ran and
+            // so still holds the pre-clamp value. The X pair above/below reads
+            // the live position and has never had the problem; this makes Y
+            // behave the same way. Same Math.Max(TopLimit(), …) shape
+            // CenteredPosition() already uses, and for the same reason.
             if (actualPosition.Y + calculatedModalSize.Y > windowSize.Y)
             {
-                Set<PositionTrait>(new TVVector(ElementTrait<PositionTrait>().Value().X, windowSize.Y - calculatedModalSize.Y));
+                Set<PositionTrait>(new TVVector(
+                    ElementTrait<PositionTrait>().Value().X,
+                    Math.Max(TopLimit(), windowSize.Y - calculatedModalSize.Y)));
             }
 
             if (ElementTrait<PositionTrait>().Value().X < 0)
