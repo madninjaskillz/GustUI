@@ -200,9 +200,19 @@ public class WaveformElement : Element
     private static void DrawGeometryBaked(
         Managers.DrawManager manager, WaveformData data, int level, Rectangle rect, Color tint, float sourceFraction)
     {
-        (GeometryVertex[] vertices, short[] indices, int primitiveCount) =
-            data.GetGeometryVertices(level, rect.Width, rect.Height, sourceFraction);
-        manager.DrawCachedTriangles(vertices, indices, primitiveCount, new Vector2(rect.X, rect.Y), tint);
+        GeometryVertex[] vertices;
+        short[] indices;
+        int primitiveCount;
+        using (Managers.Telemetry.Scope("Draw.Waveform.Lookup"))
+        {
+            (vertices, indices, primitiveCount) =
+                data.GetGeometryVertices(level, rect.Width, rect.Height, sourceFraction);
+        }
+
+        using (Managers.Telemetry.Scope("Draw.Waveform.Append"))
+        {
+            manager.DrawCachedTriangles(vertices, indices, primitiveCount, new Vector2(rect.X, rect.Y), tint);
+        }
     }
 
     private void DrawColumns(

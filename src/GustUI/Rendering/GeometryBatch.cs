@@ -118,6 +118,68 @@ namespace GustUI.Rendering
                 Smoothing == other.Smoothing && BorderWidth == other.BorderWidth && BorderColor == other.BorderColor;
         }
 
+        /// <summary>
+        /// Per-DRAW-CALL uniforms for a segment of CACHED geometry
+        /// (<see cref="AppendCachedTriangles"/>) — the same trick
+        /// <see cref="TextParams"/> already plays, for the same reason.
+        ///
+        /// A waveform's triangulation is identical every frame. Only where it
+        /// sits, what tint it wears, which atlas texel it samples and what it
+        /// is clipped to change — and all four used to be stamped into every
+        /// vertex on the CPU while copying it into the batch. On a maximised
+        /// timeline that was 321 append calls a frame and 5.3 ms of a 7.9 ms
+        /// frame, re-deriving data that was already correct except for four
+        /// values (ezmuze studio bug board #64).
+        ///
+        /// As uniforms, the copy is an Array.Copy and the arithmetic moves to
+        /// the vertex shader, which was doing a matrix multiply per vertex
+        /// anyway. The price is that a cached draw cannot share a segment with
+        /// anything — every one of them is its own DrawIndexedPrimitives call.
+        /// That is a price this class has already measured and found not to
+        /// matter: see its own note on 257 segments costing nothing.
+        /// </summary>
+        private struct CachedParams : IEquatable<CachedParams>
+        {
+            public Vector2 Offset;
+            public Vector4 Tint;
+            public Vector2 UV;
+            public Vector4 Clip;
+
+            public bool Equals(CachedParams other) =>
+                Offset == other.Offset && Tint == other.Tint && UV == other.UV && Clip == other.Clip;
+        }
+
+        /// <summary>
+        /// A clip rect that clips nothing, used from BOTH ends of the
+        /// intersection in the vertex shader: ordinary geometry passes it as
+        /// the uniform, cached vertices carry it per-vertex
+        /// (<see cref="AppendCachedTriangles"/>'s callers bake it in). Big
+        /// enough to swallow any device-pixel coordinate, small enough to stay
+        /// exact in a float.
+        ///
+        /// DECLARED BEFORE <see cref="IdentityParams"/>, which reads it.
+        /// Static field initialisers run in declaration order, so the other
+        /// way round IdentityParams.Clip silently took Vector4.Zero -- an
+        /// EMPTY rect, intersected with every ordinary vertex's own, which
+        /// clipped the whole UI away and left nothing on screen but the
+        /// waveforms (their own clip) and the text (a different shader).
+        /// </summary>
+        public static readonly Vector4 NoClip = new Vector4(-1e9f, -1e9f, 1e9f, 1e9f);
+
+        /// <summary>
+        /// The identity values ordinary geometry sets, so one shader serves
+        /// both without a branch: no offset, no tint, UV weight 0 (the vertex
+        /// keeps its own), and a clip rect the shader intersects with the
+        /// per-vertex one to no effect.
+        /// </summary>
+        private static readonly CachedParams IdentityParams = new CachedParams
+        {
+            Offset = Vector2.Zero,
+            Tint = Vector4.One,
+            UV = Vector2.Zero,
+            Clip = NoClip,
+        };
+
         private struct Segment
         {
             public Texture2D Texture;
@@ -127,6 +189,11 @@ namespace GustUI.Rendering
             public int VertexStart;
             public bool IsText;
             public TextParams TextParams;
+
+            /// <summary>Set for a cached-geometry segment; the uniforms below
+            /// are then this draw's rather than the identity ones.</summary>
+            public bool IsCached;
+            public CachedParams Cached;
         }
 
         /// <summary>
@@ -147,6 +214,8 @@ namespace GustUI.Rendering
             public BlendState CurrentBlend;
             public bool CurrentIsText;
             public TextParams CurrentTextParams;
+            public bool CurrentIsCached;
+            public CachedParams CurrentCachedParams;
             public int CurrentSegmentVertexStart;
             public int CurrentSegmentIndexStart;
             public bool HasOpenSegment;
@@ -196,8 +265,16 @@ namespace GustUI.Rendering
 
             public void BeginSegmentIfNeeded(Texture2D texture, BlendState blend, int addVertices, bool isText, TextParams textParams)
             {
+                BeginSegmentIfNeeded(texture, blend, addVertices, isText, textParams, false, IdentityParams);
+            }
+
+            public void BeginSegmentIfNeeded(
+                Texture2D texture, BlendState blend, int addVertices, bool isText, TextParams textParams,
+                bool isCached, CachedParams cachedParams)
+            {
                 bool stateChanged = !HasOpenSegment || texture != CurrentTexture || blend != CurrentBlend
-                    || isText != CurrentIsText || (isText && !textParams.Equals(CurrentTextParams));
+                    || isText != CurrentIsText || (isText && !textParams.Equals(CurrentTextParams))
+                    || isCached != CurrentIsCached || (isCached && !cachedParams.Equals(CurrentCachedParams));
                 bool wouldOverflow = HasOpenSegment && (VertexCount - CurrentSegmentVertexStart + addVertices > MaxVerticesPerSegment);
 
                 if (stateChanged || wouldOverflow)
@@ -207,6 +284,8 @@ namespace GustUI.Rendering
                     CurrentBlend = blend;
                     CurrentIsText = isText;
                     CurrentTextParams = textParams;
+                    CurrentIsCached = isCached;
+                    CurrentCachedParams = cachedParams;
                     CurrentSegmentVertexStart = VertexCount;
                     CurrentSegmentIndexStart = IndexCount;
                     HasOpenSegment = true;
@@ -229,6 +308,8 @@ namespace GustUI.Rendering
                         VertexStart = CurrentSegmentVertexStart,
                         IsText = CurrentIsText,
                         TextParams = CurrentTextParams,
+                        IsCached = CurrentIsCached,
+                        Cached = CurrentCachedParams,
                     });
                 }
 
@@ -642,20 +723,40 @@ namespace GustUI.Rendering
         /// Same shape as <see cref="AppendTriangles"/>, for one specific
         /// caller (WaveformData's cached-array "Geometry (Baked)" mode,
         /// DrawManager.DrawCachedTriangles): <paramref name="localVerts"/>
-        /// is LOCAL-space (relative to (0,0)) and gets translated by
-        /// <paramref name="offset"/> and multiplied by <paramref name="tint"/>
-        /// WHILE copying into this batch's own vertex array, instead of the
-        /// caller building a separate translated array first — that array
-        /// would otherwise be a fresh per-call allocation (this runs once
-        /// per visible waveform block, every frame), pure GC churn for data
-        /// that only ever needed to exist inside this buffer anyway. UV is
-        /// stamped fresh here too (not read from <paramref name="localVerts"/>)
-        /// since a long-lived cache can outlive an atlas grow/rebuild that
-        /// relocates the white region this samples.
+        /// is LOCAL-space (relative to (0,0)), and where it goes, what colour
+        /// it wears, which texel it samples and what it is clipped to are all
+        /// PER-DRAW UNIFORMS (<see cref="CachedParams"/>) rather than things
+        /// written into each vertex.
+        ///
+        /// They used to be written into each vertex, here, while copying —
+        /// which was itself an improvement on the caller building a separate
+        /// translated array first. It was still the wrong shape of work. The
+        /// triangulation is identical every frame and the four values are
+        /// four values, so a maximised timeline spent 5.3 ms of a 7.9 ms
+        /// frame across 321 of these calls rebuilding vertices that differed
+        /// from the cached ones only by a translate and a multiply (ezmuze
+        /// studio bug board #64). The copy is now an Array.Copy and the
+        /// arithmetic happens in the vertex shader, which was already doing a
+        /// matrix multiply per vertex.
+        ///
+        /// UV in particular has to be a uniform rather than baked: a
+        /// long-lived cache can outlive an atlas grow/rebuild that relocates
+        /// the white region it samples, so the live value must arrive at draw
+        /// time. The shader lerps to it on <c>DrawUVWeight</c>.
+        ///
+        /// <paramref name="localVerts"/> MUST carry
+        /// <see cref="NoClip"/> as its per-vertex ClipRect: the shader
+        /// intersects that with the uniform, so a vertex baked with anything
+        /// smaller silently clips this draw.
+        ///
+        /// This closes the open segment and cannot share one — every cached
+        /// draw is its own DrawIndexedPrimitives call. Measured on the same
+        /// scene, that takes the frame from 284 segments to ~600, which this
+        /// class has already established costs nothing (see its own note on
+        /// 257 segments).
         /// </summary>
         public void AppendCachedTriangles(Texture2D texture, GeometryVertex[] localVerts, short[] idx, int primitiveCount, Vector2 offset, Color tint, Vector2 uv, Vector4 clipRect, BlendState blend)
         {
-            tint = Fade(tint);
             if (primitiveCount <= 0 || localVerts == null || localVerts.Length == 0)
             {
                 return;
@@ -664,22 +765,29 @@ namespace GustUI.Rendering
             int addVertices = localVerts.Length;
             int addIndices = primitiveCount * 3;
 
+            var cached = new CachedParams
+            {
+                Offset = offset,
+
+                // Fade folded in HERE, once per draw. It only ever scales
+                // alpha (see Fade), which is exactly what multiplying the
+                // vertex colour by this tint then does.
+                Tint = Fade(tint).ToVector4(),
+                UV = uv,
+                Clip = clipRect,
+            };
+
             Accumulator acc = stream;
-            acc.BeginSegmentIfNeeded(texture, blend, addVertices);
+            acc.BeginSegmentIfNeeded(texture, blend, addVertices, false, default, true, cached);
             acc.EnsureCapacity(addVertices, addIndices);
 
-            Vector4 tintVec = tint.ToVector4();
             // Segment-relative — see CloseSegment's doc for why.
             int vBase = acc.VertexCount - acc.CurrentSegmentVertexStart;
-            for (int i = 0; i < addVertices; i++)
-            {
-                GeometryVertex src = localVerts[i];
-                acc.Vertices[acc.VertexCount++] = new GeometryVertex(
-                    new Vector2(src.Position.X + offset.X, src.Position.Y + offset.Y),
-                    new Color(src.Color.ToVector4() * tintVec),
-                    uv,
-                    clipRect);
-            }
+
+            // The whole point: a straight block copy, no per-vertex work at
+            // all. Everything that varies per draw is in the uniforms above.
+            Array.Copy(localVerts, 0, acc.Vertices, acc.VertexCount, addVertices);
+            acc.VertexCount += addVertices;
 
             for (int i = 0; i < addIndices; i++)
             {
@@ -772,6 +880,24 @@ namespace GustUI.Rendering
             device.DepthStencilState = DepthStencilState.None;
             device.RasterizerState = RasterizerState.CullNone;
 
+            // Looked up ONCE, not once per segment. Parameters is a
+            // name-keyed collection and there are now several hundred
+            // segments in a busy frame; four dictionary probes each would be
+            // a cost this change exists to remove.
+            EffectParameter drawOffset = flatEffect.Parameters["DrawOffset"];
+            EffectParameter drawTint = flatEffect.Parameters["DrawTint"];
+            EffectParameter drawClip = flatEffect.Parameters["DrawClip"];
+            EffectParameter drawUV = flatEffect.Parameters["DrawUV"];
+            EffectParameter drawUVWeight = flatEffect.Parameters["DrawUVWeight"];
+
+            // Whatever the last segment set is still live, so this tracks what
+            // has actually been written rather than re-setting five uniforms
+            // for every ordinary segment. Starts "unknown" so the first
+            // segment always writes.
+            bool paramsKnown = false;
+            CachedParams appliedParams = default;
+            float appliedWeight = -1f;
+
             foreach (Segment segment in acc.Segments)
             {
                 device.BlendState = segment.Blend ?? BlendState.AlphaBlend;
@@ -782,6 +908,23 @@ namespace GustUI.Rendering
                     effect.Parameters["Smoothing"].SetValue(segment.TextParams.Smoothing);
                     effect.Parameters["BorderWidth"].SetValue(segment.TextParams.BorderWidth);
                     effect.Parameters["BorderColor"].SetValue(segment.TextParams.BorderColor.ToVector4());
+                }
+                else if (drawOffset != null)
+                {
+                    CachedParams want = segment.IsCached ? segment.Cached : IdentityParams;
+                    float wantWeight = segment.IsCached ? 1f : 0f;
+
+                    if (!paramsKnown || !want.Equals(appliedParams) || wantWeight != appliedWeight)
+                    {
+                        drawOffset.SetValue(want.Offset);
+                        drawTint.SetValue(want.Tint);
+                        drawClip.SetValue(want.Clip);
+                        drawUV.SetValue(want.UV);
+                        drawUVWeight.SetValue(wantWeight);
+                        appliedParams = want;
+                        appliedWeight = wantWeight;
+                        paramsKnown = true;
+                    }
                 }
 
                 foreach (EffectPass pass in effect.CurrentTechnique.Passes)

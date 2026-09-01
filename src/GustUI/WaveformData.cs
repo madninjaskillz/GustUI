@@ -382,11 +382,25 @@ namespace GustUI
             var verts = new GeometryVertex[raw.Length];
             for (int i = 0; i < raw.Length; i++)
             {
-                // UV/ClipRect are placeholders — DrawCachedTriangles
-                // overwrites both (UV from the atlas's current white
-                // region, ClipRect from the current scissor) every time
-                // it translates this cache into the batch.
-                verts[i] = new GeometryVertex(new Vector2(raw[i].Position.X, raw[i].Position.Y), raw[i].Color, Vector2.Zero, Vector4.Zero);
+                // UV is a placeholder: the shader takes the live value from a
+                // uniform (GeometryBatch.CachedParams), because this cache can
+                // outlive an atlas rebuild that moves the white region it
+                // samples.
+                //
+                // ClipRect is NoClip, and that is load-bearing rather than
+                // "unset". The vertex shader INTERSECTS the per-vertex rect
+                // with the uniform one so a single shader can serve ordinary
+                // geometry (real rect per vertex, permissive uniform) and
+                // cached geometry (permissive per vertex, real rect in the
+                // uniform). It used to be Vector4.Zero, which was harmless
+                // only because the value was overwritten during the copy;
+                // now that the copy is a memcpy, zero here would intersect to
+                // an empty rect and clip every waveform away entirely.
+                verts[i] = new GeometryVertex(
+                    new Vector2(raw[i].Position.X, raw[i].Position.Y),
+                    raw[i].Color,
+                    Vector2.Zero,
+                    Rendering.GeometryBatch.NoClip);
             }
 
             // LEAST-RECENTLY-USED eviction. An empty slot wins outright (its
