@@ -1826,6 +1826,54 @@ namespace GustUI.Elements
                 ? button.ElementTrait<TextTrait>()?.Value()?.Text?.Trim()
                 : null;
 
+        /// <summary>
+        /// The title of the frontmost window under <paramref name="root"/>, or
+        /// null when nothing titled is open.
+        ///
+        /// Exposed because the OS window title (and the browser tab) wants to
+        /// name what you are actually looking at, and only GustUI can answer
+        /// which window that is — <see cref="Element.FrontSequence"/> is
+        /// internal, and re-deriving "frontmost" from depth outside would be a
+        /// second, quietly different answer to a question this class already
+        /// answers for its own title-bar shading.
+        ///
+        /// Both window kinds count: a FullScreenModalElement is a window too
+        /// (the sequencer is one), and a title bar is the only thing that makes
+        /// either of them nameable.
+        /// </summary>
+        public static string FrontmostTitle(Element root)
+        {
+            if (root == null)
+            {
+                return null;
+            }
+
+            long best = long.MinValue;
+            string title = null;
+
+            foreach (Element child in root.Children.Items)
+            {
+                string candidate = child switch
+                {
+                    ModalWindowElement modal => modal.Title,
+                    FullScreenModalElement full => full.Title,
+                    _ => null,
+                };
+
+                // An untitled window is chrome, not a place — it must not blank
+                // the title just for being in front.
+                if (string.IsNullOrWhiteSpace(candidate) || child.FrontSequence <= best)
+                {
+                    continue;
+                }
+
+                best = child.FrontSequence;
+                title = candidate;
+            }
+
+            return title;
+        }
+
         internal static bool IsFrontmostWindow(Element host)
         {
             if (host?.Parent == null)
