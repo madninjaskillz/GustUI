@@ -88,11 +88,29 @@ namespace GustUI.Managers
         /// <summary>Shared atlas for baked alpha-mask shapes (rounded-rect corners, knob dial/ring, etc.) migrated onto the geometry backend — see TextureAtlas's own doc comment.</summary>
         public TextureAtlas GeometryAtlas => geometryAtlas ?? (geometryAtlas = new TextureAtlas(Resources.StaticResources.GraphicsDevice));
 
+        /// <summary>
+        /// Which compiled effect the geometry backend loads, and which the SDF
+        /// text backend loads.
+        ///
+        /// Settable because the choice is per-HEAD and GustUI is a library
+        /// shared by all of them, so it cannot be a #if here. ezmuze studio's
+        /// GL/web heads point these at hand-written GLSL twins
+        /// (GeometryBatchGL/SdfTextGL) to keep MojoShader out of the pipeline;
+        /// the DirectX head leaves them alone and loads the HLSL, which it
+        /// needs anyway and which an Xbox build would need too.
+        ///
+        /// Set BEFORE the first draw — these are read once and the effect is
+        /// then cached for the app's lifetime.
+        /// </summary>
+        public static string GeometryEffectAsset { get; set; } = "GeometryBatch";
+
+        public static string SdfEffectAsset { get; set; } = "SdfText";
+
         private Effect GetGeometryBatchEffect()
         {
             if (geometryBatchEffect == null)
             {
-                geometryBatchEffect = Resources.StaticResources.Content.Load<Effect>("GeometryBatch");
+                geometryBatchEffect = Resources.StaticResources.Content.Load<Effect>(GeometryEffectAsset);
             }
 
             return geometryBatchEffect;
@@ -102,7 +120,7 @@ namespace GustUI.Managers
         {
             if (sdfEffect == null)
             {
-                sdfEffect = Resources.StaticResources.Content.Load<Effect>("SdfText");
+                sdfEffect = Resources.StaticResources.Content.Load<Effect>(SdfEffectAsset);
             }
 
             return sdfEffect;
