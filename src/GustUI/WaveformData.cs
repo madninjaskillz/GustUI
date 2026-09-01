@@ -277,17 +277,45 @@ namespace GustUI
         }
 
         /// <summary>
-        /// TWO cache slots, not one, and that count is load-bearing rather
-        /// than arbitrary generosity: a tiled block draws N-1 identical FULL
-        /// tiles plus (when its length isn't an exact multiple of the tile's)
-        /// ONE partial tile with a different width and fraction. A one-slot
-        /// cache alternates between those two keys and so re-triangulates
-        /// twice on every single frame — the exact cost this cache exists to
-        /// avoid. Two slots make that pattern hit 100%, and nothing draws a
-        /// third distinct key in one pass.
+        /// Cache slots, and the count is load-bearing rather than arbitrary
+        /// generosity. A tiled block draws N-1 identical FULL tiles plus (when
+        /// its length isn't an exact multiple of the tile's) ONE partial tile
+        /// with a different width and fraction, so a one-slot cache alternates
+        /// between those two keys and re-triangulates twice every frame — the
+        /// exact cost this cache exists to avoid.
+        ///
+        /// It was two, on the reasoning that "nothing draws a third distinct
+        /// key in one pass". That is true of ONE block and false of a row:
+        /// every clip sharing a waveform shares this cache, so two placements
+        /// of the same pattern at different lengths are already three or four
+        /// keys per frame, and the two slots thrash — each miss re-runs the
+        /// triangulation the cache was built to run once (ezmuze-studio bug
+        /// board #64, which called this out from the outside: "if we have a
+        /// clip that's pattern 1 for 2 bars and another that's pattern 1 for 1
+        /// bar, they both get rendered").
+        ///
+        /// MEASURED on that repo's "The Dark" demo, maximised, 1361 frames:
+        /// 83021 waveform draws and 14290 triangulations — ten and a half
+        /// misses per frame, 0.18 ms of every frame spent re-deriving vertices
+        /// that were already derived.
+        ///
+        /// Six, and LRU rather than round-robin. Round-robin can evict the
+        /// slot about to be asked for next, which two slots hid (the one not
+        /// just written is always the other one) and four would not. Six
+        /// covers a row of same-pattern clips at mixed lengths without being
+        /// a real cache with real bookkeeping; the arrays are bounded by
+        /// on-screen width and nothing here is a memory problem at this size.
         /// </summary>
-        private readonly GeometrySlot[] geometrySlots = { new GeometrySlot(), new GeometrySlot() };
-        private int geometrySlotNext;
+        private readonly GeometrySlot[] geometrySlots =
+        {
+            new GeometrySlot(), new GeometrySlot(), new GeometrySlot(),
+            new GeometrySlot(), new GeometrySlot(), new GeometrySlot(),
+        };
+
+        /// <summary>Monotonic tick for LRU order; the slot with the lowest
+        /// <see cref="GeometrySlot.LastUsed"/> is the one nothing has wanted
+        /// for longest.</summary>
+        private int geometryClock;
 
         private sealed class GeometrySlot
         {
@@ -298,6 +326,8 @@ namespace GustUI
             public int Width = -1;
             public int Height = -1;
             public float Fraction = float.NaN;
+
+            public int LastUsed;
 
             public bool Matches(int level, int width, int height, float fraction)
                 => Vertices != null && Level == level && Width == width && Height == height
@@ -337,9 +367,15 @@ namespace GustUI
             {
                 if (hit.Matches(level, width, height, sourceFraction))
                 {
+                    hit.LastUsed = ++geometryClock;
                     return (hit.Vertices, hit.Indices, hit.PrimitiveCount);
                 }
             }
+
+            // A MISS. Scoped so the cost of re-triangulating is separable
+            // from the cost of drawing: "Draw.Waveform" is the whole draw and
+            // says nothing about how much of it is this cache failing.
+            using var miss = Managers.Telemetry.Scope("Draw.Waveform.Triangulate");
 
             (VertexPositionColor[] raw, short[] indices, int primitiveCount) =
                 BuildGeometry(level, new Rectangle(0, 0, width, height), Color.White, sourceFraction);
@@ -353,11 +389,21 @@ namespace GustUI
                 verts[i] = new GeometryVertex(new Vector2(raw[i].Position.X, raw[i].Position.Y), raw[i].Color, Vector2.Zero, Vector4.Zero);
             }
 
-            // Round-robin eviction. The two live keys of a tiled block (full
-            // tile, partial tile) alternate, so the slot that is NOT the one
-            // just written is exactly the one wanted next.
-            GeometrySlot slot = geometrySlots[geometrySlotNext];
-            geometrySlotNext = (geometrySlotNext + 1) % geometrySlots.Length;
+            // LEAST-RECENTLY-USED eviction. An empty slot wins outright (its
+            // LastUsed is 0), so a cold cache fills before anything is thrown
+            // away; after that the victim is whatever nothing has asked for in
+            // the longest time, which round-robin got wrong the moment there
+            // were more than two live keys.
+            GeometrySlot slot = geometrySlots[0];
+            for (int i = 1; i < geometrySlots.Length; i++)
+            {
+                if (geometrySlots[i].LastUsed < slot.LastUsed)
+                {
+                    slot = geometrySlots[i];
+                }
+            }
+
+            slot.LastUsed = ++geometryClock;
             slot.Vertices = verts;
             slot.Indices = indices;
             slot.PrimitiveCount = primitiveCount;
