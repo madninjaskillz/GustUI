@@ -219,6 +219,46 @@ namespace GustUI.Elements
                             Color.Lerp(ThumbColor, Color.Black, 0.20f));
                         break;
 
+                    case ControlSkin.Amp:
+                        // A rocker: a plain dark surround with a hard block
+                        // that sits on one side or the other. No colour change
+                        // on the body, because an amp's switch is read by where
+                        // the rocker is, not by what shade it went.
+                        manager.DrawFilledRectangle(dest, Color.Lerp(OffColor, Color.Black, 0.35f));
+                        manager.DrawFilledRectangle(
+                            new Rectangle((int)(thumbCenter.X - thumbRadius), dest.Y + 1,
+                                (int)(thumbRadius * 2), Math.Max(1, dest.Height - 2)),
+                            Color.Lerp(ThumbColor, Color.Black, t > 0.5f ? 0.1f : 0.45f));
+                        break;
+
+                    case ControlSkin.Neon:
+                        // Outline pill, unlit; the lit half glows.
+                        manager.DrawFilledCapsule(dest, OffColor);
+                        for (int i = 2; i >= 0; i--)
+                        {
+                            manager.DrawFilledCapsule(
+                                new Rectangle(dest.X + 2 - i, dest.Y + 2 - i,
+                                    Math.Max(2, (int)((dest.Width - 4) * (0.3f + 0.7f * t)) + i * 2),
+                                    Math.Max(1, dest.Height - 4 + i * 2)),
+                                Color.Lerp(OffColor, OnColor, t) * (i == 0 ? 1f : 0.2f / i));
+                        }
+
+                        manager.DrawFilledCircle(thumbCenter, thumbRadius * 0.7f, ThumbColor);
+                        break;
+
+                    case ControlSkin.Pixel:
+                        manager.DrawFilledRectangle(
+                            new Rectangle(dest.X - 1, dest.Y - 1, dest.Width + 2, dest.Height + 2),
+                            Color.Lerp(OffColor, Color.Black, 0.6f));
+                        manager.DrawFilledRectangle(dest, trackColor);
+                        int side = Math.Max(3, dest.Height - 4);
+                        var block = new Rectangle(
+                            (int)(thumbCenter.X - side / 2f), (int)(thumbCenter.Y - side / 2f), side, side);
+                        manager.DrawFilledRectangle(block, Color.Lerp(ThumbColor, Color.Black, 0.65f));
+                        manager.DrawFilledRectangle(
+                            new Rectangle(block.X, block.Y, block.Width - 2, block.Height - 2), ThumbColor);
+                        break;
+
                     default:
                         manager.DrawFilledCapsule(dest, trackColor);
                         manager.DrawFilledCircle(thumbCenter, thumbRadius, ThumbColor);

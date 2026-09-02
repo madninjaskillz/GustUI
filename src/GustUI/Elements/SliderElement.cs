@@ -139,6 +139,29 @@ public class SliderElement : Element
                         Color.Lerp(TrackColor, Color.White, 0.25f));
                     DrawHardwareScale(manager, trackRect);
                     break;
+
+                case ControlSkin.Amp:
+                    // A printed scale and a plain slot. Like the Amp knob, what
+                    // carries the value is the THUMB read against marks that do
+                    // not change, so the track stays one colour end to end.
+                    manager.DrawFilledRectangle(trackRect, Color.Lerp(TrackColor, Color.Black, 0.35f));
+                    DrawHardwareScale(manager, trackRect);
+                    break;
+
+                case ControlSkin.Neon:
+                    // An unlit channel with a thin outline; the fill below does
+                    // the glowing.
+                    manager.DrawFilledCapsule(trackRect, TrackColor);
+                    break;
+
+                case ControlSkin.Pixel:
+                    // Chunky recessed trough: dark base, darker top edge, hard
+                    // corners. No capsule anywhere on a pixel panel.
+                    manager.DrawFilledRectangle(new Rectangle(
+                        trackRect.X - 1, trackRect.Y - 1, trackRect.Width + 2, trackRect.Height + 2),
+                        Color.Lerp(TrackColor, Color.Black, 0.6f));
+                    manager.DrawFilledRectangle(trackRect, TrackColor);
+                    break;
                 default:
                     manager.DrawFilledRectangle(trackRect, TrackColor);
                     break;
@@ -194,13 +217,33 @@ public class SliderElement : Element
     /// square elsewhere.</summary>
     private void DrawFill(DrawManager manager, Rectangle rect)
     {
-        if (Skin == ControlSkin.Soft)
+        switch (Skin)
         {
-            manager.DrawFilledCapsule(rect, FillColor);
-        }
-        else
-        {
-            manager.DrawFilledRectangle(rect, FillColor);
+            case ControlSkin.Soft:
+                manager.DrawFilledCapsule(rect, FillColor);
+                break;
+
+            case ControlSkin.Neon:
+                // Bloom: the same bar three times, growing and fading, which is
+                // as close to a glow as geometry gets without a shader.
+                for (int i = 2; i >= 0; i--)
+                {
+                    manager.DrawFilledCapsule(
+                        new Rectangle(rect.X, rect.Y - i, rect.Width, rect.Height + i * 2),
+                        FillColor * (i == 0 ? 1f : 0.18f / i));
+                }
+
+                break;
+
+            case ControlSkin.Amp:
+                // Nothing. An amp's slot is not a progress bar -- the cap is
+                // read against the printed scale, and filling the track behind
+                // it would be a second, competing reading of the same value.
+                break;
+
+            default:
+                manager.DrawFilledRectangle(rect, FillColor);
+                break;
         }
     }
 
@@ -226,6 +269,34 @@ public class SliderElement : Element
                 manager.DrawRadialShadedCircle(centre, radius * 0.78f,
                     Color.Lerp(ThumbColor, Color.White, 0.30f),
                     Color.Lerp(ThumbColor, Color.Black, 0.18f));
+                break;
+
+            case ControlSkin.Amp:
+                // A fader cap, not a bead: a tall block with a light line
+                // across its middle, which is the thing you line up with the
+                // scale.
+                int capW = (int)Math.Max(3f, radius * 1.1f);
+                int capH = (int)Math.Max(6f, radius * 2.4f);
+                var cap = new Rectangle((int)(centre.X - capW / 2f), (int)(centre.Y - capH / 2f), capW, capH);
+                manager.DrawFilledRectangle(cap, Color.Lerp(ThumbColor, Color.Black, 0.55f));
+                manager.DrawFilledRectangle(
+                    new Rectangle(cap.X + 1, cap.Y + 1, Math.Max(1, cap.Width - 2), Math.Max(1, cap.Height - 2)),
+                    Color.Lerp(ThumbColor, Color.Black, 0.25f));
+                manager.DrawFilledRectangle(
+                    new Rectangle(cap.X, (int)centre.Y - 1, cap.Width, 2), ThumbColor);
+                break;
+
+            case ControlSkin.Neon:
+                manager.DrawFilledCircle(centre, radius, ThumbColor * 0.25f);
+                manager.DrawFilledCircle(centre, radius * 0.62f, ThumbColor);
+                break;
+
+            case ControlSkin.Pixel:
+                int side = (int)Math.Max(4f, radius * 1.8f);
+                var block = new Rectangle((int)(centre.X - side / 2f), (int)(centre.Y - side / 2f), side, side);
+                manager.DrawFilledRectangle(block, Color.Lerp(ThumbColor, Color.Black, 0.7f));
+                manager.DrawFilledRectangle(
+                    new Rectangle(block.X, block.Y, block.Width - 2, block.Height - 2), ThumbColor);
                 break;
 
             default:

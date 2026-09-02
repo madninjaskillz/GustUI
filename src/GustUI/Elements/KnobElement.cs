@@ -330,6 +330,15 @@ public class KnobElement : Element
                     case ControlSkin.Hardware:
                         DrawHardwareFace(manager, center, outerRadius, diameter);
                         break;
+                    case ControlSkin.Amp:
+                        DrawAmpFace(manager, center, outerRadius, diameter);
+                        break;
+                    case ControlSkin.Neon:
+                        DrawNeonFace(manager, center, outerRadius);
+                        break;
+                    case ControlSkin.Pixel:
+                        DrawPixelFace(manager, center, outerRadius);
+                        break;
                     default:
                         DrawFlatFace(manager, center, outerRadius, ringInner);
                         break;
@@ -391,7 +400,19 @@ public class KnobElement : Element
             // lane runs on top of it.
             float angle = MathHelper.ToRadians(45f + value * SweepDegrees);
             int length = (int)(diameter * PointerLength);
-            var pointerRect = new Rectangle((int)center.X, (int)center.Y, 3, length);
+
+            // Skins vary the pointer's WEIGHT but never whether it is there.
+            // Amp panels print a fat white line on the cap; pixel art cannot
+            // have a 3px line at all, since everything else on that panel is
+            // built from blocks several pixels across.
+            int pointerWidth = Skin switch
+            {
+                ControlSkin.Amp => Math.Max(3, (int)(diameter * 0.09f)),
+                ControlSkin.Pixel => Math.Max(3, (int)(diameter * 0.14f)),
+                _ => 3,
+            };
+
+            var pointerRect = new Rectangle((int)center.X, (int)center.Y, pointerWidth, length);
             manager.DrawRotatedFilledRectangle(pointerRect, PointerColor, angle, new Vector2(0.5f, 0f));
 
             if (LiveValue.HasValue)
@@ -533,6 +554,148 @@ public class KnobElement : Element
             float rad = MathHelper.ToRadians(45f + t * SweepDegrees);
             var dir = new Vector2(-(float)Math.Sin(rad), (float)Math.Cos(rad));
             manager.DrawFilledCircle(center + dir * tickRadius, dotRadius, t <= value + 0.0001f ? lit : unlit);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="ControlSkin.Amp"/>: a knurled black cap with printed tick
+    /// marks around it, read like a volume control on an amplifier.
+    ///
+    /// The ticks are PRINTED, not lit — they are the same colour all the way
+    /// round, and the pointer is what you read against them. That is the whole
+    /// difference from <see cref="DrawHardwareFace"/>, and it is why this skin
+    /// survives on a panel whose accent is barely there.
+    ///
+    /// The knurl is a run of short radial spokes around the cap's edge. Real
+    /// knurling is far finer than this at knob sizes, and drawing it finer just
+    /// produces a grey ring: a dozen visible teeth read as "milled edge" where
+    /// forty read as "smudge".
+    /// </summary>
+    private void DrawAmpFace(DrawManager manager, Vector2 center, float outerRadius, int diameter)
+    {
+        float tickRadius = outerRadius * 0.94f;
+        float capRadius = outerRadius * 0.68f;
+
+        // Printed scale. Longer marks at the two ends, because an amp panel
+        // calls out its extremes and the eye uses them to find the middle.
+        int ticks = Math.Max(9, Math.Min(15, diameter / 8));
+        Color printed = RingColor;
+
+        for (int i = 0; i < ticks; i++)
+        {
+            float t = i / (float)(ticks - 1);
+            float rad = MathHelper.ToRadians(45f + t * SweepDegrees);
+            var dir = new Vector2(-(float)Math.Sin(rad), (float)Math.Cos(rad));
+            bool end = i == 0 || i == ticks - 1;
+            float length = outerRadius * (end ? 0.22f : 0.14f);
+            manager.DrawThickLine(center + dir * (tickRadius - length), center + dir * tickRadius,
+                printed, Math.Max(1, (int)(outerRadius * 0.07f)));
+        }
+
+        // Knurled edge, then the cap face over the top of its inner half.
+        int teeth = Math.Max(10, Math.Min(24, diameter / 5));
+        Color knurl = Darken(FaceColor, 0.25f);
+        for (int i = 0; i < teeth; i++)
+        {
+            float rad = i / (float)teeth * MathHelper.TwoPi;
+            var dir = new Vector2((float)Math.Cos(rad), (float)Math.Sin(rad));
+            manager.DrawThickLine(center + dir * (capRadius * 0.86f), center + dir * capRadius,
+                knurl, Math.Max(1, (int)(outerRadius * 0.06f)));
+        }
+
+        manager.DrawFilledCircle(center, capRadius * 0.88f, Darken(FaceColor, 0.55f));
+        manager.DrawRadialShadedCircle(center, capRadius * 0.84f,
+            Lighten(FaceColor, 0.10f), Darken(FaceColor, 0.30f));
+
+        // The coloured insert. On a black cap this is the only colour on the
+        // control, and it is what separates one knob from the next on a panel
+        // of otherwise identical black ones.
+        if (LiveValue.HasValue || PointerColor != Color.White)
+        {
+            manager.DrawFilledCircle(center, capRadius * 0.46f, LiveWarmed(PointerColor));
+        }
+    }
+
+    /// <summary>
+    /// <see cref="ControlSkin.Neon"/>: an outlined ring, dark inside, with the
+    /// travelled part glowing.
+    ///
+    /// The glow is three arcs of falling alpha over the same band rather than
+    /// anything blurred — there is no blur to be had without a shader, and at
+    /// knob sizes a three-step bloom is indistinguishable from one.
+    /// </summary>
+    private void DrawNeonFace(DrawManager manager, Vector2 center, float outerRadius)
+    {
+        float ringOuter = outerRadius * 0.94f;
+        float ringInner = ringOuter - Math.Max(1.5f, outerRadius * 0.13f);
+
+        manager.DrawFilledCircle(center, ringInner, FaceColor);
+        manager.DrawRing(center, ringInner, ringOuter, RingColor * 0.5f);
+
+        if (!ShowRing)
+        {
+            return;
+        }
+
+        float sweep = MathHelper.ToRadians(value * SweepDegrees);
+        if (sweep <= 0.0001f)
+        {
+            return;
+        }
+
+        Color glow = LiveWarmed(PointerColor);
+        for (int i = 2; i >= 0; i--)
+        {
+            float spread = i * Math.Max(1f, outerRadius * 0.09f);
+            manager.DrawRingArc(center, ringInner - spread, ringOuter + spread,
+                glow * (i == 0 ? 1f : 0.16f / i), ArcStartRadians, sweep);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="ControlSkin.Pixel"/>: a square cap with a two-step bevel,
+    /// drawn only from hard-edged rectangles.
+    ///
+    /// The bevel is light on the top and left, dark on the bottom and right,
+    /// which is the entire vocabulary of a raised pixel-art button and reads at
+    /// sizes where a gradient would not.
+    /// </summary>
+    private void DrawPixelFace(DrawManager manager, Vector2 center, float outerRadius)
+    {
+        int step = Math.Max(1, (int)(outerRadius * 0.16f));
+        int side = (int)(outerRadius * 1.7f);
+        int left = (int)(center.X - side / 2f);
+        int top = (int)(center.Y - side / 2f);
+
+        // Outline, then the shadowed base it sits proud of, then the face.
+        manager.DrawFilledRectangle(new Rectangle(left - step, top - step, side + step * 2, side + step * 2),
+            Darken(FaceColor, 0.75f));
+        manager.DrawFilledRectangle(new Rectangle(left, top, side, side), Darken(FaceColor, 0.35f));
+        manager.DrawFilledRectangle(new Rectangle(left, top, side - step, side - step), FaceColor);
+        manager.DrawFilledRectangle(new Rectangle(left, top, side - step * 2, step), Lighten(FaceColor, 0.35f));
+        manager.DrawFilledRectangle(new Rectangle(left, top, step, side - step * 2), Lighten(FaceColor, 0.35f));
+
+        if (!ShowRing)
+        {
+            return;
+        }
+
+        // Value as a row of blocks along the bottom of the CAP, because a
+        // pixel panel has no arcs on it anywhere else.
+        //
+        // Inside the cap rather than under it: the element's box is only as
+        // tall as the knob, and a row hung below the face lands in the caption
+        // that every control draws beneath itself.
+        int cells = 6;
+        int inset = step;
+        int barWidth = side - step - inset * 2;
+        int cell = Math.Max(1, barWidth / cells);
+        int barTop = top + side - step * 2 - inset;
+        for (int i = 0; i < cells; i++)
+        {
+            manager.DrawFilledRectangle(
+                new Rectangle(left + inset + i * cell, barTop, Math.Max(1, cell - 1), step),
+                i / (float)cells < value ? LiveWarmed(PointerColor) : Darken(FaceColor, 0.45f));
         }
     }
 
