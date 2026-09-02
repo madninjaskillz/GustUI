@@ -36,6 +36,13 @@ namespace GustUI.Elements
         public Color OffColor { get; set; } = new Color(70, 70, 84);
         public Color ThumbColor { get; set; } = Color.White;
 
+        /// <summary>
+        /// How the pill and thumb paint. The slide animation, the drag and the
+        /// click behaviour are identical across skins -- see
+        /// <see cref="ControlSkin"/>.
+        /// </summary>
+        public ControlSkin Skin { get; set; } = ControlSkin.Flat;
+
         public Action<bool> OnValueChanged;
 
         /// <summary>Raised once per completed gesture with the final value —
@@ -170,14 +177,53 @@ namespace GustUI.Elements
                 Color trackColor = Color.Lerp(OffColor, OnColor, t);
 
                 var dest = new Rectangle((int)pos.X, (int)pos.Y, w, h);
-                manager.DrawFilledCapsule(dest, trackColor);
 
                 int diameter = Math.Max(2, h - 4);
                 float travel = Math.Max(0, w - diameter - 4);
                 float thumbX = pos.X + 2 + t * travel;
                 float thumbY = pos.Y + (h - diameter) / 2f;
                 Vector2 thumbCenter = new Vector2(thumbX + diameter / 2f, thumbY + diameter / 2f);
-                manager.DrawFilledCircle(thumbCenter, diameter / 2f, ThumbColor);
+                float thumbRadius = diameter / 2f;
+
+                switch (Skin)
+                {
+                    case ControlSkin.Soft:
+                        // Recessed pill, raised thumb -- the same inversion the
+                        // soft slider uses, so a panel mixing the two reads as
+                        // one material rather than two.
+                        manager.DrawFilledCapsule(new Rectangle(
+                            dest.X, dest.Y - 1, dest.Width, dest.Height + 2), Color.Black * 0.16f);
+                        manager.DrawFilledCapsule(dest, trackColor);
+                        manager.DrawSoftShadowCircle(
+                            thumbCenter + new Vector2(thumbRadius * 0.25f, thumbRadius * 0.25f),
+                            thumbRadius, Color.Black * 0.30f, thumbRadius * 0.45f);
+                        manager.DrawRadialShadedCircle(thumbCenter, thumbRadius,
+                            Color.Lerp(ThumbColor, Color.White, 0.22f),
+                            Color.Lerp(ThumbColor, Color.Black, 0.10f));
+                        break;
+
+                    case ControlSkin.Hardware:
+                        // A rocker in a dark surround, with the lit side of the
+                        // pill glowing rather than the whole track changing
+                        // colour: on a rack panel the LED is the state, and the
+                        // switch body stays the same dark plastic either way.
+                        manager.DrawFilledCapsule(dest, Color.Lerp(OffColor, Color.Black, 0.5f));
+                        int litWidth = Math.Max(2, (int)(dest.Width * (0.25f + 0.55f * t)));
+                        manager.DrawFilledCapsule(
+                            new Rectangle(dest.X + 2, dest.Y + 2, litWidth, Math.Max(1, dest.Height - 4)),
+                            Color.Lerp(OffColor, OnColor, t));
+                        manager.DrawFilledCircle(thumbCenter, thumbRadius,
+                            Color.Lerp(ThumbColor, Color.Black, 0.55f));
+                        manager.DrawRadialShadedCircle(thumbCenter, thumbRadius * 0.80f,
+                            Color.Lerp(ThumbColor, Color.White, 0.28f),
+                            Color.Lerp(ThumbColor, Color.Black, 0.20f));
+                        break;
+
+                    default:
+                        manager.DrawFilledCapsule(dest, trackColor);
+                        manager.DrawFilledCircle(thumbCenter, thumbRadius, ThumbColor);
+                        break;
+                }
             }
 
             base.Draw();

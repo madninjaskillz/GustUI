@@ -115,6 +115,19 @@ public class KnobElement : Element
     /// </summary>
     public Texture2D FaceTexture { get; set; }
 
+    /// <summary>
+    /// How the FACE paints -- flat disc, soft plastic, or studio hardware.
+    ///
+    /// Only the face and its rim change. The pointer, the modulation arc, the
+    /// ghost pointer and the live-automation dot are affordances rather than
+    /// decoration, and they draw identically over every skin: a themed panel
+    /// must not quietly cost you the ability to see that a knob is automated.
+    ///
+    /// Ignored when <see cref="FaceTexture"/> is set -- a bitmap cap IS the
+    /// face, and shading it a second time would fight the artwork.
+    /// </summary>
+    public ControlSkin Skin { get; set; } = ControlSkin.Flat;
+
     /// <summary>Draws the rim ring. Skins usually bring their own bezel, so a
     /// custom <see cref="FaceTexture"/> defaults this off via
     /// <see cref="ShowRingWithSkin"/> rather than double-drawing one.</summary>
@@ -298,23 +311,29 @@ public class KnobElement : Element
                 // Custom skin: the author's bitmap IS the face (drawn
                 // untinted so its own colours survive).
                 manager.Draw(FaceTexture, dest, Color.White);
+
+                // A running lane warms the ring toward LiveColor — a passive,
+                // always-visible cue that this control is automated right now,
+                // ahead of the eye even catching the moving rim dot.
+                if (ShowRing && ShowRingWithSkin)
+                {
+                    manager.DrawRing(center, ringInner, outerRadius, LiveWarmed(RingColor));
+                }
             }
             else
             {
-                // Face fills only to ringInner (the ring band itself is
-                // drawn separately below, over this) — real vector geometry
-                // now, so this edge is antialiased in its own right rather
-                // than relying on the ring's inner AA to hide a hard cut.
-                manager.DrawFilledCircle(center, ringInner, FaceColor);
-            }
-
-            // A running lane warms the ring toward LiveColor — a passive,
-            // always-visible cue that this control is automated right now,
-            // ahead of the eye even catching the moving rim dot.
-            if (ShowRing && (FaceTexture == null || ShowRingWithSkin))
-            {
-                Color ringColor = LiveValue.HasValue ? Color.Lerp(RingColor, LiveColor, 0.35f) : RingColor;
-                manager.DrawRing(center, ringInner, outerRadius, ringColor);
+                switch (Skin)
+                {
+                    case ControlSkin.Soft:
+                        DrawSoftFace(manager, center, outerRadius);
+                        break;
+                    case ControlSkin.Hardware:
+                        DrawHardwareFace(manager, center, outerRadius, diameter);
+                        break;
+                    default:
+                        DrawFlatFace(manager, center, outerRadius, ringInner);
+                        break;
+                }
             }
 
             // Modulation arc, UNDER the pointer so the pointer stays the
@@ -392,5 +411,143 @@ public class KnobElement : Element
         }
 
         base.Draw();
+    }
+
+    /// <summary>The ring colour, warmed toward <see cref="LiveColor"/> while a
+    /// lane is driving this control.</summary>
+    private Color LiveWarmed(Color ringColor)
+    {
+        return LiveValue.HasValue ? Color.Lerp(ringColor, LiveColor, 0.35f) : ringColor;
+    }
+
+    /// <summary>
+    /// <see cref="ControlSkin.Flat"/>: a disc and a thin rim, which is what
+    /// every knob drew before skins existed.
+    ///
+    /// The face fills only to <paramref name="ringInner"/> and the band is
+    /// drawn over it, so that edge is antialiased in its own right rather than
+    /// relying on the ring's inner AA to hide a hard cut.
+    /// </summary>
+    private void DrawFlatFace(DrawManager manager, Vector2 center, float outerRadius, float ringInner)
+    {
+        manager.DrawFilledCircle(center, ringInner, FaceColor);
+
+        if (ShowRing)
+        {
+            manager.DrawRing(center, ringInner, outerRadius, LiveWarmed(RingColor));
+        }
+    }
+
+    /// <summary>
+    /// <see cref="ControlSkin.Soft"/>: the cap is the same material as the
+    /// panel, lifted off it by a shadow low-right and a highlight high-left,
+    /// with the value read as an accent arc around the rim.
+    ///
+    /// The arc is what replaces the flat skin's plain ring, and it is drawn in
+    /// <see cref="PointerColor"/> rather than <see cref="RingColor"/> because
+    /// it is now carrying the value: a soft knob whose arc was the dim rim
+    /// colour would be a control with no reading at a glance.
+    /// </summary>
+    private void DrawSoftFace(DrawManager manager, Vector2 center, float outerRadius)
+    {
+        float capRadius = outerRadius * 0.72f;
+
+        // The offset has to be a real fraction of the cap, not a pixel or two:
+        // a shadow that peeps out on every side is a HALO, and a halo reads as
+        // a metal bezel rather than as a raised surface. Offsetting it far
+        // enough that the lit side is genuinely clear of it is the whole
+        // difference between the two.
+        float offset = Math.Max(2f, outerRadius * 0.20f);
+
+        // Shadow then highlight, both under the cap. Light from the top-left,
+        // which is the convention every soft-UI reference uses and the reason
+        // these controls read as raised rather than as printed discs. The
+        // highlight is the stronger of the two because these panels are pale
+        // and a white lift has less to work with there than a black one.
+        manager.DrawSoftShadowCircle(center + new Vector2(offset, offset), capRadius,
+            Color.Black * 0.22f, offset * 1.4f);
+        manager.DrawSoftShadowCircle(center - new Vector2(offset, offset), capRadius,
+            Color.White * 0.85f, offset * 1.4f);
+
+        // The cap itself, very slightly dished: lighter where the light is, so
+        // it is not a flat sticker sitting between two blurs.
+        manager.DrawRadialShadedCircle(center, capRadius,
+            Lighten(FaceColor, 0.10f), Darken(FaceColor, 0.06f));
+
+        if (ShowRing)
+        {
+            float arcOuter = outerRadius;
+            float arcInner = outerRadius - Math.Max(2f, outerRadius * 0.14f);
+
+            // Full sweep dim, travelled sweep lit -- the same 45..315 degrees
+            // clockwise-from-6-o'clock convention the pointer uses, converted
+            // to DrawRingArc's 0-at-three-o'clock frame.
+            manager.DrawRingArc(center, arcInner, arcOuter, LiveWarmed(RingColor) * 0.45f,
+                ArcStartRadians, MathHelper.ToRadians(SweepDegrees));
+
+            if (value > 0.001f)
+            {
+                manager.DrawRingArc(center, arcInner, arcOuter, LiveWarmed(PointerColor),
+                    ArcStartRadians, MathHelper.ToRadians(value * SweepDegrees));
+            }
+        }
+    }
+
+    /// <summary>
+    /// <see cref="ControlSkin.Hardware"/>: a machined cap in a metal bezel,
+    /// ringed by ticks with the travelled ones lit.
+    ///
+    /// The lit ticks are the value read here, and they are deliberately
+    /// COARSE -- a dozen or so discrete steps, like the LED collar on a piece
+    /// of rack gear. The pointer still draws over the top, so the exact value
+    /// is not left to a count of dots.
+    /// </summary>
+    private void DrawHardwareFace(DrawManager manager, Vector2 center, float outerRadius, int diameter)
+    {
+        float tickRadius = outerRadius * 0.90f;
+        float bezelOuter = outerRadius * 0.78f;
+        float capRadius = bezelOuter - Math.Max(1.5f, outerRadius * 0.07f);
+
+        // Bezel: a bright ring with a darker disc just inside it, which is the
+        // cheapest thing that reads as a turned metal edge rather than a
+        // painted circle.
+        manager.DrawRing(center, bezelOuter - Math.Max(1f, outerRadius * 0.06f), bezelOuter,
+            LiveWarmed(RingColor));
+        manager.DrawFilledCircle(center, capRadius, Darken(FaceColor, 0.45f));
+
+        // The cap, shaded from a little light at the centre out to near-black
+        // at the edge.
+        manager.DrawRadialShadedCircle(center, capRadius * 0.94f,
+            Lighten(FaceColor, 0.22f), Darken(FaceColor, 0.35f));
+
+        // Tick collar. Count follows SIZE so a small knob does not turn into a
+        // solid ring of overlapping dots.
+        int ticks = Math.Max(9, Math.Min(21, diameter / 6));
+        float dotRadius = Math.Max(0.9f, outerRadius * 0.055f);
+        Color lit = LiveWarmed(PointerColor);
+        Color unlit = RingColor * 0.35f;
+
+        for (int i = 0; i < ticks; i++)
+        {
+            float t = i / (float)(ticks - 1);
+            float rad = MathHelper.ToRadians(45f + t * SweepDegrees);
+            var dir = new Vector2(-(float)Math.Sin(rad), (float)Math.Cos(rad));
+            manager.DrawFilledCircle(center + dir * tickRadius, dotRadius, t <= value + 0.0001f ? lit : unlit);
+        }
+    }
+
+    /// <summary>Start of the value sweep in <c>DrawRingArc</c>'s frame (0 at
+    /// three o'clock, clockwise): the knob's own 45 degrees from 6
+    /// o'clock.</summary>
+    private static float ArcStartRadians => MathHelper.ToRadians(45f + 90f);
+
+    private static Color Lighten(Color c, float amount)
+    {
+        return Color.Lerp(c, Color.White, amount);
+    }
+
+    private static Color Darken(Color c, float amount)
+    {
+        return Color.Lerp(c, Color.Black, amount);
     }
 }

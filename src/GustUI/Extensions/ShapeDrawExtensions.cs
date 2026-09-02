@@ -571,6 +571,109 @@ namespace GustUI.Extensions
         }
 
         /// <summary>
+        /// A circle shaded from <paramref name="inner"/> at its centre to
+        /// <paramref name="outer"/> at its rim.
+        ///
+        /// ONE TRIANGLE FAN with per-vertex colour, not a stack of circles.
+        /// The stack was tried first and it is worth saying why it failed,
+        /// because it looked like the obvious implementation: every
+        /// <see cref="DrawFilledCircle"/> carries its own feathered
+        /// antialiased edge, so concentric ones spaced closer than that
+        /// feather cross-fade into each other and the cap comes out covered in
+        /// a moire swirl. Spacing them further apart to avoid it just trades
+        /// the swirl for visible banding. There is no gap between the two.
+        ///
+        /// A fan has neither problem: the GPU interpolates the colour exactly,
+        /// with one vertex per rim segment and no overlapping geometry at all.
+        /// It is also the cheaper of the two by an order of magnitude.
+        ///
+        /// The fan's own rim is hard-edged (no feather), so an opaque
+        /// <paramref name="outer"/> disc is laid down underneath it at the
+        /// full radius to supply the antialiased boundary, and the fan is
+        /// drawn a half-pixel inside that.
+        /// </summary>
+        public static void DrawRadialShadedCircle(this DrawManager manager, Vector2 center,
+            float radius, Color inner, Color outer)
+        {
+            if (radius <= 0.01f)
+            {
+                return;
+            }
+
+            // The AA edge. Also the whole shape when the control is too small
+            // for the shading to be worth any triangles.
+            manager.DrawFilledCircle(center, radius, outer);
+
+            float fanRadius = radius - 0.5f;
+            if (fanRadius <= 1.5f)
+            {
+                return;
+            }
+
+            int segments = ArcSegments(fanRadius, manager.RenderScale);
+            var vertices = new VertexPositionColor[segments + 2];
+            vertices[0] = new VertexPositionColor(new Vector3(center, 0f), inner);
+
+            for (int i = 0; i <= segments; i++)
+            {
+                float angle = i / (float)segments * MathHelper.TwoPi;
+                vertices[i + 1] = new VertexPositionColor(
+                    new Vector3(
+                        center.X + (float)Math.Cos(angle) * fanRadius,
+                        center.Y + (float)Math.Sin(angle) * fanRadius,
+                        0f),
+                    outer);
+            }
+
+            var indices = new short[segments * 3];
+            for (int i = 0; i < segments; i++)
+            {
+                indices[i * 3] = 0;
+                indices[i * 3 + 1] = (short)(i + 1);
+                indices[i * 3 + 2] = (short)(i + 2);
+            }
+
+            manager.DrawTriangles(vertices, indices, segments);
+        }
+
+        /// <summary>
+        /// A soft circular shadow: <paramref name="layers"/> translucent
+        /// circles from <paramref name="radius"/> out to
+        /// <paramref name="radius"/> + <paramref name="spread"/>, each fainter
+        /// than the last, centred on <paramref name="center"/>.
+        ///
+        /// Draw it BEFORE the thing casting it, offset toward the light's
+        /// opposite corner. The alpha ramp is quadratic rather than linear
+        /// because a linear one reads as a hard disc with a fuzzy edge instead
+        /// of a shadow.
+        ///
+        /// This is the whole of what makes <see cref="Elements.ControlSkin.Soft"/>
+        /// work, and it is why that skin needs a mid-tone panel: a shadow on
+        /// black is invisible, so the shape it is separating never separates.
+        /// </summary>
+        public static void DrawSoftShadowCircle(this DrawManager manager, Vector2 center,
+            float radius, Color color, float spread, int layers = 6)
+        {
+            if (radius <= 0.01f || spread <= 0.01f)
+            {
+                return;
+            }
+
+            layers = Math.Max(1, layers);
+
+            for (int i = layers - 1; i >= 0; i--)
+            {
+                float t = (i + 1) / (float)layers;          // 1 = outermost
+                float falloff = (1f - t) * (1f - t);
+                // color * scalar is the fade idiom under the premultiplied
+                // AlphaBlend GeometryBatch runs, so a caller that wants a
+                // half-strength shadow passes Color.Black * 0.5f and the two
+                // scalars compose correctly.
+                manager.DrawFilledCircle(center, radius + spread * t, color * falloff);
+            }
+        }
+
+        /// <summary>
         /// A ROUNDED filled rectangle — real vector geometry (the same
         /// fan-plus-feather technique as <see cref="DrawFilledCircle"/>/
         /// <see cref="DrawFilledCapsule"/>): four quarter-circle corner arcs

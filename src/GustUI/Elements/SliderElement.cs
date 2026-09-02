@@ -22,6 +22,13 @@ public class SliderElement : Element
     public Color TrackColor { get; set; } = new Color(52, 52, 63);
     public Color FillColor { get; set; } = new Color(110, 145, 235);
     public Color ThumbColor { get; set; } = new Color(232, 232, 236);
+    /// <summary>
+    /// How the TRACK and THUMB paint. The fill, the centre tick and the
+    /// live-automation marker are affordances and draw the same over every
+    /// skin -- see <see cref="ControlSkin"/>.
+    /// </summary>
+    public ControlSkin Skin { get; set; } = ControlSkin.Flat;
+
     public int TrackThickness { get; set; } = 4;
     public int ThumbDiameter { get; set; } = 14;
 
@@ -110,7 +117,32 @@ public class SliderElement : Element
             int trackTop = (int)(centerY - TrackThickness / 2f);
             float thumbCenterX = pos.X + ThumbDiameter / 2f + value * (size.X - ThumbDiameter);
 
-            manager.DrawFilledRectangle(new Rectangle(trackLeft, trackTop, trackWidth, TrackThickness), TrackColor);
+            var trackRect = new Rectangle(trackLeft, trackTop, trackWidth, TrackThickness);
+            switch (Skin)
+            {
+                case ControlSkin.Soft:
+                    // A groove pressed INTO the panel: the shadow sits inside
+                    // the top edge, which is what inverts the raised look the
+                    // thumb has and makes the pair read as track-and-slider.
+                    manager.DrawFilledCapsule(new Rectangle(
+                        trackRect.X, trackRect.Y - 1, trackRect.Width, trackRect.Height + 2),
+                        Color.Black * 0.16f);
+                    manager.DrawFilledCapsule(trackRect, TrackColor);
+                    break;
+                case ControlSkin.Hardware:
+                    // Inset channel with a lip along the bottom, and a milled
+                    // scale above it -- the tick row is the thing that reads
+                    // as a piece of gear rather than a progress bar.
+                    manager.DrawFilledRectangle(trackRect, Color.Lerp(TrackColor, Color.Black, 0.45f));
+                    manager.DrawFilledRectangle(new Rectangle(
+                        trackRect.X, trackRect.Bottom - 1, trackRect.Width, 1),
+                        Color.Lerp(TrackColor, Color.White, 0.25f));
+                    DrawHardwareScale(manager, trackRect);
+                    break;
+                default:
+                    manager.DrawFilledRectangle(trackRect, TrackColor);
+                    break;
+            }
 
             if (Bipolar)
             {
@@ -119,7 +151,7 @@ public class SliderElement : Element
                 int fillWidth = (int)Math.Abs(thumbCenterX - centerX);
                 if (fillWidth > 0)
                 {
-                    manager.DrawFilledRectangle(new Rectangle(fillLeft, trackTop, fillWidth, TrackThickness), FillColor);
+                    DrawFill(manager, new Rectangle(fillLeft, trackTop, fillWidth, TrackThickness));
                 }
 
                 // Center tick mark, drawn OVER the fill so it stays visible
@@ -132,14 +164,14 @@ public class SliderElement : Element
                 int fillWidth = (int)(thumbCenterX - trackLeft);
                 if (fillWidth > 0)
                 {
-                    manager.DrawFilledRectangle(new Rectangle(trackLeft, trackTop, fillWidth, TrackThickness), FillColor);
+                    DrawFill(manager, new Rectangle(trackLeft, trackTop, fillWidth, TrackThickness));
                 }
             }
 
             int d = Math.Min(ThumbDiameter, (int)size.Y);
             if (d >= 4)
             {
-                manager.DrawFilledCircle(new Vector2(thumbCenterX, centerY), d / 2f, ThumbColor);
+                DrawThumb(manager, new Vector2(thumbCenterX, centerY), d / 2f);
             }
 
             if (LiveValue.HasValue)
@@ -155,5 +187,66 @@ public class SliderElement : Element
         }
 
         base.Draw();
+    }
+
+    /// <summary>The travelled part of the track. Rounded under
+    /// <see cref="ControlSkin.Soft"/> so it matches the groove it sits in;
+    /// square elsewhere.</summary>
+    private void DrawFill(DrawManager manager, Rectangle rect)
+    {
+        if (Skin == ControlSkin.Soft)
+        {
+            manager.DrawFilledCapsule(rect, FillColor);
+        }
+        else
+        {
+            manager.DrawFilledRectangle(rect, FillColor);
+        }
+    }
+
+    /// <summary>The grab handle, per skin: a plain disc, a soft raised cap, or
+    /// a milled metal one.</summary>
+    private void DrawThumb(DrawManager manager, Vector2 centre, float radius)
+    {
+        switch (Skin)
+        {
+            case ControlSkin.Soft:
+                float offset = Math.Max(1f, radius * 0.28f);
+                manager.DrawSoftShadowCircle(centre + new Vector2(offset, offset), radius,
+                    Color.Black * 0.28f, offset * 1.5f);
+                manager.DrawRadialShadedCircle(centre, radius,
+                    Color.Lerp(ThumbColor, Color.White, 0.20f),
+                    Color.Lerp(ThumbColor, Color.Black, 0.10f));
+                break;
+
+            case ControlSkin.Hardware:
+                // Dark collar, bright cap: the same two-tone trick the knob's
+                // bezel uses, at slider scale.
+                manager.DrawFilledCircle(centre, radius, Color.Lerp(ThumbColor, Color.Black, 0.55f));
+                manager.DrawRadialShadedCircle(centre, radius * 0.78f,
+                    Color.Lerp(ThumbColor, Color.White, 0.30f),
+                    Color.Lerp(ThumbColor, Color.Black, 0.18f));
+                break;
+
+            default:
+                manager.DrawFilledCircle(centre, radius, ThumbColor);
+                break;
+        }
+    }
+
+    /// <summary>The milled scale above a <see cref="ControlSkin.Hardware"/>
+    /// track: evenly spaced ticks, spaced by SIZE rather than by a fixed count
+    /// so a short slider does not become a solid bar.</summary>
+    private void DrawHardwareScale(DrawManager manager, Rectangle track)
+    {
+        int ticks = Math.Max(5, Math.Min(33, track.Width / 12));
+        int height = Math.Max(2, TrackThickness);
+        Color tick = Color.Lerp(TrackColor, Color.White, 0.35f);
+
+        for (int i = 0; i < ticks; i++)
+        {
+            int x = track.X + (int)(i / (float)(ticks - 1) * (track.Width - 1));
+            manager.DrawFilledRectangle(new Rectangle(x, track.Y - height - 2, 1, height), tick);
+        }
     }
 }
