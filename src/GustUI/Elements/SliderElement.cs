@@ -154,6 +154,12 @@ public class SliderElement : Element
                     manager.DrawFilledCapsule(trackRect, TrackColor);
                     break;
 
+                case ControlSkin.Modern:
+                    // A thin recessed rail. The fill and the small pale thumb
+                    // carry it; nothing here is drawn to look physical.
+                    manager.DrawFilledCapsule(trackRect, Color.Lerp(TrackColor, Color.Black, 0.25f));
+                    break;
+
                 case ControlSkin.Pixel:
                     // Chunky recessed trough: dark base, darker top edge, hard
                     // corners. No capsule anywhere on a pixel panel.
@@ -289,6 +295,12 @@ public class SliderElement : Element
             case ControlSkin.Neon:
                 manager.DrawFilledCircle(centre, radius, ThumbColor * 0.25f);
                 manager.DrawFilledCircle(centre, radius * 0.62f, ThumbColor);
+                break;
+
+            case ControlSkin.Modern:
+                manager.DrawFilledCircle(centre, radius, Color.Lerp(ThumbColor, Color.Black, 0.5f));
+                manager.DrawRadialShadedCircle(centre, radius * 0.82f,
+                    Color.Lerp(ThumbColor, Color.White, 0.15f), ThumbColor);
                 break;
 
             case ControlSkin.Pixel:

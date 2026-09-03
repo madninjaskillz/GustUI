@@ -87,5 +87,22 @@ namespace GustUI.Elements
         /// the one primitive here with no feather on it.
         /// </summary>
         Pixel = 5,
+
+        /// <summary>
+        /// The soft-synth look: a dark machined cap with no bezel and no tick
+        /// collar, a thin pointer with a LIT TIP, and a hairline value arc
+        /// around the outside.
+        ///
+        /// Distinct from <see cref="Hardware"/> in what it leaves out. Hardware
+        /// is rack gear -- a metal bezel and a ring of lit ticks, drawn to look
+        /// machined and physical. This is a plugin: the cap is almost flat, the
+        /// only bright thing on it is the accent at the pointer's tip, and the
+        /// arc is a hairline rather than a collar. Put the two side by side and
+        /// Hardware reads as a box in a rack, this as a window on a screen.
+        ///
+        /// Wants a near-black panel and ONE strong accent. It has no second
+        /// colour to fall back on.
+        /// </summary>
+        Modern = 6,
     }
 }

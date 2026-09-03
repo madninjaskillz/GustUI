@@ -19,6 +19,33 @@ namespace GustUI.Elements;
 public class KnobElement : Element
 {
     public float DragRangePixels { get; set; } = 150f;
+
+    /// <summary>
+    /// Number of positions the knob may rest on, or 0 for continuous.
+    ///
+    /// The knob SNAPS: the value is quantised on the way in, so the pointer
+    /// sits on a step and the drag feels detented rather than sliding between
+    /// two names. A control that reads "Analog Saw" while its pointer is a
+    /// third of the way to the next table is telling you two different things
+    /// at once.
+    ///
+    /// Steps span both ends: with N, the positions are 0, 1/(N-1) ... 1, so
+    /// the first and last are reachable. Anything else makes the last option
+    /// unselectable, which is exactly where a player reaches first.
+    /// </summary>
+    public int Steps { get; set; }
+
+    /// <summary>Value snapped to <see cref="Steps"/>, or unchanged when
+    /// continuous.</summary>
+    private float Snap(float raw)
+    {
+        if (Steps < 2)
+        {
+            return raw;
+        }
+
+        return (float)Math.Round(MathHelper.Clamp(raw, 0f, 1f) * (Steps - 1)) / (Steps - 1);
+    }
     public Color RingColor { get; set; } = new Color(180, 180, 190);
     public Color FaceColor { get; set; } = new Color(38, 38, 47);
     public Color PointerColor { get; set; } = new Color(232, 232, 232);
@@ -154,7 +181,10 @@ public class KnobElement : Element
         get => value;
         set
         {
-            float clamped = MathHelper.Clamp(value, 0f, 1f);
+            // Snapped here rather than at each call site: drag, programmatic
+            // set and the panel's own re-sync all land on this setter, and a
+            // knob that snaps on some of those and not others reads as drift.
+            float clamped = Snap(MathHelper.Clamp(value, 0f, 1f));
             if (clamped != this.value)
             {
                 this.value = clamped;
@@ -339,6 +369,9 @@ public class KnobElement : Element
                     case ControlSkin.Pixel:
                         DrawPixelFace(manager, center, outerRadius);
                         break;
+                    case ControlSkin.Modern:
+                        DrawModernFace(manager, center, outerRadius);
+                        break;
                     default:
                         DrawFlatFace(manager, center, outerRadius, ringInner);
                         break;
@@ -409,11 +442,19 @@ public class KnobElement : Element
             {
                 ControlSkin.Amp => Math.Max(3, (int)(diameter * 0.09f)),
                 ControlSkin.Pixel => Math.Max(3, (int)(diameter * 0.14f)),
+                ControlSkin.Modern => Math.Max(2, (int)(diameter * 0.045f)),
                 _ => 3,
             };
 
+            // Modern's pointer is a PALE hairline, because on that skin the
+            // accent is already doing the reading at the tip; colouring the
+            // line too would put two bright marks on one small control.
+            Color pointerColor = Skin == ControlSkin.Modern
+                ? Color.Lerp(FaceColor, Color.White, 0.72f)
+                : PointerColor;
+
             var pointerRect = new Rectangle((int)center.X, (int)center.Y, pointerWidth, length);
-            manager.DrawRotatedFilledRectangle(pointerRect, PointerColor, angle, new Vector2(0.5f, 0f));
+            manager.DrawRotatedFilledRectangle(pointerRect, pointerColor, angle, new Vector2(0.5f, 0f));
 
             if (LiveValue.HasValue)
             {
@@ -697,6 +738,49 @@ public class KnobElement : Element
                 new Rectangle(left + inset + i * cell, barTop, Math.Max(1, cell - 1), step),
                 i / (float)cells < value ? LiveWarmed(PointerColor) : Darken(FaceColor, 0.45f));
         }
+    }
+
+    /// <summary>
+    /// <see cref="ControlSkin.Modern"/>: a dark cap, a hairline value arc, and
+    /// an accent dot at the pointer's tip.
+    ///
+    /// The DOT is the whole idea. Every other skin here carries the value in
+    /// something large -- a lit collar, a glowing ring, a row of blocks -- and
+    /// this one puts it in the single brightest, smallest mark on the control,
+    /// which is what a plugin knob does and why a panel of forty of them still
+    /// reads as calm.
+    /// </summary>
+    private void DrawModernFace(DrawManager manager, Vector2 center, float outerRadius)
+    {
+        float capRadius = outerRadius * 0.86f;
+
+        // A hairline of shadow around the cap rather than a bezel: enough to
+        // separate it from the panel, not enough to look machined.
+        manager.DrawFilledCircle(center, capRadius + Math.Max(1f, outerRadius * 0.04f),
+            Darken(FaceColor, 0.55f));
+        manager.DrawRadialShadedCircle(center, capRadius,
+            Lighten(FaceColor, 0.14f), Darken(FaceColor, 0.22f));
+
+        if (ShowRing)
+        {
+            float arcOuter = outerRadius;
+            float arcInner = outerRadius - Math.Max(1f, outerRadius * 0.07f);
+
+            manager.DrawRingArc(center, arcInner, arcOuter, LiveWarmed(RingColor) * 0.35f,
+                ArcStartRadians, MathHelper.ToRadians(SweepDegrees));
+
+            if (value > 0.001f)
+            {
+                manager.DrawRingArc(center, arcInner, arcOuter, LiveWarmed(PointerColor),
+                    ArcStartRadians, MathHelper.ToRadians(value * SweepDegrees));
+            }
+        }
+
+        // The lit tip, at the far end of where the pointer will be drawn.
+        float rad = MathHelper.ToRadians(45f + value * SweepDegrees);
+        var dir = new Vector2(-(float)Math.Sin(rad), (float)Math.Cos(rad));
+        manager.DrawFilledCircle(center + dir * (outerRadius * PointerLength * 1.9f),
+            Math.Max(1.2f, outerRadius * 0.10f), LiveWarmed(PointerColor));
     }
 
     /// <summary>Start of the value sweep in <c>DrawRingArc</c>'s frame (0 at

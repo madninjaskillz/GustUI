@@ -246,6 +246,24 @@ namespace GustUI.Elements
                         manager.DrawFilledCircle(thumbCenter, thumbRadius * 0.7f, ThumbColor);
                         break;
 
+                    case ControlSkin.Modern:
+                        // A SQUARE LED, not a pill. Soft synths mark a section
+                        // on or off with a small lit square rather than a
+                        // sliding switch, and at the sizes these panels use it
+                        // is far easier to read than a 16px pill.
+                        int ledSide = Math.Max(6, Math.Min(dest.Height, dest.Width) - 2);
+                        var led = new Rectangle(
+                            dest.X, dest.Y + (dest.Height - ledSide) / 2, ledSide, ledSide);
+                        manager.DrawRoundedRectangle(led, Color.Lerp(OffColor, Color.Black, 0.45f),
+                            Math.Max(1, ledSide / 5));
+                        int ledInset = Math.Max(2, ledSide / 4);
+                        manager.DrawRoundedRectangle(
+                            new Rectangle(led.X + ledInset, led.Y + ledInset,
+                                Math.Max(1, led.Width - ledInset * 2), Math.Max(1, led.Height - ledInset * 2)),
+                            Color.Lerp(Color.Lerp(OffColor, Color.Black, 0.2f), OnColor, t),
+                            Math.Max(1, ledSide / 8));
+                        break;
+
                     case ControlSkin.Pixel:
                         manager.DrawFilledRectangle(
                             new Rectangle(dest.X - 1, dest.Y - 1, dest.Width + 2, dest.Height + 2),
