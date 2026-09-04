@@ -81,15 +81,37 @@ public sealed class Toast
 
     internal double ClosingFor { get; set; }
 
+    /// <summary>
+    /// Optional: raised when this toast is DISMISSED — its close button, or a
+    /// caller calling <see cref="Dismiss"/>. Not raised when it simply expires
+    /// on its own lifetime, because those are different facts: one is the user
+    /// saying "I have seen this / I do not want it", the other is a toast doing
+    /// what it was always going to do.
+    ///
+    /// It is what lets a long job notice that nobody is watching it any more
+    /// and report its outcome some other way when it finishes — otherwise
+    /// dismissing the progress means never learning how it went.
+    ///
+    /// Raised exactly once, and cleared as it fires.
+    /// </summary>
+    public Action OnDismissed { get; set; }
+
     /// <summary>Takes this toast away, with its exit animation. Idempotent —
     /// a toast that expires while its close button is being pressed must not
-    /// be a problem.</summary>
+    /// be a problem, and <see cref="OnDismissed"/> must not fire twice for
+    /// it.</summary>
     public void Dismiss()
     {
-        if (IsOpen)
+        if (!IsOpen || Closing)
         {
-            Closing = true;
+            return;
         }
+
+        Closing = true;
+
+        Action dismissed = OnDismissed;
+        OnDismissed = null;
+        dismissed?.Invoke();
     }
 
     /// <summary>Restarts the countdown — for a toast that says the same thing
