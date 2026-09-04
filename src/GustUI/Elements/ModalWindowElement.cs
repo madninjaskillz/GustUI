@@ -226,8 +226,26 @@ namespace GustUI.Elements
         /// (90,000) and everything above it.</summary>
         public bool FloatAboveModalTier { get; set; }
 
+        /// <summary>Opt-in (2026-09-04): an EXPLICIT ceiling, overriding both
+        /// the default clamp and <see cref="FloatAboveModalTier"/>.
+        ///
+        /// For the rare owner that draws above the modal tiers entirely and
+        /// still has to show a dialog over itself. ezmuze studio's beta gate is
+        /// the first: it is a full-window wall at a depth far above everything
+        /// (a gate you can draw over is not a gate), and the only way past it
+        /// is the sign-in dialog it opens itself — which the wall then buried,
+        /// so the one button that mattered appeared to do nothing.
+        ///
+        /// A one-shot Depth assignment at spawn cannot do this: MoveToFront
+        /// runs on the modal's first Update and again on every title-bar drag,
+        /// and re-clamps each time. The ceiling is what has to move.
+        ///
+        /// Null (the default) changes nothing.</summary>
+        public int? DepthCeiling { get; set; }
+
         private protected override int MoveToFrontCeiling
-            => FloatAboveModalTier ? FullScreenModalElement.ModalDepth + 9999 : base.MoveToFrontCeiling;
+            => DepthCeiling
+               ?? (FloatAboveModalTier ? FullScreenModalElement.ModalDepth + 9999 : base.MoveToFrontCeiling);
 
         /// <summary>Opt-in hook (2026-08-17, tear-off/dissolve fix): an app-
         /// level owner that constructs and reuses ONE long-lived
