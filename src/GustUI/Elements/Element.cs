@@ -911,7 +911,7 @@ public class Element : IDisposable
     /// 60,000 surface (e.g. the wave picker's loop browser), which the
     /// blanket clamp silently buried behind their owner.
     /// </summary>
-    private protected virtual int MoveToFrontCeiling => FullScreenModalElement.ModalDepth - 1;
+    private protected virtual int MoveToFrontCeiling => ModalWindowElement.ModalDepth - 1;
 
     private static long frontSequenceCounter = 0;
 

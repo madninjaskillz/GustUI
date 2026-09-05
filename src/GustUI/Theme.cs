@@ -357,7 +357,7 @@ namespace GustUI
         public const int ChipRadius = 0;
 
         /// <summary>Opacity for every full-screen view's own base background
-        /// fill (the sequencer's and every <see cref="FullScreenModalElement"/>
+        /// fill (the sequencer's and every <c>FullScreenModalElement</c>
         /// editor's) — multiply the fill color by this instead of using it at
         /// full opacity, e.g. <c>new TVFillSolidColor(color * Theme.
         /// ModalBackgroundAlpha)</c>. 2026-08-16: the decorative

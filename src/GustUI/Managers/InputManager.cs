@@ -48,6 +48,35 @@ namespace GustUI.Managers
         /// inner modal closing after its parent still resolves correctly).</summary>
         public void PopHookScope(int token) => hookScopeStack.Remove(token);
 
+        /// <summary>
+        /// Makes an already-pushed scope the ACTIVE one again, without
+        /// creating a new one.
+        ///
+        /// Push/pop is a stack because modals nest: an inner one opens above
+        /// an outer one and closes before it. TABS are not a stack — they sit
+        /// side by side and the user switches between them in any order — so a
+        /// window hosting several views needs to say "this one has the
+        /// keyboard now" about a scope that is already on the stack.
+        ///
+        /// A hook records its scope when it is CONSTRUCTED and only fires when
+        /// that scope is active, so this is the only way a tab that was built
+        /// earlier can take the keyboard back. Without it every tab in a window
+        /// shares one scope and their shortcuts all fire at once.
+        ///
+        /// A token that is not on the stack is ignored rather than pushed: it
+        /// belongs to something already closed, and reviving its hooks would
+        /// fire a dead view's shortcuts.
+        /// </summary>
+        public void RaiseHookScope(int token)
+        {
+            if (token == 0 || !hookScopeStack.Remove(token))
+            {
+                return;
+            }
+
+            hookScopeStack.Add(token);
+        }
+
         public bool HaveInteracted { get; private set; }
         private MouseState previousMouseState;
         private KeyboardState previousKeyboardState;

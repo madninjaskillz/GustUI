@@ -172,7 +172,7 @@ namespace GustUI.Elements
         /// <see cref="Managers.DockLayout"/> leaves available (2026-08-17 —
         /// the sequencer's own default: opening/closing a docked panel like
         /// the loop browser now shrinks/grows it live, same as any
-        /// <see cref="FullScreenModalElement"/> already did). False by
+        /// <c>FullScreenModalElement</c> already did). False by
         /// default — opt-in, since most ModalWindowElement hosts
         /// (Preferences, About, a docked panel itself) are sized from their
         /// own content or from DockLayout instead. Turns off permanently
@@ -212,11 +212,22 @@ namespace GustUI.Elements
         /// offers to merge them into a shared tabbed window — see
         /// <see cref="UpdateTabMergeGesture"/>. False by default; the loop
         /// browser and wave bank are the first two opted in.</summary>
+        /// <summary>Depth tier for a modal window. The documented root tiers:
+        /// tooltip 1000000 &gt; dock preview 700000 (see
+        /// <see cref="DockPreviewOverlay"/>) &gt; popup 500000 &gt; status bar
+        /// 100000 &gt; loading 90000 &gt; MODAL 60000 &gt; side panels 50000 &gt;
+        /// content 0.
+        ///
+        /// Lived on FullScreenModalElement until that class was retired
+        /// (#22). It was never about the SHEET — it is the tier every modal
+        /// sits in, and the sheet merely happened to be the first one written.</summary>
+        public const int ModalDepth = 60000;
+
         public bool Tabable { get; set; }
 
         /// <summary>Opt-in (2026-08-21): lets <see cref="Element.MoveToFront"/>
         /// place this floating window ABOVE the full-screen modal tier
-        /// (<see cref="FullScreenModalElement.ModalDepth"/>), instead of the
+        /// (<see cref="ModalDepth"/>), instead of the
         /// default clamp just below it. For auxiliary floats a full-screen
         /// editor OWNS and shows over itself (the wave picker's loop
         /// browser) — the 2026-08-17 blanket clamp silently buried those
@@ -245,7 +256,7 @@ namespace GustUI.Elements
 
         private protected override int MoveToFrontCeiling
             => DepthCeiling
-               ?? (FloatAboveModalTier ? FullScreenModalElement.ModalDepth + 9999 : base.MoveToFrontCeiling);
+               ?? (FloatAboveModalTier ? ModalDepth + 9999 : base.MoveToFrontCeiling);
 
         /// <summary>Opt-in hook (2026-08-17, tear-off/dissolve fix): an app-
         /// level owner that constructs and reuses ONE long-lived
@@ -335,8 +346,15 @@ namespace GustUI.Elements
                 Title = source.Title,
                 Content = body,
                 RehostCallback = source.OnContentRehosted,
+
+                // The scope TRAVELS with the view. Killing the source shell
+                // below would otherwise pop it, and the merged view's
+                // shortcuts would stop working — silently, since a hook whose
+                // scope has left the stack never fires again.
+                HookScope = source.hasHookScope ? source.hookScopeToken : 0,
             };
 
+            source.hookScopeClosed = true; // handed over: Kill must not pop it
             body?.Parent?.Children?.Remove(body);
             source.tabs.Clear();
             source.Undock();
@@ -357,7 +375,7 @@ namespace GustUI.Elements
         /// <paramref name="onRehost"/> is told where the content ends up if it
         /// is later torn off, and told null when the tab is closed.
         /// </summary>
-        public void AddTab(string tabTitle, Element body, Action<ModalWindowElement> onRehost = null)
+        public void AddTab(string tabTitle, Element body, Action<ModalWindowElement> onRehost = null, int hookScope = 0)
         {
             if (body == null)
             {
@@ -365,11 +383,43 @@ namespace GustUI.Elements
             }
 
             body.Parent?.Children?.Remove(body);
-            Adopt(new Tab { Title = tabTitle, Content = body, RehostCallback = onRehost });
+            Adopt(new Tab { Title = tabTitle, Content = body, RehostCallback = onRehost, HookScope = hookScope });
+        }
+
+        /// <summary>
+        /// Makes this window's own content its first tab, so adopting a
+        /// second one does not lose it.
+        ///
+        /// ActivateTab detaches whatever was showing and puts the incoming
+        /// content in its place; it cannot tell that the outgoing element was
+        /// this window's ORIGINAL body rather than another tab, so without
+        /// this the host's own view is detached and never reachable again.
+        /// Carries the window's own hook scope, because that is the scope the
+        /// host's shortcuts were registered in.
+        /// </summary>
+        private void EnsureSelfTab()
+        {
+            if (tabs.Count > 0 || content == null)
+            {
+                return;
+            }
+
+            tabs.Add(new Tab
+            {
+                Title = Title,
+                Content = content,
+                RehostCallback = OnContentRehosted,
+                AuthoredHeight = authoredContentHeight,
+                HookScope = hasHookScope ? hookScopeToken : 0,
+            });
+
+            BuildTabButton(tabs[0]);
+            activeIndex = 0;
         }
 
         private void Adopt(Tab entry)
         {
+            EnsureSelfTab();
             entry.AuthoredHeight = NaturalHeightOf(entry.Content);
             tabs.Add(entry);
             BuildTabButton(entry);
@@ -405,6 +455,11 @@ namespace GustUI.Elements
             activeIndex = index;
             content = tabs[index].Content;
             authoredContentHeight = tabs[index].AuthoredHeight;
+
+            // The visible tab owns the keyboard. Raised before the
+            // unchanged-content early return too, so re-activating a tab
+            // takes focus back after something else raised its own scope.
+            Resources.StaticResources?.InputManager?.RaiseHookScope(tabs[index].HookScope);
 
             if (ReferenceEquals(outgoing, content))
             {
@@ -461,6 +516,14 @@ namespace GustUI.Elements
 
             if (killContent)
             {
+                // Its view is going, so its shortcuts go with it — otherwise
+                // the scope stays on the stack and a later raise could hand
+                // the keyboard to a dead view.
+                if (entry.HookScope != 0)
+                {
+                    Resources.StaticResources?.InputManager?.PopHookScope(entry.HookScope);
+                }
+
                 entry.RehostCallback?.Invoke(null);
                 if (ReferenceEquals(content, entry.Content))
                 {
@@ -1320,7 +1383,7 @@ namespace GustUI.Elements
 
         /// <summary>Window-bottom pixels a DOCKED modal leaves uncovered
         /// (e.g. the app's status bar) — same purpose as
-        /// <see cref="FullScreenModalElement.BottomInset"/>, caller-supplied
+        /// <c>FullScreenModalElement.BottomInset</c>, caller-supplied
         /// since GustUI itself doesn't know about app-level chrome. No
         /// effect while floating.</summary>
         public int BottomInset { get; set; }
@@ -1374,6 +1437,17 @@ namespace GustUI.Elements
             /// <summary>Told when this tab's content moves to another window or
             /// is closed — see <see cref="OnContentRehosted"/>.</summary>
             internal Action<ModalWindowElement> RehostCallback;
+
+            /// <summary>The keyboard-hook scope this tab's view registered its
+            /// shortcuts in: raised when the tab is activated, popped when it
+            /// closes. 0 for a view with no scope of its own.
+            ///
+            /// Per TAB rather than per window because tabs are not a stack.
+            /// Without this every view in a window shares one scope and their
+            /// shortcuts all fire together — a piano roll tabbed beside the
+            /// sequencer would have Space, Escape and Delete meaning two things
+            /// at once.</summary>
+            internal int HookScope;
 
             internal FilledRectangleElement Button;
             internal TextElement Label;
@@ -1626,7 +1700,7 @@ namespace GustUI.Elements
         /// <summary>Whether <paramref name="host"/> is the frontmost window-
         /// like element currently open — the one with the highest
         /// <see cref="Element.FrontSequence"/> among every
-        /// <see cref="ModalWindowElement"/> and <see cref="FullScreenModalElement"/>
+        /// <see cref="ModalWindowElement"/> and <c>FullScreenModalElement</c>
         /// directly under the root window (2026-08-17, inactive-title-bar-
         /// desaturation feature). NOT keyed off <see cref="Element.Depth"/> —
         /// found live via the control API that Depth ties once two or more
@@ -1874,7 +1948,6 @@ namespace GustUI.Elements
                 string candidate = child switch
                 {
                     ModalWindowElement modal => modal.Title,
-                    FullScreenModalElement full => full.Title,
                     _ => null,
                 };
 
@@ -1906,7 +1979,7 @@ namespace GustUI.Elements
             long maxSequence = long.MinValue;
             foreach (Element sibling in host.Parent.Children.Items)
             {
-                if ((sibling is ModalWindowElement || sibling is FullScreenModalElement) && sibling.FrontSequence > maxSequence)
+                if (sibling is ModalWindowElement && sibling.FrontSequence > maxSequence)
                 {
                     maxSequence = sibling.FrontSequence;
                 }

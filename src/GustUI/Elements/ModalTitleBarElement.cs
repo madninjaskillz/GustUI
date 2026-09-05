@@ -13,7 +13,7 @@ namespace GustUI.Elements
     /// into the bar until hovered — the modern-app idiom (VS Code, Windows
     /// 11) in place of the permanently-lit primary-color buttons this used
     /// to have. Historically welded to ModalWindowElement; now any element
-    /// can host it (e.g. <see cref="FullScreenModalElement"/>) — drag/
+    /// can host it (e.g. <c>FullScreenModalElement</c>) — drag/
     /// maximize behaviors only attach when the parent actually is a
     /// ModalWindowElement, and the X routes through
     /// <see cref="OnCloseRequested"/> (default: kill the parent, the

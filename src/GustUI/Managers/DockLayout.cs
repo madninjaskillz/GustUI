@@ -13,7 +13,7 @@ namespace GustUI.Managers
     /// currently reserves, so every full-screen/fill-available window can
     /// shrink around them without any docked panel needing to know about any
     /// specific full-screen view (or vice versa) — the same "poll a shared
-    /// value every frame" idiom <see cref="FullScreenModalElement"/> already
+    /// value every frame" idiom <c>FullScreenModalElement</c> already
     /// used for window-resize.
     ///
     /// Insets are computed LIVE on every read (2026-08-17 — previously cached
@@ -289,7 +289,7 @@ namespace GustUI.Managers
         /// <summary>The rect a "fills available space" window — or anything
         /// else that wants to occupy exactly whatever docking leaves free,
         /// e.g. a maximized <see cref="ModalWindowElement"/> or
-        /// <see cref="FullScreenModalElement"/> — should occupy: window size
+        /// <c>FullScreenModalElement</c> — should occupy: window size
         /// minus every side's live inset, with an optional extra bottom
         /// inset for the caller's own app-level chrome (a status bar) and an
         /// optional floor so the result never goes below some minimum usable
