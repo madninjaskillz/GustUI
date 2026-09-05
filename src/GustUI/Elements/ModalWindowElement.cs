@@ -354,6 +354,10 @@ namespace GustUI.Elements
                 HookScope = source.hasHookScope ? source.hookScopeToken : 0,
             };
 
+            // Its menu and toolbar come too, or the merged view arrives with
+            // no chrome and the window it landed in keeps somebody else's.
+            source.HarvestChromeInto(entry);
+
             source.hookScopeClosed = true; // handed over: Kill must not pop it
             body?.Parent?.Children?.Remove(body);
             source.tabs.Clear();
@@ -411,7 +415,19 @@ namespace GustUI.Elements
                 RehostCallback = OnContentRehosted,
                 AuthoredHeight = authoredContentHeight,
                 HookScope = hasHookScope ? hookScopeToken : 0,
+
+                // The chrome this window is already wearing is this view's, and
+                // becomes tab 0's -- otherwise the first view's menu and
+                // toolbar belong to nobody, and the next tab to activate takes
+                // the window's chrome away for good (#156).
+                Menu = untabbedMenu,
+                ToolbarItems = untabbedToolbarItems.Count > 0
+                    ? new List<(Element, string)>(untabbedToolbarItems)
+                    : null,
             });
+
+            untabbedMenu = null;
+            untabbedToolbarItems.Clear();
 
             BuildTabButton(tabs[0]);
             activeIndex = 0;
@@ -435,10 +451,73 @@ namespace GustUI.Elements
                 entry.Button?.Kill();
                 entry.Button = null;
                 entry.Content?.Parent?.Children?.Remove(entry.Content);
+
+                // And its toolbar items, or Kill()ing this shell takes the
+                // buttons of every tab that just moved out with it.
+                ReleaseToolbarItems(entry);
             }
 
             tabs.Clear();
             return moving;
+        }
+
+        /// <summary>Takes one tab's toolbar items off this window, without
+        /// killing them — they belong to a view that is still alive and is
+        /// going somewhere else.</summary>
+        private void ReleaseToolbarItems(Tab entry)
+        {
+            if (entry?.ToolbarItems == null)
+            {
+                return;
+            }
+
+            foreach ((Element item, string _) in entry.ToolbarItems)
+            {
+                item?.Parent?.Children?.Remove(item);
+                toolbar?.Children?.Remove(item);
+            }
+        }
+
+        /// <summary>The chrome of a window that is being merged away, as a tab
+        /// would carry it — from tab 0 when it had tabs, and from the untabbed
+        /// slots when it never did (the ordinary case for a single view).
+        /// Detached from this window's toolbar on the way out.</summary>
+        private void HarvestChromeInto(Tab entry)
+        {
+            if (tabs.Count > 0)
+            {
+                entry.Menu = tabs[0].Menu;
+                entry.ToolbarItems = tabs[0].ToolbarItems;
+                ReleaseToolbarItems(tabs[0]);
+                return;
+            }
+
+            entry.Menu = untabbedMenu;
+            if (untabbedToolbarItems.Count > 0)
+            {
+                entry.ToolbarItems = new List<(Element, string)>(untabbedToolbarItems);
+                ReleaseToolbarItems(entry);
+            }
+        }
+
+        /// <summary>Wears the chrome a tab brought with it, for a window that
+        /// has no tabs of its own — a freshly popped-out one.</summary>
+        private void WearChromeOf(Tab entry)
+        {
+            if (entry.Menu != null)
+            {
+                SetMenu(entry.Menu);
+            }
+
+            if (entry.ToolbarItems == null)
+            {
+                return;
+            }
+
+            foreach ((Element item, string name) in entry.ToolbarItems)
+            {
+                AddToolbarItem(item, name);
+            }
         }
 
         /// <summary>Shows the tab at <paramref name="index"/> — its content
@@ -463,6 +542,7 @@ namespace GustUI.Elements
 
             if (ReferenceEquals(outgoing, content))
             {
+                SwapChromeTo(tabs[index]);
                 RefreshTabStrip();
                 return;
             }
@@ -481,7 +561,83 @@ namespace GustUI.Elements
             }
 
             content.Set<PositionTrait>(new TVVector(0, ContentTop));
+            SwapChromeTo(tabs[index]);
             RefreshTabStrip();
+        }
+
+        /// <summary>
+        /// Puts <paramref name="incoming"/>'s menu and toolbar up, and takes
+        /// every other tab's down.
+        ///
+        /// EVERY OTHER TAB, not just the one being replaced: a window can gain
+        /// tabs by merging, and the items of a tab that was never on screen
+        /// here would otherwise sit in the toolbar from the moment it arrived.
+        ///
+        /// The menu is only ever REPLACED, never emptied -- a tab with no menu
+        /// of its own leaves the previous one up rather than removing the bar
+        /// and moving everything below it. Every view that can be a tab sets
+        /// one, so this is a fallback rather than a case anybody sees.
+        /// </summary>
+        private void SwapChromeTo(Tab incoming)
+        {
+            // A tab that arrived by merge or tear-off brings items still
+            // parented to the toolbar of the window it came from, and that
+            // window may have been the only one with a toolbar at all.
+            if (incoming.ToolbarItems != null && incoming.ToolbarItems.Count > 0)
+            {
+                EnsureToolbar();
+            }
+
+            if (toolbar != null)
+            {
+                foreach (Tab other in tabs)
+                {
+                    if (ReferenceEquals(other, incoming) || other.ToolbarItems == null)
+                    {
+                        continue;
+                    }
+
+                    foreach ((Element item, string _) in other.ToolbarItems)
+                    {
+                        // Detached, not killed: an inactive tab's view is alive
+                        // and keeps its buttons, exactly as its content does.
+                        //
+                        // Off the toolbar BY NAME as well as via Parent: a
+                        // Children.Remove does not clear the child's Parent, so
+                        // Parent is only a hint about where something used to
+                        // be, and after a merge it can point at a window this
+                        // item is no longer in.
+                        item?.Parent?.Children?.Remove(item);
+                        toolbar.Children?.Remove(item);
+                    }
+                }
+
+                if (incoming.ToolbarItems != null)
+                {
+                    foreach ((Element item, string name) in incoming.ToolbarItems)
+                    {
+                        if (item == null)
+                        {
+                            continue;
+                        }
+
+                        // REMOVE THEN ADD, UNCONDITIONALLY. Asking "is this
+                        // already on the toolbar?" via item.Parent looks right
+                        // and is not: Children.Remove leaves Parent pointing at
+                        // the collection the child has just left, so an item
+                        // that had been detached still claimed to be here and
+                        // was never put back -- the sequencer's transport
+                        // vanished for good on the first tab switch. Removing
+                        // first is a no-op when it is absent and guarantees it
+                        // appears exactly once when it is not.
+                        item.Parent?.Children?.Remove(item);
+                        toolbar.Children?.Remove(item);
+                        toolbar.AddChild(item, name);
+                    }
+                }
+            }
+
+            ApplyMenu(incoming.Menu);
         }
 
         /// <summary>Brings the tab showing <paramref name="hosted"/> to the
@@ -930,6 +1086,7 @@ namespace GustUI.Elements
             TVVector size = ElementTrait<SizeTrait>().Value();
             int bottomInset = BottomInset;
             Tab moved = DetachTab(index);
+            ReleaseToolbarItems(moved);
 
             var modal = new ModalWindowElement(moved.Title, moved.Content,
                 position: new TVVector(mouse.X - (size.X / 2f), mouse.Y - (ModalTitleBarElement.BarHeight / 2f)),
@@ -948,6 +1105,7 @@ namespace GustUI.Elements
             };
 
             modal.OnContentRehosted = rehost;
+            modal.WearChromeOf(moved);
             rehost?.Invoke(modal);
             Resources.StaticResources.RootWindow.AddChild(modal, "tab-popped-" + Guid.NewGuid());
         }
@@ -1160,6 +1318,46 @@ namespace GustUI.Elements
                 return;
             }
 
+            RememberMenu(sections);
+            ApplyMenu(sections);
+        }
+
+        /// <summary>Files a menu against whichever tab installed it, so
+        /// <see cref="ActivateTab"/> can put it back when that tab returns
+        /// (bug board #156). Before any tab exists it is held aside for
+        /// <see cref="EnsureSelfTab"/>.
+        ///
+        /// Against the ACTIVE tab, which is right because a view builds its
+        /// chrome after Adopt has already activated it. A view that re-sets its
+        /// menu later while a DIFFERENT tab is showing would file it against
+        /// that other tab -- but such a call already changed the visible menu
+        /// wrongly before any of this, so it is not a new fault, and no view
+        /// does it: the one runtime re-set (a module UI panel refreshing its
+        /// own menu) only runs while it is the tab on screen.</summary>
+        private void RememberMenu(List<MenuItemModel> sections)
+        {
+            if (tabs.Count == 0)
+            {
+                untabbedMenu = sections;
+                return;
+            }
+
+            if (activeIndex >= 0 && activeIndex < tabs.Count)
+            {
+                tabs[activeIndex].Menu = sections;
+            }
+        }
+
+        /// <summary>Puts a menu on screen without filing it anywhere — the
+        /// half of SetMenu a tab switch wants, since the incoming tab's menu is
+        /// already recorded.</summary>
+        private void ApplyMenu(List<MenuItemModel> sections)
+        {
+            if (sections == null || sections.Count == 0)
+            {
+                return;
+            }
+
             if (menuBar == null)
             {
                 EnsureChromeRowBackground();
@@ -1170,6 +1368,45 @@ namespace GustUI.Elements
             else
             {
                 menuBar.SetItems(sections);
+            }
+        }
+
+        /// <summary>
+        /// Adds one item to this window's toolbar ON BEHALF OF THE ACTIVE TAB,
+        /// which is what callers should use rather than adding to
+        /// <see cref="EnsureToolbar"/>'s return value directly.
+        ///
+        /// The difference is the whole of bug board #156: a raw AddChild puts
+        /// every tab's strip in the toolbar at once, at the same coordinates,
+        /// drawn over each other and all of them still clickable. Recorded
+        /// here, a tab's items go up when it is activated and come down when it
+        /// leaves — and they travel with it to another window, which the views
+        /// could not do for themselves because they cached the ToolbarElement
+        /// of the window they were built in.
+        /// </summary>
+        public void AddToolbarItem(Element item, string name)
+        {
+            if (item == null)
+            {
+                return;
+            }
+
+            // Off whatever it was on: an item handed over from another window
+            // (a pop-out or a merge) still points at that window's toolbar.
+            item.Parent?.Children?.Remove(item);
+            EnsureToolbar().AddChild(item, name);
+
+            if (tabs.Count == 0)
+            {
+                untabbedToolbarItems.Add((item, name));
+                return;
+            }
+
+            if (activeIndex >= 0 && activeIndex < tabs.Count)
+            {
+                Tab owner = tabs[activeIndex];
+                owner.ToolbarItems ??= new List<(Element, string)>();
+                owner.ToolbarItems.Add((item, name));
             }
         }
 
@@ -1449,6 +1686,29 @@ namespace GustUI.Elements
             /// at once.</summary>
             internal int HookScope;
 
+            /// <summary>The menu this tab's view set, and the toolbar items it
+            /// contributed, so <see cref="ActivateTab"/> can put the right
+            /// chrome up with the right content.
+            ///
+            /// CHROME BELONGS TO THE TAB, NOT THE WINDOW. It did not, and the
+            /// two halves failed in opposite directions (ezmuze studio bug
+            /// board #156): SetMenu is declarative, so a second view's menu
+            /// REPLACED the first's and switching back never restored it --
+            /// the sequencer lost File/Edit/View/Help outright -- while the
+            /// toolbar is populated by adding children, so a second view's
+            /// strip ACCUMULATED beside the first's, both at the same
+            /// coordinates, drawn over each other and both still hit-testable.
+            ///
+            /// Recorded at install time against whichever tab is active, which
+            /// works because Adopt activates the incoming tab BEFORE its view
+            /// builds any chrome. Chrome installed before this window had tabs
+            /// at all is swept into tab 0 by EnsureSelfTab.</summary>
+            internal List<MenuItemModel> Menu;
+
+            /// <summary>Named so a tab can contribute more than one thing --
+            /// a module editor adds its buttons AND a warnings label.</summary>
+            internal List<(Element Item, string Name)> ToolbarItems;
+
             internal FilledRectangleElement Button;
             internal TextElement Label;
             internal FilledRectangleElement Underline;
@@ -1460,6 +1720,14 @@ namespace GustUI.Elements
 
         private readonly List<Tab> tabs = new List<Tab>();
         private int activeIndex;
+
+        /// <summary>Chrome installed while this window had no tabs — the
+        /// ordinary case for a window's first view, which builds its menu and
+        /// toolbar long before a second view arrives and turns it into tab 0.
+        /// <see cref="EnsureSelfTab"/> hands these to that tab.</summary>
+        private List<MenuItemModel> untabbedMenu;
+        private readonly List<(Element Item, string Name)> untabbedToolbarItems
+            = new List<(Element, string)>();
         private FilledRectangleElement tabStrip;
         private Tab closeTabRequested;
         private Tab popOutRequested;
