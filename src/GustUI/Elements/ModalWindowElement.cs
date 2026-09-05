@@ -1,4 +1,4 @@
-using GustUI.Attributes;
+﻿using GustUI.Attributes;
 using GustUI.Extensions;
 using GustUI.Managers;
 using GustUI.Models;
@@ -1134,11 +1134,11 @@ namespace GustUI.Elements
                 // modal's contents never learned they had more room.
                 if (!FitModalToContent)
                 {
-                    float buttonHeight = buttons.Count > 0 ? 80 : ContentMargin;
+                    float buttonHeight = buttons.Count > 0 ? 80 : BodyMargin;
                     TVVector size = this.GetSize();
                     return new Vector2(
-                        Math.Max(1f, size.X - (ContentMargin * 2)),
-                        Math.Max(1f, size.Y - ContentTop - ContentMargin - buttonHeight));
+                        Math.Max(1f, size.X - (BodyMargin * 2)),
+                        Math.Max(1f, size.Y - ContentTop - BodyMargin - buttonHeight));
                 }
 
                 return new Vector2(EffectiveContentWidth(), EffectiveContentHeight());
@@ -2081,8 +2081,8 @@ namespace GustUI.Elements
             // is what gets measured.
             float natural = FitModalToContent ? NaturalContentHeight() : authoredContentHeight;
 
-            float buttonHeight = this.buttons.Count > 0 ? 80 : ContentMargin;
-            float naturalModalHeight = 40 + ContentMargin + natural + ContentMargin + buttonHeight;
+            float buttonHeight = this.buttons.Count > 0 ? 80 : BodyMargin;
+            float naturalModalHeight = ContentTop + BodyMargin + natural + BodyMargin + buttonHeight;
             if (naturalModalHeight <= MaxModalHeight())
             {
                 return;
@@ -2131,8 +2131,8 @@ namespace GustUI.Elements
                 return natural;
             }
 
-            float buttonHeight = this.buttons.Count > 0 ? 80 : ContentMargin;
-            float cappedContent = MaxModalHeight() - 40 - ContentMargin - ContentMargin - buttonHeight;
+            float buttonHeight = this.buttons.Count > 0 ? 80 : BodyMargin;
+            float cappedContent = MaxModalHeight() - ContentTop - BodyMargin - BodyMargin - buttonHeight;
 
             // The cap is a CEILING, not a height. Returning it flat was
             // harmless while scroll mode was decided once (it only ever
@@ -2210,6 +2210,31 @@ namespace GustUI.Elements
         /// from the modal edge).</summary>
         private const float ContentMargin = 12f;
 
+        /// <summary>
+        /// Whether the body element runs edge to edge instead of sitting
+        /// inside <see cref="ContentMargin"/> — flush to the modal's left and
+        /// right edges, straight up against the title bar, straight down onto
+        /// the footer.
+        ///
+        /// For a body that is a SURFACE of its own rather than loose content:
+        /// a scroll viewport, in practice. A recessed panel floating inside a
+        /// 12px moat of modal body reads as a box inside a box; the same panel
+        /// filling the body reads as the modal's content area, which is what
+        /// it is. Loose content (a stack of text lines) still wants the moat —
+        /// that is what the margin is for — so this stays off by default.
+        ///
+        /// The inset does not disappear, it MOVES: an edge-to-edge body owes
+        /// its own children the same inset from its own edges (see
+        /// VerticalStackElement.Padding). Set it before the first Update; the
+        /// layout settles on the next frame either way.
+        /// </summary>
+        public bool BodyBleed { get; set; }
+
+        /// <summary>The inset actually applied around the body — the whole of
+        /// <see cref="BodyBleed"/>'s effect, in one place, so every piece of
+        /// size/position arithmetic below agrees about it.</summary>
+        private float BodyMargin => BodyBleed ? 0f : ContentMargin;
+
         private void Setup()
         {
             // Same fix as FullScreenModalElement/FruitMenuElement: a view
@@ -2243,20 +2268,20 @@ namespace GustUI.Elements
             {
                 float contentHeight = EffectiveContentHeight();
                 float contentWidth = EffectiveContentWidth();
-                float buttonHeight = (this.buttons.Count > 0 ? 80 : ContentMargin);
+                float buttonHeight = (this.buttons.Count > 0 ? 80 : BodyMargin);
 
                 if (contentScrolls)
                 {
                     scrollViewport.Set<SizeTrait>(new TVVector(contentWidth, contentHeight));
                 }
 
-                float calcHeight = 40 + ContentMargin + contentHeight + ContentMargin + buttonHeight;
-                float calcWidth = contentWidth + ContentMargin * 2;
+                float calcHeight = ContentTop + BodyMargin + contentHeight + BodyMargin + buttonHeight;
+                float calcWidth = contentWidth + BodyMargin * 2;
                 size = new TVVector(calcWidth, calcHeight);
                 Set<SizeTrait>(size);
             }
 
-            titleBarElement.Set<SizeTrait>(new TVVector(size.X, 40));
+            titleBarElement.Set<SizeTrait>(new TVVector(size.X, ModalTitleBarElement.BarHeight));
 
             if (this.buttons.Count > 0)
             {
@@ -2445,11 +2470,11 @@ namespace GustUI.Elements
             {
                 float contentHeight = EffectiveContentHeight();
                 float contentWidth = EffectiveContentWidth();
-                float buttonHeight = (this.buttons.Count > 0 ? 80 : ContentMargin);
+                float buttonHeight = (this.buttons.Count > 0 ? 80 : BodyMargin);
 
                 this.Set<SizeTrait>(new TVVector(
-                    contentWidth + ContentMargin * 2,
-                    40 + ContentMargin + contentHeight + ContentMargin + buttonHeight));
+                    contentWidth + BodyMargin * 2,
+                    ContentTop + BodyMargin + contentHeight + BodyMargin + buttonHeight));
             }
 
             if (contentScrolls)
@@ -2465,11 +2490,11 @@ namespace GustUI.Elements
                 // smaller than the screen still reported a ~1261px-tall
                 // visible area, desyncing the scrollbar thumb/travel from
                 // what was actually on screen.
-                float ownButtonHeight = this.buttons.Count > 0 ? 80 : ContentMargin;
-                float viewportWidth = FitModalToContent ? EffectiveContentWidth() : this.GetSize().X - ContentMargin * 2;
+                float ownButtonHeight = this.buttons.Count > 0 ? 80 : BodyMargin;
+                float viewportWidth = FitModalToContent ? EffectiveContentWidth() : this.GetSize().X - BodyMargin * 2;
                 float viewportHeight = FitModalToContent
                     ? EffectiveContentHeight()
-                    : Math.Max(80f, this.GetSize().Y - ContentTop - ContentMargin - ownButtonHeight);
+                    : Math.Max(80f, this.GetSize().Y - ContentTop - BodyMargin - ownButtonHeight);
                 scrollViewport.Set<SizeTrait>(new TVVector(viewportWidth, viewportHeight));
             }
 
@@ -2731,9 +2756,10 @@ namespace GustUI.Elements
 
             //content.Set<PositionTrait>(new TVVector((size.X / 2f) - (content.GetSize().X / 2f), (size.Y / 2f) - (content.GetSize().Y / 2f)));
             // X centering falls out of the size calc above already including
-            // ContentMargin on both sides (design-guide.md §3): size.X is
+            // BodyMargin on both sides (design-guide.md §3): size.X is
             // contentWidth + 2*margin, so (size.X/2) - (contentWidth/2)
-            // resolves to exactly margin either side. Positions scrollViewport
+            // resolves to exactly margin either side — and to flush against
+            // both edges when BodyBleed has made that margin zero. Positions scrollViewport
             // instead of content directly once contentScrolls — content
             // itself then just sits at (0,0) inside it (set once, at wrap
             // time in the constructor) while the viewport is what's actually
@@ -2756,7 +2782,7 @@ namespace GustUI.Elements
             }
             else
             {
-                positioned.Set<PositionTrait>(new TVVector((size.X / 2f) - (positioned.GetSize().X / 2f), ContentTop + ContentMargin));
+                positioned.Set<PositionTrait>(new TVVector((size.X / 2f) - (positioned.GetSize().X / 2f), ContentTop + BodyMargin));
             }
         }
 

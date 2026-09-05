@@ -20,6 +20,21 @@ namespace GustUI.Elements
         /// include its own bottom margin) don't shift under them.</summary>
         public float Spacing { get; set; } = 0f;
 
+        /// <summary>Inset between this stack's own edges and its children,
+        /// on all four sides (design-guide.md §3 — content should never sit
+        /// flush against a container's border).
+        ///
+        /// Zero by default, because most stacks are invisible layout glue
+        /// nested inside something that already carries the margin. It earns
+        /// its keep on the ones that are a VISIBLE surface of their own — a
+        /// filled panel, a scroll viewport — where flush content reads as
+        /// broken. Before this existed, callers wanting it set a
+        /// PositionTrait on each child and then wondered why nothing moved:
+        /// RecalculatePositions overwrites child X unconditionally, so the
+        /// per-child inset was silently dead while the width those callers
+        /// had already subtracted for it was not (ezmuze bug board #153).</summary>
+        public float Padding { get; set; } = 0f;
+
         /// <summary>The Children.Items list instance RecalculatePositions
         /// last laid out against — TVElements hands out a freshly-rebuilt
         /// list (a new object) any time membership or Depth-sort changes
@@ -135,7 +150,7 @@ namespace GustUI.Elements
 
         private void RecalculatePositions()
         {
-            var currentY = 0f;
+            var currentY = Padding;
             var maxWidth = 0f;
             var items = this.Children.Items;
             lastChildSizes.Clear();
@@ -146,9 +161,9 @@ namespace GustUI.Elements
                 // stack is still settling, and a trait write fires listeners
                 // whether or not the value changed.
                 TVVector at = child.GetRelativePosition();
-                if (at.X != 0f || at.Y != currentY)
+                if (at.X != Padding || at.Y != currentY)
                 {
-                    child.Set<PositionTrait>(new TVVector(0, currentY));
+                    child.Set<PositionTrait>(new TVVector(Padding, currentY));
                 }
 
                 TVVector size = child.GetSize();
@@ -160,6 +175,11 @@ namespace GustUI.Elements
             if (items.Any())
             {
                 currentY -= Spacing; // no trailing gap after the last child
+                currentY += Padding; // the bottom half of the inset
+            }
+            else
+            {
+                currentY = 0f; // an empty stack is empty, not two paddings tall
             }
 
             // Width is normally caller-set (a stack of full-width rows), but
@@ -171,7 +191,7 @@ namespace GustUI.Elements
             // Managers/InputManager.cs's CollectHovered — so an under-sized
             // stack doesn't just clip visually, it makes every child
             // silently unclickable, not merely a cosmetic default).
-            float width = Math.Max(maxWidth, this.GetSize().X);
+            float width = Math.Max(maxWidth + (Padding * 2f), this.GetSize().X);
             TVVector own = this.GetSize();
             if (own.X != width || own.Y != currentY)
             {

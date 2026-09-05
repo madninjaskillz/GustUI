@@ -30,9 +30,14 @@ namespace GustUI.Elements
         ///
         /// 30 rather than 40 (2026-08-26): the app stacks a title bar, a menu
         /// row and often a tab strip before any content, and at 40 that chrome
-        /// was taking a visible bite out of every panel. The title also came
-        /// down a step, from subtitle to secondary, because type sized for the
-        /// taller bar does not fit this one.
+        /// was taking a visible bite out of every panel. The title came down
+        /// with it, from subtitle (28) to secondary (20), because type sized
+        /// for the taller bar does not fit this one — but 20 put it a step
+        /// BELOW the 24 body copy it heads, so every dialog in the app was
+        /// named in smaller type than it was written in (ezmuze bug board
+        /// #153). It sits at the body size now: 24 centred in 30 keeps three
+        /// pixels of air either side, and the hierarchy reads headline (28)
+        /// over title = body (24) instead of upside down.
         /// </summary>
         public const int BarHeight = 30;
 
@@ -205,7 +210,7 @@ namespace GustUI.Elements
 
             Set<BackgroundFillTrait>(new TVFillSimpleGradient(BarFillTop, BarFillBottom, Direction.Vertically));
             Set<BorderSizeTrait>(new TVInt(0));
-            Set<FontTrait>(Resources.StaticResources.Theme.UiFontSecondary);
+            Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
             Set<PositionTrait>(position ?? new TVVector(0, 0));
             Set<SizeTrait>(size ?? new TVVector(0, 0));
 
@@ -302,7 +307,7 @@ namespace GustUI.Elements
             dragBarElement.Set<PositionTrait>(new TVVector(LeftReserved, 0));
             dragBarElement.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
             dragBarElement.Set<TextTrait>(new TVText(title));
-            dragBarElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFontSecondary);
+            dragBarElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
             dragBarElement.Set<ForegroundColorTrait>(new TVColor(TitleText));
 
             // Drag-to-move is a ModalWindowElement behavior; other hosts
