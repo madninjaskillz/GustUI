@@ -697,7 +697,17 @@ namespace GustUI.Extensions
                 return;
             }
 
-            int segmentsPerCorner = Math.Max(3, ArcSegments(r, manager.RenderScale) / 4);
+            // Six a corner, not three. ArcSegments is a budget for a whole
+            // arc and the /4 shares it between the four corners, which is
+            // right for a gently rounded box — but when the radius reaches
+            // half the side the four corners ARE the shape, and the old floor
+            // of three drew a circle as a twelve-sided polygon with visible
+            // flats at any size a person actually looks at (the add-channel
+            // and add-device rings, 22px across, were noticeably lumpy).
+            // Six gives twenty-four sides, which reads as round. It only
+            // binds below about a 27px radius, so nothing larger changes, and
+            // the extra triangles on something this small are free.
+            int segmentsPerCorner = Math.Max(6, ArcSegments(r, manager.RenderScale) / 4);
             (Vector2[] points, Vector2[] normals) = BuildRoundedRectOutline(rectangle, r, segmentsPerCorner);
             var centroid = new Vector2(rectangle.Left + rectangle.Width / 2f, rectangle.Top + rectangle.Height / 2f);
             AppendFeatheredFill(manager, points, normals, centroid, color);
