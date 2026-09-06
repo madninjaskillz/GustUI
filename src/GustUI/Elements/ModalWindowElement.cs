@@ -1571,6 +1571,66 @@ namespace GustUI.Elements
             return false;
         }
 
+        /// <summary>
+        /// Renames whatever the window is showing <paramref name="content"/>
+        /// AS: the tab carrying it when it is a tab, the window's own title
+        /// otherwise.
+        ///
+        /// The counterpart of <see cref="CloseHostOf"/>, and it exists for the
+        /// same reason. <see cref="Title"/> renames the WINDOW, which is right
+        /// for a floating panel and silently wrong once that panel has been
+        /// merged: a tab's caption was copied out of the title at adoption and
+        /// never looks at it again, so a view whose name changes while it is
+        /// docked (the module editor becoming "Remix of X by Y" the moment its
+        /// graph is forked — ezmuze #177) kept the caption it was merged
+        /// under. Returns false when the content is not in a window at all.
+        /// </summary>
+        public static bool RetitleHostOf(Element content, string title)
+        {
+            Element cursor = content?.Parent;
+            while (cursor != null)
+            {
+                if (cursor is ModalWindowElement host)
+                {
+                    host.RetitleContent(content, title);
+                    return true;
+                }
+
+                cursor = cursor.Parent;
+            }
+
+            return false;
+        }
+
+        /// <summary>Renames the tab holding <paramref name="content"/>, or
+        /// this window when it holds no such tab. See
+        /// <see cref="RetitleHostOf"/>, which is how callers reach it.</summary>
+        public virtual void RetitleContent(Element content, string title)
+        {
+            for (int i = 0; i < tabs.Count; i++)
+            {
+                if (!ReferenceEquals(tabs[i].Content, content))
+                {
+                    continue;
+                }
+
+                if (string.Equals(tabs[i].Title, title, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                tabs[i].Title = title;
+
+                // The strip lays the captions out; with a single tab there is
+                // no strip and the title bar underneath IS the caption, which
+                // RefreshTabStrip's own one-tab branch takes care of.
+                RefreshTabStrip();
+                return;
+            }
+
+            Title = title;
+        }
+
         // ---- free-form resize (2026-08-16) ----
 
         private ResizeHandlesElement resizeHandles;
