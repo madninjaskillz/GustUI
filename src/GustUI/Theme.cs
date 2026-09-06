@@ -1,4 +1,4 @@
-using GustUI.Managers;
+﻿using GustUI.Managers;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -64,6 +64,24 @@ namespace GustUI
 
         public Color MenuBarFillTop;
         public Color MenuBarFillBottom;
+
+        /// <summary>
+        /// The blue behind the menu row the pointer is on — bar item or
+        /// dropdown entry.
+        ///
+        /// It is deliberately NOT <see cref="AccentSelection"/>, which is the
+        /// same idea tuned for a different job: that one is drawn as a hairline
+        /// or an outline on a dark panel, so in the dark palette it is a pale
+        /// (150,200,255) that would read as a highlighter pen across a whole
+        /// menu row. This is a FILL, and a fill has to carry legible text.
+        ///
+        /// It is also near-identical in both palettes, which almost nothing
+        /// else here is. Menus are chrome: the popup strip is light in the dark
+        /// theme too (see MenuBarFillTop), so a highlight that flipped with the
+        /// theme would be solving a problem the surface underneath it does not
+        /// have.
+        /// </summary>
+        public Color MenuHighlight;
 
         public Color AccentSelection;
         public Color AccentLiveAutomation;
@@ -190,6 +208,7 @@ namespace GustUI
 
             MenuBarFillTop = new Color(214, 221, 232, 235),
             MenuBarFillBottom = new Color(198, 206, 220, 235),
+            MenuHighlight = new Color(46, 116, 208),
 
             AccentSelection = new Color(150, 200, 255),
             AccentLiveAutomation = new Color(255, 196, 64),
@@ -222,6 +241,7 @@ namespace GustUI
 
             MenuBarFillTop = new Color(255, 255, 255, 235),
             MenuBarFillBottom = new Color(240, 242, 246, 235),
+            MenuHighlight = new Color(40, 110, 210),
 
             AccentSelection = new Color(40, 110, 210),
             AccentLiveAutomation = new Color(196, 140, 20),
@@ -254,7 +274,7 @@ namespace GustUI
         // hand-picked face color) is still fine to keep local to its view.
         public Color SurfaceBackdrop, SurfacePanel, SurfaceHeader, SurfaceRaised, SurfaceBorder, BodyText;
         public Color MeterWell;
-        public Color MenuBarFillTop, MenuBarFillBottom;
+        public Color MenuBarFillTop, MenuBarFillBottom, MenuHighlight;
         public Color AccentSelection, AccentLiveAutomation, AccentModPositive, AccentModNegative, AccentPlayhead, AccentMuteOn, AccentMuteOff, AccentWarning, AccentVolume, AccentPan;
         public Color CategorySource, CategoryEffects, CategoryModulation, CategoryUtility, CategoryComposite;
         public Color ElevationShadow;
@@ -282,6 +302,36 @@ namespace GustUI
             ApplyPalette(mode == ThemeMode.Dark ? DarkPalette : LightPalette, mode);
         }
 
+        /// <summary>
+        /// The same colour, darker — RGB scaled, alpha left alone.
+        ///
+        /// NOT <c>colour * factor</c>, which is the obvious thing to write and
+        /// scales all four channels: on this renderer's premultiplied colours
+        /// that is the same colour at reduced OPACITY, so the "darker" end of a
+        /// gradient comes out as a see-through end instead, and what you get
+        /// depends on whatever is behind it.
+        /// </summary>
+        private static Color Shade(Color c, float factor)
+            => new Color((int)(c.R * factor), (int)(c.G * factor), (int)(c.B * factor), (int)c.A);
+
+        /// <summary>
+        /// Black or white, whichever can be read on <paramref name="background"/>.
+        ///
+        /// Perceived brightness (Rec. 601 weights — green carries most of it,
+        /// blue almost none), so a saturated blue is correctly called dark and
+        /// gets white text, where a plain average of the channels would not be.
+        /// Used instead of hard-coding the ink beside a fill, so retuning the
+        /// fill cannot silently leave the text unreadable on it.
+        /// </summary>
+        public static Color ReadableOn(Color background)
+            => (background.R * 0.299f + background.G * 0.587f + background.B * 0.114f) > 145f
+                ? Color.Black
+                : Color.White;
+
+        /// <summary>The ink a menu row's label takes once the highlight is
+        /// fully under it. See <see cref="Palette.MenuHighlight"/>.</summary>
+        public Color MenuHighlightInk => ReadableOn(MenuHighlight);
+
         private void ApplyPalette(Palette p, ThemeMode mode)
         {
             Mode = mode;
@@ -296,6 +346,7 @@ namespace GustUI
 
             MenuBarFillTop = p.MenuBarFillTop;
             MenuBarFillBottom = p.MenuBarFillBottom;
+            MenuHighlight = p.MenuHighlight;
 
             AccentSelection = p.AccentSelection;
             AccentLiveAutomation = p.AccentLiveAutomation;
@@ -320,11 +371,36 @@ namespace GustUI
             NegativeButtonFill = new TVFillSimpleGradient(p.NegativeBase, p.NegativeBase * 0.75f, Direction.Vertically);
             NeutralButtonFill = new TVFillSimpleGradient(p.NeutralBase, p.NeutralBase * 0.75f, Direction.Vertically);
 
+            // A MENU ROW'S HIGHLIGHT. Three things about this are load-bearing.
+            //
+            // It is BLUE, not a slightly-lifted grey. The greys it replaced
+            // were (44,44,52) in the dark theme, which is very nearly black —
+            // and menu rows are drawn on a LIGHT strip in both themes, in
+            // black text, so the highlighted row was the one item in the menu
+            // nobody could read (2026-09-06, live user report). Selection is
+            // blue everywhere else in this app; a menu is not the place to
+            // invent a second answer.
+            //
+            // The pressed state is the same blue pushed DOWN rather than a
+            // separate colour. Press is meant to read as "harder", and a
+            // lighter press on a saturated fill reads as a different control.
+            //
+            // Normal is a transparent GRADIENT, not a transparent solid, and
+            // that is not a style choice: TVSmartFill only crossfades when all
+            // three states are gradients, and falls back to an instant snap
+            // otherwise (see its Resolve). As a solid it was the one stock
+            // control in the app whose hover popped in with no transition.
+            // Transparent-as-a-gradient costs nothing to draw and buys the
+            // ease for free, over whatever surface the row happens to sit on —
+            // which differs between the bar (SurfaceHeader) and the popup
+            // (MenuBarFill), so a named backdrop colour here would be wrong
+            // for one of them.
+            Color menuHighlight = p.MenuHighlight;
             FruitMenuItemStates = new ButtonStates
             {
-                NormalFill = new TVFillSolidColor(Color.Transparent),
-                HoveredFill = new TVFillSimpleGradient(mode == ThemeMode.Dark ? new Color(44, 44, 52) : new Color(224, 227, 233), mode == ThemeMode.Dark ? new Color(38, 38, 45) : new Color(210, 214, 222), Direction.Vertically),
-                PressedFill = new TVFillSimpleGradient(mode == ThemeMode.Dark ? new Color(52, 52, 62) : new Color(208, 212, 222), mode == ThemeMode.Dark ? new Color(44, 44, 52) : new Color(194, 199, 210), Direction.Vertically)
+                NormalFill = new TVFillSimpleGradient(Color.Transparent, Color.Transparent, Direction.Vertically),
+                HoveredFill = new TVFillSimpleGradient(menuHighlight, Shade(menuHighlight, 0.86f), Direction.Vertically),
+                PressedFill = new TVFillSimpleGradient(Shade(menuHighlight, 0.86f), Shade(menuHighlight, 0.72f), Direction.Vertically)
             };
 
             PositiveButtonStates = new ButtonStates

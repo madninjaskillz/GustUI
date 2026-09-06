@@ -23,6 +23,40 @@ namespace GustUI.Elements
         FruitPopupMenu popup = null;
         int hoverCounter = 0;
         int maxHover = 50;
+
+        /// <summary>
+        /// This row's own highlight fill, kept so the row's INK can be read off
+        /// the same eased number the background is drawn with.
+        ///
+        /// Every label, glyph and shortcut letter here used to be a fixed
+        /// <c>Color.Black</c>. That is right for a row at rest — a popup is a
+        /// light strip in both themes — and it was wrong the instant the
+        /// pointer arrived, because the highlight is a saturated blue: the one
+        /// row you had picked out was the one row you could not read
+        /// (2026-09-06, live user report; the menu BAR had the same bug found
+        /// the same way in 2026-08 and fixed only for itself).
+        /// </summary>
+        private readonly TVSmartFill highlightFill;
+
+        /// <summary>
+        /// <paramref name="rest"/> for an unhovered row, sliding to the
+        /// highlight's own ink as the blue comes in under it.
+        ///
+        /// A live lambda per element rather than a value set on enter and exit:
+        /// the two OnEnter/OnExit edges cannot express a crossfade, and a
+        /// snapshot taken at construction is a menu built before a theme switch
+        /// still painted in the old palette — the exact bug ezmuze #66 was.
+        /// </summary>
+        private TVColor Ink(Color rest, float dim = 1f)
+            => new TVColor(() => Color.Lerp(
+                rest,
+                Resources.StaticResources.Theme.MenuHighlightInk,
+                highlightFill.HighlightWeight) * dim);
+
+        /// <summary>Menu rows cross faster than the design guide's default
+        /// ~150ms button transition (design-guide.md §5, 2026-09-06): a row is
+        /// something you sweep past on the way to another one.</summary>
+        internal const float HighlightFadeSeconds = 0.1f;
         /// <summary>
         /// One row's height, and the type scale that goes with it.
         ///
@@ -96,7 +130,12 @@ namespace GustUI.Elements
             };
             var more = menuItem.SubItems?.Count > 0;
             Set<SizeTrait>(new TVVector(width, RowHeight));
-            Set<BackgroundFillTrait>(new TVSmartFill { States = Resources.StaticResources.Theme.FruitMenuItemStates });
+            highlightFill = new TVSmartFill
+            {
+                States = Resources.StaticResources.Theme.FruitMenuItemStates,
+                FadeSeconds = HighlightFadeSeconds,
+            };
+            Set<BackgroundFillTrait>(highlightFill);
             Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) =>
             {
                 Log.This("doing click");
@@ -109,7 +148,7 @@ namespace GustUI.Elements
                 iconElement.Set<PositionTrait>(new TVVector(8, RowTextTop));
                 iconElement.Set<SizeTrait>(new TVVector(IconBox, IconFontSize));
                 iconElement.Set<FontTrait>(IconFont);
-                iconElement.Set<ForegroundColorTrait>(new TVColor(Color.Black));
+                iconElement.Set<ForegroundColorTrait>(Ink(Color.Black));
                 iconElement.Set<TextTrait>(new TVText(icon));
             }
 
@@ -121,7 +160,7 @@ namespace GustUI.Elements
                     moreElement.Set<PositionTrait>(new TVVector(width - 30, RowTextTop));
                     moreElement.Set<SizeTrait>(new TVVector(IconBox, IconFontSize));
                     moreElement.Set<FontTrait>(IconFont);
-                    moreElement.Set<ForegroundColorTrait>(new TVColor(Color.Black));
+                    moreElement.Set<ForegroundColorTrait>(Ink(Color.Black));
                     moreElement.Set<TextTrait>(new TVText(UIFont.Symbol.More.Icon()));
 
 
@@ -181,7 +220,7 @@ namespace GustUI.Elements
                     keyElement.Set<PositionTrait>(new TVVector(ps, height));
                     keyElement.Set<SizeTrait>(new TVVector(22, iconHeight));
                     keyElement.Set<FontTrait>(Resources.StaticResources.Theme.MenuFont);
-                    keyElement.Set<ForegroundColorTrait>(new TVColor(menuItem.Enabled ? Color.Black : Color.Black * 0.5f));
+                    keyElement.Set<ForegroundColorTrait>(Ink(Color.Black, menuItem.Enabled ? 1f : 0.5f));
                     keyElement.Set<TextTrait>(new TVText(menuItem.Shortcut.Key.ToString()));
                 }
             }
@@ -200,12 +239,12 @@ namespace GustUI.Elements
             textElement.Set<PositionTrait>(new TVVector(LabelLeft, RowTextTop));
             textElement.Set<SizeTrait>(new TVVector(labelWidth, RowHeight));
             textElement.Set<FontTrait>(labelFont);
-            textElement.Set<ForegroundColorTrait>(new TVColor(Color.Black));
+            textElement.Set<ForegroundColorTrait>(Ink(Color.Black));
             textElement.Set<TextTrait>(new TVText(TextElement.Ellipsise(text, labelWidth, labelFont)));
 
             if (!menuItem.Enabled)
             {
-                textElement.Set<ForegroundColorTrait>(new TVColor(Color.Black * 0.5f));
+                textElement.Set<ForegroundColorTrait>(Ink(Color.Black, 0.5f));
                 Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
             }
 

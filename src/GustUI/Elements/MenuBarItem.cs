@@ -1,4 +1,4 @@
-using GustUI.Attributes;
+﻿using GustUI.Attributes;
 using GustUI.Extensions;
 using GustUI.Models;
 using GustUI.Traits;
@@ -23,7 +23,28 @@ namespace GustUI.Elements
         public MenuBarItem(MenuItemModel menuItem, System.Action<ClickEventArgs> action, int width, int height)
         {
             Set<SizeTrait>(new TVVector(width, height));
-            Set<BackgroundFillTrait>(new TVSmartFill { States = Resources.StaticResources.Theme.FruitMenuItemStates });
+            // The blue highlight, same states the dropdown rows use, so the
+            // bar and the menu it opens light up as one control (2026-09-06:
+            // this was a barely-there grey lift, which on the dark theme's
+            // SurfaceHeader bar was very nearly invisible — "the bg should be
+            // the standard blue on hover, similar to titlebars").
+            TVSmartFill highlightFill = new TVSmartFill
+            {
+                States = Resources.StaticResources.Theme.FruitMenuItemStates,
+                FadeSeconds = FruitMenuItem.HighlightFadeSeconds,
+            };
+            // A disabled entry does not light up at all. It never did
+            // visibly, because the old highlight was a grey barely off the
+            // bar's own colour; a blue one would have made "greyed out but
+            // glowing" a new bug rather than an inherited one.
+            if (menuItem.Enabled)
+            {
+                Set<BackgroundFillTrait>(highlightFill);
+            }
+            else
+            {
+                Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
+            }
             Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) =>
             {
                 if (!menuItem.Enabled)
@@ -54,10 +75,19 @@ namespace GustUI.Elements
             // LIVE: the menu bar is built once and lives for the whole session, so a
             // captured colour left File/Edit/View/Help painted in the palette that
             // was current at startup — invisible after a switch to Light (#66).
+            // HIGHLIGHT: and once the blue is under it, BodyText is the wrong
+            // answer again in the other direction — it is a near-white in the
+            // dark theme (fine) and a near-black in the light one (unreadable
+            // on a saturated blue). The label crosses to the highlight's own
+            // ink as the fill comes in, off the fill's own eased weight so the
+            // two move together rather than each keeping its own clock.
             bool enabled = menuItem.Enabled;
-            textElement.Set<ForegroundColorTrait>(new TVColor(() => enabled
-                ? Resources.StaticResources.Theme.BodyText
-                : Color.Lerp(Resources.StaticResources.Theme.SurfacePanel, Resources.StaticResources.Theme.BodyText, 0.5f)));
+            textElement.Set<ForegroundColorTrait>(new TVColor(() => Color.Lerp(
+                enabled
+                    ? Resources.StaticResources.Theme.BodyText
+                    : Color.Lerp(Resources.StaticResources.Theme.SurfacePanel, Resources.StaticResources.Theme.BodyText, 0.5f),
+                Resources.StaticResources.Theme.MenuHighlightInk,
+                highlightFill.HighlightWeight)));
             textElement.Set<TextTrait>(new TVText(menuItem.Text));
         }
     }

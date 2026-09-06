@@ -39,6 +39,28 @@ namespace GustUI.TraitValues
         private readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
 
         /// <summary>
+        /// How long the crossfade takes, in seconds. Defaults to the
+        /// design-guide's ~150ms discrete-state transition; menus set it
+        /// shorter (2026-09-06) because a menu row is a thing you sweep past
+        /// on the way to another one, and a transition tuned for a button you
+        /// arrive at reads as lag when six of them light up in a row.
+        /// </summary>
+        public float FadeSeconds { get; set; } = 0.15f;
+
+        /// <summary>
+        /// How far this element is into its highlight, 0 at rest and 1 when
+        /// hovered or pressed — the same eased number the fill is drawn with.
+        ///
+        /// Exists so a LABEL can cross at exactly the rate its background
+        /// does. Text that snaps to white over a background still fading in is
+        /// worse than either half done alone, and a second easing clock in the
+        /// element would be the same value computed twice and drifting.
+        /// Updated in <see cref="Resolve"/>, i.e. when the owning element
+        /// draws its fill — always before its children draw their text.
+        /// </summary>
+        public float HighlightWeight => Math.Min(1f, weightHovered + weightPressed);
+
+        /// <summary>
         /// The fill to actually draw for <paramref name="state"/> right now.
         /// Only animates when all three states are <see cref="TVFillSimpleGradient"/>
         /// (every stock button per Theme.cs's Positive/Negative/Neutral
@@ -50,6 +72,18 @@ namespace GustUI.TraitValues
         /// </summary>
         public TVFill Resolve(Managers.InputManager.ElementState state)
         {
+            // Advanced BEFORE the gradients-only test below, so
+            // <see cref="HighlightWeight"/> is honest even for a fill that
+            // cannot itself crossfade — a caller colouring text off this
+            // weight is entitled to a real number rather than a stuck one.
+            double now = clock.Elapsed.TotalSeconds;
+            float dt = lastSeconds < 0 ? 0f : (float)Math.Min(now - lastSeconds, 0.25);
+            lastSeconds = now;
+
+            weightNormal = Ease.Toward(weightNormal, state == Managers.InputManager.ElementState.Normal ? 1f : 0f, dt, FadeSeconds);
+            weightHovered = Ease.Toward(weightHovered, state == Managers.InputManager.ElementState.Hovered ? 1f : 0f, dt, FadeSeconds);
+            weightPressed = Ease.Toward(weightPressed, state == Managers.InputManager.ElementState.Pressed ? 1f : 0f, dt, FadeSeconds);
+
             if (!(States.NormalFill is TVFillSimpleGradient normalG
                 && States.HoveredFill is TVFillSimpleGradient hoverG
                 && States.PressedFill is TVFillSimpleGradient pressG))
@@ -61,14 +95,6 @@ namespace GustUI.TraitValues
                     _ => States.NormalFill,
                 };
             }
-
-            double now = clock.Elapsed.TotalSeconds;
-            float dt = lastSeconds < 0 ? 0f : (float)Math.Min(now - lastSeconds, 0.25);
-            lastSeconds = now;
-
-            weightNormal = Ease.Toward(weightNormal, state == Managers.InputManager.ElementState.Normal ? 1f : 0f, dt);
-            weightHovered = Ease.Toward(weightHovered, state == Managers.InputManager.ElementState.Hovered ? 1f : 0f, dt);
-            weightPressed = Ease.Toward(weightPressed, state == Managers.InputManager.ElementState.Pressed ? 1f : 0f, dt);
 
             float sum = Math.Max(0.0001f, weightNormal + weightHovered + weightPressed);
             Color primary = BlendColor(normalG.PrimaryColor, hoverG.PrimaryColor, pressG.PrimaryColor, sum);
