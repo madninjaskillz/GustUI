@@ -21,7 +21,35 @@ namespace GustUI.Elements
         TextElement moreElement;
         MenuItemModel _menuItem;
         FruitPopupMenu popup = null;
+        /// <summary>
+        /// How long the pointer has dwelt on this row, counted in frames: a
+        /// hovered frame adds 2 and every update takes 1 back, so sitting
+        /// still climbs by 1 a frame and moving away drains it at the same
+        /// rate. At <see cref="maxHover"/> the row opens its submenu without
+        /// being clicked.
+        ///
+        /// CLAMPED near that threshold, and it has to be. Uncapped it just kept
+        /// climbing for as long as the pointer sat there — a row logged at 241
+        /// after four seconds — and the drain then took four seconds to fall
+        /// back through the threshold, which it did while the pointer was on a
+        /// DIFFERENT row by then. The test below fired on that way down and
+        /// reopened the submenu you had just left, on top of the one you had
+        /// moved to (2026-09-06, user report: "I hover one option then move to
+        /// a second, it shows the second, then replaces it with the first
+        /// despite me not being on it any more"). Capped, leaving a row puts
+        /// the count under the threshold on the very next frame, so the drain
+        /// can never cross it a second time.
+        ///
+        /// The clamp is maxHover + 1 rather than maxHover, and the extra 1 is
+        /// not slack: <see cref="Update"/> drains BEFORE it tests, so a count
+        /// clamped exactly at the threshold arrives at the test one short and
+        /// the submenu never opens at all. One frame of headroom is what puts
+        /// the steady state under the pointer exactly on the threshold.
+        /// </summary>
         int hoverCounter = 0;
+
+        /// <summary>The dwell that opens a submenu, in frames — a bit under a
+        /// second at 60fps.</summary>
         int maxHover = 50;
 
         /// <summary>
@@ -193,7 +221,7 @@ namespace GustUI.Elements
 
                     Set<OnHoverTrait>(new TVEvent<ClickEventArgs>((x) =>
                     {
-                        hoverCounter = hoverCounter + 2;
+                        hoverCounter = Math.Min(hoverCounter + 2, maxHover + 1);
                     }));
                 }
             }
@@ -309,7 +337,20 @@ namespace GustUI.Elements
                 hoverCounter--;
             }
 
-            if (hoverCounter == maxHover)
+            // >=, NOT ==. The count is stepped from two places — +2 per
+            // hovered frame, -1 per update — and nothing makes those alternate:
+            // InputManager replays each host-pushed pointer edge as its own
+            // full dispatch pass before the polled one, so a single frame can
+            // raise hover twice, move the count by 3, and step straight over
+            // the threshold. An exact-equality test on a number that does not
+            // have to land on the value is a dwell that usually works, which
+            // is harder to trust than one that never does.
+            //
+            // Firing on every frame at the top is not a problem: clickMore
+            // declines when a submenu is already open, so this is self-
+            // latching, and the clamp above is what stops the drain from
+            // coming back through and firing again after the pointer has left.
+            if (hoverCounter >= maxHover)
             {
                 // Auto-pop on dwell. There used to be a sweep here that
                 // killed every root popup flagged WasAutoPopped, meaning to
