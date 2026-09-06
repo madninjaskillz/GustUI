@@ -3033,6 +3033,21 @@ namespace GustUI.Elements
             // time in the constructor) while the viewport is what's actually
             // placed/clipped/sized within the modal's chrome.
             Element positioned = contentScrolls ? (Element)scrollViewport : content;
+
+            // NOTHING TO PLACE THIS FRAME. Content is detached for a frame
+            // while a window docks, undocks, maximises or restores, and while
+            // a tab hands its body to another window -- so this can run with
+            // no content at all. It used to dereference `positioned` anyway
+            // and take the app down with a NullReferenceException, which was
+            // easy to hit just by maximising a docked panel twice (ezmuze
+            // bug board #203). Skipping the placement is the whole fix: the
+            // frame after the move has content again and lays it out
+            // normally, and this block is the last thing Update does.
+            if (positioned == null)
+            {
+                return;
+            }
+
             if (!FitModalToContent && !contentScrolls)
             {
                 // A fill-available modal's content host is a nominal-size
