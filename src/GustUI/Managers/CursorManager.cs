@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -36,7 +37,7 @@ namespace GustUI.Managers
 
         private static Texture2D atlas;
         private static readonly Dictionary<string, Rectangle> cells =
-            new Dictionary<string, Rectangle>(System.StringComparer.OrdinalIgnoreCase);
+            new Dictionary<string, Rectangle>(StringComparer.OrdinalIgnoreCase);
 
         private static Vector2 hotspot;
         private static string thisFrame;
@@ -46,11 +47,27 @@ namespace GustUI.Managers
         public static bool Ready => atlas != null && cells.Count > 0;
 
         /// <summary>
-        /// How big the pointer is drawn, as a multiple of its cell. The atlas
-        /// is authored well above pointer size so it can be scaled DOWN
-        /// cleanly; scaling a cursor up looks like exactly what it is.
+        /// The size the art is drawn at to look "normal" — the app's own
+        /// atlas is authored above pointer size so it can be scaled DOWN
+        /// cleanly, and this is the factor that undoes that.
+        ///
+        /// Separate from <see cref="Scale"/> so a user preference can be a
+        /// plain multiplier of 1 rather than having to know what the art was
+        /// drawn at.
+        /// </summary>
+        public static float AuthoredScale { get; set; } = 0.75f;
+
+        /// <summary>
+        /// How big the pointer is actually drawn. Usually
+        /// <see cref="AuthoredScale"/> times whatever the user asked for —
+        /// some people want a much bigger cursor, and hiding the system one
+        /// means the system's own setting no longer reaches us.
         /// </summary>
         public static float Scale { get; set; } = 0.75f;
+
+        /// <summary>Draws a dot at the exact pointer position alongside the
+        /// cursor — for checking that the hotspot lands where it should.</summary>
+        public static bool DebugHotspot { get; set; }
 
         /// <summary>
         /// Registers the app's cursor art: one texture, a cell rectangle per
@@ -126,16 +143,31 @@ namespace GustUI.Managers
 
             MouseState mouse = Resources.StaticResources.InputManager.CurrentMouseState;
             float scale = Scale;
-            int w = (int)(cell.Width * scale);
-            int h = (int)(cell.Height * scale);
+
+            // ROUNDED, not truncated. The offset is the hotspot scaled, and
+            // truncating it biases the whole pointer down and right by up to
+            // a pixel — small, but it is a pixel of "the tip is not quite
+            // where I am pointing", which is the one thing a cursor has to
+            // get right.
+            if (DebugHotspot)
+            {
+                // A 3px dot at the EXACT pointer position, drawn by this same
+                // call in this same space — so a screenshot compares the art
+                // against ground truth instead of against my arithmetic.
+                draw.Draw(
+                    atlas,
+                    new Rectangle(mouse.X - 1, mouse.Y - 1, 3, 3),
+                    new Rectangle(cell.X + 20, cell.Y + 20, 1, 1),
+                    Color.Red);
+            }
 
             draw.Draw(
                 atlas,
                 new Rectangle(
-                    mouse.X - (int)(hotspot.X * scale),
-                    mouse.Y - (int)(hotspot.Y * scale),
-                    w,
-                    h),
+                    mouse.X - (int)MathF.Round(hotspot.X * scale),
+                    mouse.Y - (int)MathF.Round(hotspot.Y * scale),
+                    (int)MathF.Round(cell.Width * scale),
+                    (int)MathF.Round(cell.Height * scale)),
                 cell,
                 Color.White);
         }
