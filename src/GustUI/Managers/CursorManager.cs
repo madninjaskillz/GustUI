@@ -70,6 +70,18 @@ namespace GustUI.Managers
         public static bool DebugHotspot { get; set; }
 
         /// <summary>
+        /// Stop drawing the pointer, and leave the real one to it.
+        ///
+        /// Set while the window is not focused. An unfocused window has no
+        /// business drawing a pointer at all — the OS one is over whatever
+        /// the person is actually using — and the mouse state it reports is
+        /// not to be trusted: alt-tab away and it reads (0,0), so ours
+        /// jumped to the top-left corner and looked for all the world like
+        /// something had moved the mouse.
+        /// </summary>
+        public static bool Suppressed { get; set; }
+
+        /// <summary>
         /// Registers the app's cursor art: one texture, a cell rectangle per
         /// name, and the hotspot shared by all of them — the point in a cell
         /// that sits ON the pointer position.
@@ -130,7 +142,7 @@ namespace GustUI.Managers
             string wanted = thisFrame ?? DefaultCursor;
             thisFrame = null;
 
-            if (!Ready || draw == null)
+            if (!Ready || Suppressed || draw == null)
             {
                 return;
             }
