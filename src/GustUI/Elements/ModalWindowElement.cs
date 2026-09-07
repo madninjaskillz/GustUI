@@ -464,6 +464,10 @@ namespace GustUI.Elements
         /// <summary>Takes one tab's toolbar items off this window, without
         /// killing them — they belong to a view that is still alive and is
         /// going somewhere else.</summary>
+        /// <summary>Stands in for a tab with no toolbar items, so the release
+        /// paths can foreach without a null check each time.</summary>
+        private static readonly List<(Element Item, string Name)> EmptyItems = new();
+
         private void ReleaseToolbarItems(Tab entry)
         {
             if (entry?.ToolbarItems == null)
@@ -668,6 +672,28 @@ namespace GustUI.Elements
 
             Tab entry = tabs[index];
             entry.Button?.Kill();
+
+            // Its toolbar items come off the strip WITH IT (#216). Every other
+            // way a tab leaves this window releases them -- a merge out, a
+            // tear-off, adopting them somewhere else -- and closing was the one
+            // that did not. The moment the entry is out of `tabs`, nothing else
+            // can: SwapChromeTo only knows how to take down the items of tabs
+            // it can still see, so a closed tab's buttons stayed on the toolbar
+            // for the rest of the session, under whatever went up next and
+            // still live. Close two editors and there were two dead strips.
+            ReleaseToolbarItems(entry);
+            if (killContent)
+            {
+                // The view they belong to is going, not moving: kill them
+                // rather than leaving them detached and alive.
+                foreach ((Element item, string _) in entry.ToolbarItems ?? EmptyItems)
+                {
+                    item?.Kill();
+                }
+
+                entry.ToolbarItems = null;
+            }
+
             tabs.RemoveAt(index);
 
             if (killContent)
