@@ -289,6 +289,10 @@ namespace GustUI.Managers
 
             FrameProfiler.End(FrameProfiler.Bucket.DrawDebug);
             DrawTelemetryOverlay();
+
+            // The pointer goes on top of everything, including the overlays
+            // that go on top of everything.
+            CursorManager.Draw(this);
             End();
         }
 
