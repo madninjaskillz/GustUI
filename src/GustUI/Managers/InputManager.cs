@@ -545,10 +545,51 @@ namespace GustUI.Managers
         /// </summary>
         public bool WindowActive { get; set; } = true;
 
+        /// <summary>
+        /// Whether the REAL mouse and keyboard reach the tree. Synthetic input
+        /// is unaffected, which is the whole point: something driving the app
+        /// remotely can lock the person at the keyboard out of the run so a
+        /// stray click cannot land in the middle of it.
+        ///
+        /// Exactly the same gate as <see cref="WindowActive"/> and for the same
+        /// reason, so the two combine rather than each inventing their own way
+        /// to ignore a device.
+        ///
+        /// ALWAYS ESCAPABLE. A locked app is indistinguishable from a hung one
+        /// from the outside, so <see cref="UnlockChordHeld"/> is checked
+        /// against the real keyboard BEFORE the gate and clears this on its
+        /// own. Whoever is sitting at the machine always has a way back in,
+        /// even if the thing that locked it has crashed.
+        /// </summary>
+        public bool AcceptsRealInput { get; set; } = true;
+
+        /// <summary>Set when the chord above did the unlocking, so whoever
+        /// owns the lock can notice and say so rather than silently
+        /// disagreeing with the app about whether input is on.</summary>
+        public bool RealInputUnlockedByChord { get; set; }
+
+        /// <summary>Ctrl+Alt+U — "unlock". Deliberately a chord nothing else
+        /// in the app binds, and deliberately not Escape, which half the
+        /// screens use for something.</summary>
+        public static bool UnlockChordHeld(KeyboardState keys)
+            => (keys.IsKeyDown(Keys.LeftControl) || keys.IsKeyDown(Keys.RightControl))
+               && (keys.IsKeyDown(Keys.LeftAlt) || keys.IsKeyDown(Keys.RightAlt))
+               && keys.IsKeyDown(Keys.U);
+
         public void Update()
         {
+            // Read the real keyboard before the gate, so the way out of a lock
+            // cannot itself be locked out.
+            if (!AcceptsRealInput && UnlockChordHeld(Keyboard.GetState()))
+            {
+                AcceptsRealInput = true;
+                RealInputUnlockedByChord = true;
+            }
+
+            bool realInputReaches = WindowActive && AcceptsRealInput;
+
             MouseState polledState = syntheticMouseState ?? Mouse.GetState();
-            if (!syntheticMouseState.HasValue && !WindowActive)
+            if (!syntheticMouseState.HasValue && !realInputReaches)
             {
                 // Inactive window: nothing the real mouse does reaches the
                 // tree (see WindowActive). Position is frozen at the last
@@ -574,7 +615,7 @@ namespace GustUI.Managers
                     polledState.XButton1, polledState.XButton2);
             }
 
-            KeyboardState keyboardState = syntheticKeyboardState ?? (WindowActive ? Keyboard.GetState() : default(KeyboardState));
+            KeyboardState keyboardState = syntheticKeyboardState ?? (realInputReaches ? Keyboard.GetState() : default(KeyboardState));
             CurrentKeyboardState = keyboardState;
 
             // While a text-input element is focused, newly pressed keys go to
