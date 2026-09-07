@@ -1727,6 +1727,15 @@ namespace GustUI.Elements
         /// no spec anywhere calling for click-to-undock.</summary>
         private const float UndockDragThresholdPixels = 6f;
 
+        /// <summary>How much a panel with nothing to restore to shrinks by
+        /// when it is dragged off a dock. Enough to see, not so much that the
+        /// window you are holding becomes a different window.</summary>
+        private const float UndockShrink = 0.88f;
+
+        /// <summary>The floating size this panel had before it docked, if it
+        /// ever had one. Null for a panel that has only ever been docked.</summary>
+        private TVVector preDockSize;
+
         /// <summary>Mouse position at the moment a still-docked title bar was
         /// pressed, or null when not mid-press — compared against the
         /// current mouse position each frame while <see cref="Element.BeingDragged"/>
@@ -2774,6 +2783,7 @@ namespace GustUI.Elements
                     {
                         dockPressMouse = null;
                         Undock();
+                        ShrinkOffDock();
                     }
                     else
                     {
@@ -3197,6 +3207,16 @@ namespace GustUI.Elements
                 }
             }
 
+            // The size to come back to when this is dragged off again. Taken
+            // BEFORE LayoutDocked overwrites it with the dock's own geometry,
+            // and only on the way in from floating — docking from one side
+            // straight to another must not overwrite the real floating size
+            // with a dock rect.
+            if (DockedSide == DockSide.None)
+            {
+                preDockSize = ElementTrait<SizeTrait>().Value();
+            }
+
             DockedSide = side;
             // A panel that docks immediately on open (DockTo called the
             // same frame it's constructed, before Update() ever runs) would
@@ -3245,6 +3265,74 @@ namespace GustUI.Elements
 
             dockSplitter?.Kill();
             dockSplitter = null;
+        }
+
+        /// <summary>
+        /// The visible "it came off" on the frame a panel is dragged out of a
+        /// dock.
+        ///
+        /// WHY IT HAS TO CHANGE SIZE AT ALL. Undock deliberately leaves the
+        /// modal on its last docked rect so the drag picks it up with no jump,
+        /// and a docked panel's rect is the dock's — full height, edge to
+        /// edge, with its own splitter on the line you just grabbed. Leaving
+        /// it at exactly that size means the first moments of the drag look
+        /// identical to dragging the splitter, and the two do very different
+        /// things.
+        ///
+        /// RESTORE FIRST, SHRINK SECOND. If the panel was floating before it
+        /// docked, the size it had then is a better answer than any fraction —
+        /// it is where the user last put it. A panel that has only ever been
+        /// docked has nothing to restore to, so it just gets smaller, and a
+        /// remembered size that matches what it is already is not worth
+        /// applying.
+        ///
+        /// THE POINTER STAYS ON THE TITLE BAR. The drag is a per-frame delta
+        /// move rather than a grab offset, so a resize under way does not move
+        /// the window relative to the cursor — but shrinking from a fixed
+        /// top-left would slide the bar out from under a pointer that grabbed
+        /// it near the right end. The horizontal grab position is kept as a
+        /// FRACTION, which is the same thing every OS does when you drag a
+        /// maximised window off the top of the screen.
+        /// </summary>
+        private void ShrinkOffDock()
+        {
+            Vector2 current = ElementTrait<SizeTrait>().Value().AsXna;
+            if (current.X < 1f || current.Y < 1f)
+            {
+                return;
+            }
+
+            Vector2 target = preDockSize != null
+                ? preDockSize.AsXna
+                : current * UndockShrink;
+
+            target.X = Math.Max(MinSize.X, target.X);
+            target.Y = Math.Max(MinSize.Y, target.Y);
+
+            // A restore that lands on the size it already is says nothing, so
+            // fall back to shrinking rather than doing visibly nothing.
+            if (Math.Abs(target.X - current.X) < 2f && Math.Abs(target.Y - current.Y) < 2f)
+            {
+                target = new Vector2(
+                    Math.Max(MinSize.X, current.X * UndockShrink),
+                    Math.Max(MinSize.Y, current.Y * UndockShrink));
+            }
+
+            if (Math.Abs(target.X - current.X) < 1f && Math.Abs(target.Y - current.Y) < 1f)
+            {
+                return; // already at its floor in both axes
+            }
+
+            Vector2 position = ElementTrait<PositionTrait>().Value().AsXna;
+            MouseState mouse = Resources.StaticResources.InputManager.CurrentMouseState;
+            float grabFraction = Math.Clamp((mouse.X - position.X) / current.X, 0f, 1f);
+
+            Set<SizeTrait>(new TVVector(target));
+            Set<PositionTrait>(new TVVector(
+                mouse.X - grabFraction * target.X,
+                position.Y));
+
+            preDockSize = null; // spent: the next dock records a fresh one
         }
 
         /// <summary>Full-height layout for the docked state — the docked
