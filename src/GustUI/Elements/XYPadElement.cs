@@ -86,6 +86,11 @@ public class XYPadElement : Element
 
     public XYPadElement()
     {
+        // The press lands AT a coordinate, so the pointer is a crosshair
+        // rather than an arrow whose tip is only approximately the value
+        // (ezmuze #224).
+        AddTrait<CursorTrait>().Set(new TVText(Managers.StandardCursors.Crosshair));
+
         ElementTrait<OnMousePress>().Set(new TVEvent<ClickEventArgs>(args =>
         {
             DragTo(args.MouseState.X, args.MouseState.Y);

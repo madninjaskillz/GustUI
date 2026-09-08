@@ -94,6 +94,9 @@ public class HorizontalScrollbarElement : Element
 
     public HorizontalScrollbarElement()
     {
+        // Grabbed and carried, not pressed (ezmuze #224).
+        AddTrait<CursorTrait>().Set(new TVText(Managers.StandardCursors.GrabHand));
+
         ElementTrait<OnMousePress>().Set(new TVEvent<ClickEventArgs>(HandlePress));
         ElementTrait<OnMouseButtonHeldDown>().Set(new TVEvent<ClickEventArgs>(HandleHeld));
         ElementTrait<OnMouseRelease>().Set(new TVEvent<ClickEventArgs>(HandleRelease));

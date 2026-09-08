@@ -62,6 +62,12 @@ public class DockSplitterElement : Element
 
         Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
 
+        // Which way this one resizes depends on which edge it sits on, and
+        // that is a property of the docked panel rather than of construction
+        // — so the pointer is re-stated in Update alongside the geometry
+        // (ezmuze #224). AddTrait here, Set there.
+        AddTrait<CursorTrait>();
+
         // A press reaches EVERY hovered element that wants one, not just the
         // front-most, so depth alone was not enough: the title bar underneath
         // this strip was still getting the same press and tearing the panel
@@ -156,6 +162,13 @@ public class DockSplitterElement : Element
     /// layout does.</summary>
     public void LayoutFor(Vector2 panelSize)
     {
+        // Same place the geometry is decided, because it is the same fact:
+        // a splitter on a left/right dock resizes across, one on a top/bottom
+        // dock resizes down (ezmuze #224). Re-docking a panel changes both.
+        ElementTrait<CursorTrait>().Set(new TVText(Horizontal
+            ? Managers.StandardCursors.ResizeHorizontal
+            : Managers.StandardCursors.ResizeVertical));
+
         switch (panel.DockedSide)
         {
             case DockSide.Left:

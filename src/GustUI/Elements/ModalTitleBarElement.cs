@@ -154,6 +154,7 @@ namespace GustUI.Elements
         {
             closable = true;
             dragBarElement = AddChildElement<BasicButtonElement>("drag bar");
+
             closeButton = AddChildElement<BasicButtonElement>("close button");
             sizeButton = AddChildElement<BasicButtonElement>("size button");
             Sync(closeButton);
@@ -388,6 +389,22 @@ namespace GustUI.Elements
         private void Setup()
         {
             Set<BorderSizeTrait, TVInt>(new TVInt(0));
+
+            // The drag bar is a BasicButtonElement, so it arrives wearing the
+            // hand every button gives itself. This one is not pressed — it is
+            // picked up, and the window comes with it (ezmuze #224). The
+            // close and maximise buttons beside it keep the hand, which is
+            // the whole distinction.
+            //
+            // HERE rather than at either construction site: both constructors
+            // end in this method, and a non-interactive title strip (a
+            // full-screen modal's) has no drag to promise, so it keeps
+            // whatever the button chose.
+            if (interactive)
+            {
+                dragBarElement.ElementTrait<CursorTrait>().Set(
+                    new TVText(Managers.StandardCursors.Move));
+            }
 
             if (closable)
             {

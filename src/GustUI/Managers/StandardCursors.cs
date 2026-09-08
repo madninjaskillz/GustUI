@@ -53,5 +53,13 @@ namespace GustUI.Managers
 
         /// <summary>A drop that will be refused.</summary>
         public const string Forbidden = "Forbidden";
+
+        /// <summary>Something grabbed and carried while the button is
+        /// down — a scrollbar thumb, a canvas being panned.</summary>
+        public const string GrabHand = "GrabHand";
+
+        /// <summary>A two-axis field where the press lands AT a point rather
+        /// than on a control — an XY pad, a picker.</summary>
+        public const string Crosshair = "Crosshair";
     }
 }

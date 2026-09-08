@@ -91,6 +91,10 @@ namespace GustUI.Elements
 
         public ToggleSwitchElement()
         {
+            // A switch is pressed like a button, and looks nothing like one
+            // (ezmuze #224).
+            AddTrait<CursorTrait>().Set(new TVText(Managers.StandardCursors.PointingHand));
+
             // Default on/off colors track the live theme (design-guide.md §1)
             // — call sites that want a specific accent (e.g. Stack's
             // ControlAccent) still override these after construction.
