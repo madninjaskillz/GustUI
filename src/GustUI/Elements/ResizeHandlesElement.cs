@@ -1,5 +1,6 @@
 using System;
 using GustUI.Extensions;
+using GustUI.Managers;
 using GustUI.Traits;
 using GustUI.TraitValues;
 using Microsoft.Xna.Framework;
@@ -13,9 +14,15 @@ namespace GustUI.Elements
     /// drawn "on top" of the edges within their own zone) added as a child
     /// of the host modal, only when it opts in (<c>resizable: true</c>).
     ///
-    /// GustUI has no OS cursor-shape API at all (checked; nothing exists),
-    /// so a hover highlight is the affordance instead of a resize cursor —
-    /// not a fallback from something better, the only option available.
+    /// Each strip declares its own resize POINTER (a <see cref="CursorTrait"/>
+    /// naming one of <see cref="StandardCursors"/>'s four directions), and
+    /// keeps the hover highlight alongside it. This used to read "GustUI has
+    /// no OS cursor-shape API at all (checked; nothing exists), so a hover
+    /// highlight is the affordance instead of a resize cursor" — true when it
+    /// was written, and true right up until the toolkit started drawing the
+    /// pointer itself (<see cref="CursorManager"/>) rather than asking the OS
+    /// for one. The highlight stays because it is the thing that still works
+    /// when an app registers no cursor art.
     ///
     /// Continuation is driven by unconditional per-frame polling in
     /// <see cref="Update"/> — exactly <see cref="Element.BeingDragged"/>'s
@@ -127,6 +134,14 @@ namespace GustUI.Elements
                         handle.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
                     }
                 }));
+                // THE POINTER SAYS WHICH WAY THIS ONE GOES (ezmuze #224).
+                // The handles are invisible transparent strips — the whole
+                // affordance is that the pointer changes on the way in — so
+                // this is not decoration, it is the control announcing
+                // itself. Declared rather than pushed from a hover handler:
+                // a handle knows at construction which edge it is.
+                handle.AddTrait<CursorTrait>().Set(new TVText(CursorFor(captured)));
+
                 // Corners sit above the edges (added after) within this
                 // element's own local children — the corner zone geometry
                 // below never actually overlaps an edge strip, but this
@@ -135,6 +150,17 @@ namespace GustUI.Elements
                 handles[(int)h] = handle;
             }
         }
+
+        /// <summary>The pointer for one handle — the two axes and the two
+        /// diagonals, named by <see cref="StandardCursors"/> so an app that
+        /// has no such art simply gets its ordinary arrow.</summary>
+        private static string CursorFor(Handle handle) => handle switch
+        {
+            Handle.N or Handle.S => StandardCursors.ResizeVertical,
+            Handle.E or Handle.W => StandardCursors.ResizeHorizontal,
+            Handle.NW or Handle.SE => StandardCursors.ResizeNorthWestSouthEast,
+            _ => StandardCursors.ResizeNorthEastSouthWest,
+        };
 
         public override void Draw()
         {

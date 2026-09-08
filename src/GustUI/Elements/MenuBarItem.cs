@@ -23,6 +23,12 @@ namespace GustUI.Elements
         public MenuBarItem(MenuItemModel menuItem, System.Action<ClickEventArgs> action, int width, int height)
         {
             Set<SizeTrait>(new TVVector(width, height));
+
+            // A menu title is a thing you press (ezmuze #224); a disabled one
+            // is not, and says so rather than inviting the click it will drop.
+            AddTrait<CursorTrait>().Set(new TVText(menuItem.Enabled
+                ? Managers.StandardCursors.PointingHand
+                : Managers.StandardCursors.Forbidden));
             // The blue highlight, same states the dropdown rows use, so the
             // bar and the menu it opens light up as one control (2026-09-06:
             // this was a barely-there grey lift, which on the dark theme's

@@ -133,6 +133,13 @@ namespace GustUI.Elements
         public FruitMenuItem(MenuItemModel menuItem, Action<ClickEventArgs> actionOverride = null, int width = 300, bool hideMore = false)
         {
             _menuItem = menuItem;
+
+            // Same rule as the bar above it (#224): the rows of a menu are
+            // pressable, except the ones that are not.
+            AddTrait<CursorTrait>().Set(new TVText(menuItem.Enabled
+                ? Managers.StandardCursors.PointingHand
+                : Managers.StandardCursors.Forbidden));
+
             var icon = menuItem.Icon;
             var text = menuItem.Text;
             var action = actionOverride != null ? actionOverride : (x)=>{

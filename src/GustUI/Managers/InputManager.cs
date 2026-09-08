@@ -1156,6 +1156,13 @@ namespace GustUI.Managers
                 }
             }
 
+            // BEFORE the hover handlers, not after. CursorManager is
+            // last-caller-wins, and a hover handler doing its own region
+            // hit-testing (a clip's edge zones) knows more than a trait on the
+            // whole element does — so the declaration goes down first and the
+            // specific case paints over it.
+            ApplyHoveredCursor();
+
             for (int i = 0; i < currentlyHovered.Count; i++)
             {
                 Element element = currentlyHovered[i];
@@ -1173,6 +1180,47 @@ namespace GustUI.Managers
             }
 
             lastHoverList = currentlyHovered;
+        }
+
+        /// <summary>
+        /// The pointer the hovered tree asks for (ezmuze #224), from the
+        /// <see cref="CursorTrait"/> of the FRONT-MOST element that declares
+        /// one.
+        ///
+        /// Back to front, because <see cref="CollectHovered"/> appends parents
+        /// before children and the front-most branch last — so the first
+        /// declaration found walking backwards is the one nearest the glass,
+        /// which is what the pointer should say. A container declaring a
+        /// pointer therefore sets it for its whole area EXCEPT wherever a
+        /// child declares its own, which is the behaviour a window with resize
+        /// handles wants without either side having to know about the other.
+        ///
+        /// Nothing is asked for when nothing declares one: the frame's request
+        /// stays empty and <see cref="CursorManager"/> falls back to its
+        /// default, the same as before this existed.
+        ///
+        /// Runs inside the hover pass rather than as a walk of its own — it is
+        /// a <see cref="Element.HasTrait{T}"/> check on a list already built
+        /// and already being iterated three times, and the loop stops at the
+        /// first hit.
+        /// </summary>
+        private void ApplyHoveredCursor()
+        {
+            for (int i = currentlyHovered.Count - 1; i >= 0; i--)
+            {
+                Element element = currentlyHovered[i];
+                if (!element.HasTrait<CursorTrait>())
+                {
+                    continue;
+                }
+
+                string cursor = element.ElementTrait<CursorTrait>().Value()?.Text;
+                if (!string.IsNullOrEmpty(cursor))
+                {
+                    CursorManager.Use(cursor);
+                    return;
+                }
+            }
         }
 
         // Scratch list reused across frames for per-branch hover collection.

@@ -74,6 +74,9 @@ public class SliderElement : Element
 
     public SliderElement()
     {
+        // Dragged along its one axis (#224).
+        AddTrait<CursorTrait>().Set(new TVText(Managers.StandardCursors.ResizeHorizontal));
+
         ElementTrait<OnMousePress>().Set(new TVEvent<ClickEventArgs>(args =>
         {
             CapturePointer();

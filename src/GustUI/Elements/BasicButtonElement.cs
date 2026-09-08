@@ -23,7 +23,34 @@ namespace GustUI.Elements
         /// conversion — robust regardless of which TVFill subtype a button
         /// uses). Default true (unchanged behavior for every existing
         /// button).</summary>
-        public bool Enabled { get; set; } = true;
+        /// <summary>
+        /// Whether this button responds at all. Disabled draws the gray wash
+        /// (see <see cref="Draw"/>) and swallows the click — and, since #224,
+        /// changes the POINTER: a hand over something that will not respond
+        /// is a lie the wash alone was already having to argue against.
+        /// </summary>
+        public bool Enabled
+        {
+            get => enabled;
+            set
+            {
+                enabled = value;
+                SyncCursor();
+            }
+        }
+
+        private bool enabled = true;
+
+        /// <summary>The pointer this button wants — a hand while it works, the
+        /// refusal sign while it does not.</summary>
+        private void SyncCursor()
+        {
+            if (HasTrait<CursorTrait>())
+            {
+                ElementTrait<CursorTrait>().Set(new TVText(
+                    enabled ? Managers.StandardCursors.PointingHand : Managers.StandardCursors.Forbidden));
+            }
+        }
 
         private static readonly Color DisabledWash = new Color(128, 128, 128, 140);
 
@@ -127,6 +154,12 @@ namespace GustUI.Elements
             textElement.Set<VerticalAlignmentTrait, TVVerticalAlignment>(new TVVerticalAlignment { Alignment = VerticalAlignment.Center });
 
             Set<BorderSizeTrait, TVInt>(new TVInt(2));
+
+            // Every constructor funnels through here, which is why the cursor
+            // is set here rather than in each of the three (#224).
+            AddTrait<CursorTrait>();
+            SyncCursor();
+
             this.AddChild(textElement, $"button Text: " + this.ElementTrait<TextTrait>().Value().Text);
         }
 

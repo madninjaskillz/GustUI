@@ -214,6 +214,10 @@ public class KnobElement : Element
         ModColor = Resources.StaticResources.Theme.AccentModPositive;
         ModNegativeColor = Resources.StaticResources.Theme.AccentModNegative;
 
+        // A knob is dragged, not clicked, and nothing about its shape says
+        // so — the pointer is what says so (ezmuze #224).
+        AddTrait<CursorTrait>().Set(new TVText(Managers.StandardCursors.Precision));
+
         ElementTrait<OnMousePress>().Set(new TVEvent<ClickEventArgs>(args =>
         {
             // A press out on the rim of a MODULATED knob grabs the arc; a

@@ -207,6 +207,11 @@ namespace GustUI.Elements.InputElements
             // positioned at a negative offset and the field crops it.
             ClipChildren = true;
 
+            // The I-beam (ezmuze #224): a text field is the one control whose
+            // pointer is genuinely load-bearing, because clicking it places a
+            // caret at a character rather than pressing the box.
+            AddTrait<CursorTrait>().Set(new TVText(Managers.StandardCursors.TextSelect));
+
             // Child order is paint order (equal Depth keeps insertion order),
             // and this is the whole layering: selection wash, then the text on
             // top of it, then the caret over both.

@@ -82,6 +82,28 @@ namespace GustUI.Managers
         public static bool Suppressed { get; set; }
 
         /// <summary>
+        /// Draw the pointer even while <see cref="Suppressed"/> — for a
+        /// screenshot taken from outside the app (ezmuze #224).
+        ///
+        /// WHY THIS HAS TO EXIST. Suppression is keyed on window focus, and a
+        /// tool driving the app over an API is by definition not focusing its
+        /// window: the whole point is that it does not need a human at the
+        /// keyboard. So the one thing the app draws entirely itself was the
+        /// one thing a screenshot could never show, and a change to a cursor
+        /// could not be verified the way every other visual change here is.
+        /// Setting this makes the pointer appear in a capture of an unfocused
+        /// window, which is exactly the frame such a tool grabs.
+        ///
+        /// It does NOT unhide the system cursor, and it does not touch the
+        /// focus rule: the reason for suppression — that an inactive window
+        /// reports (0,0) and would fling our pointer into the corner — still
+        /// stands, and this is a caller saying it wants the drawn pointer
+        /// anyway, wherever it lands. Off by default; a real session never
+        /// sets it.
+        /// </summary>
+        public static bool DrawWhileSuppressed { get; set; }
+
+        /// <summary>
         /// Registers the app's cursor art: one texture, a cell rectangle per
         /// name, and the hotspot shared by all of them — the point in a cell
         /// that sits ON the pointer position.
@@ -133,6 +155,21 @@ namespace GustUI.Managers
         public static string Current => thisFrame ?? DefaultCursor;
 
         /// <summary>
+        /// The cursor the last frame actually DREW.
+        ///
+        /// <see cref="Current"/> is the request being accumulated, and it is
+        /// cleared by every <see cref="Draw"/> — so anything asking from
+        /// outside the frame (a control API answering "what pointer is on
+        /// screen") reads it at the wrong moment and gets the default back.
+        /// This is the settled answer, and it is the one worth asserting on.
+        /// </summary>
+        public static string LastDrawn { get; private set; } = DefaultCursor;
+
+        /// <summary>How many cursors the registered atlas holds — 0 until one
+        /// is registered.</summary>
+        public static int Count => cells.Count;
+
+        /// <summary>
         /// Draws the pointer. Called last in the frame, after the tree and the
         /// debug overlay, because a cursor is on top of everything by
         /// definition — including the things that draw on top of everything.
@@ -141,8 +178,9 @@ namespace GustUI.Managers
         {
             string wanted = thisFrame ?? DefaultCursor;
             thisFrame = null;
+            LastDrawn = wanted;
 
-            if (!Ready || Suppressed || draw == null)
+            if (!Ready || (Suppressed && !DrawWhileSuppressed) || draw == null)
             {
                 return;
             }
