@@ -531,22 +531,147 @@ namespace GustUI.Extensions
         /// "sampled geometry IS the curve" idiom (no curve primitive exists in
         /// the sprite batch and none is needed).
         /// </summary>
+        /// <param name="segments">How many straight pieces to fake the curve
+        /// with. Leave it at <see cref="AutoSegments"/> — the default — to let
+        /// the curve's own size decide; see <see cref="SegmentsFor"/>.</param>
         public static void DrawCubicBezier(this DrawManager manager, Vector2 p0, Vector2 c0, Vector2 c1, Vector2 p1,
-            Color color, int thickness = 2, int segments = 24)
+            Color color, int thickness = 2, int segments = AutoSegments)
+            => manager.DrawCubicBezier(p0, c0, c1, p1, color, color, thickness, segments);
+
+        /// <summary>Pass as <c>segments</c> to size the tessellation from the
+        /// curve rather than from a guess. See <see cref="SegmentsFor"/>.</summary>
+        public const int AutoSegments = 0;
+
+        /// <summary>
+        /// How many straight pieces a curve of this size needs.
+        ///
+        /// A FIXED COUNT IS WRONG AT BOTH ENDS, which is what the previous
+        /// hardcoded 24 was: a wire spanning two thousand pixels got
+        /// eighty-pixel chords and looked visibly angular — reported as
+        /// exactly that — while a forty-pixel one got twenty-four segments to
+        /// draw what two would have covered.
+        ///
+        /// So the count comes from the CONTROL POLYGON's length, which bounds
+        /// the curve's own arc length and costs three subtractions to measure.
+        /// One segment per <see cref="PixelsPerSegment"/> of it, clamped: never
+        /// so few that a short curve turns into a chevron, never so many that
+        /// dragging a long wire around floods the batch.
+        /// </summary>
+        public static int SegmentsFor(Vector2 p0, Vector2 c0, Vector2 c1, Vector2 p1)
         {
-            Vector2 previous = p0;
+            float polygon = (c0 - p0).Length() + (c1 - c0).Length() + (p1 - c1).Length();
+            return (int)MathHelper.Clamp(polygon / PixelsPerSegment, MinSegments, MaxSegments);
+        }
+
+        /// <summary>Roughly the chord length a segment covers. Twelve is below
+        /// the point at which a corner between two segments is visible against
+        /// a 2px stroke at 100% zoom.</summary>
+        private const float PixelsPerSegment = 12f;
+
+        private const int MinSegments = 8;
+
+        /// <summary>The ceiling exists for the drag preview: a wire being
+        /// dragged across a large canvas is re-tessellated every frame, and
+        /// there is nothing to see past this.</summary>
+        private const int MaxSegments = 160;
+
+        /// <summary>
+        /// A cubic Bézier shading from <paramref name="fromColor"/> at
+        /// <paramref name="p0"/> to <paramref name="toColor"/> at
+        /// <paramref name="p1"/>.
+        ///
+        /// BY ARC LENGTH, not by the curve parameter t. Those are not the same
+        /// thing and the difference is plainly visible on the S-curves this
+        /// was written for: with horizontal tangents and a deep bend, t moves
+        /// fast through the middle and slowly at the ends, so a colour lerped
+        /// on t puts its halfway point well away from the halfway point of the
+        /// LINE. The ask was that the middle of the wire is the middle of the
+        /// two colours, and that is a statement about distance.
+        ///
+        /// So it samples first, accumulates the chord lengths, and colours
+        /// each segment by how far along it actually is. One extra array of
+        /// points, and the polyline was going to be built anyway.
+        /// </summary>
+        public static void DrawCubicBezier(this DrawManager manager, Vector2 p0, Vector2 c0, Vector2 c1, Vector2 p1,
+            Color fromColor, Color toColor, int thickness = 2, int segments = AutoSegments)
+        {
+            if (segments <= 0)
+            {
+                segments = SegmentsFor(p0, c0, c1, p1);
+            }
+
+            Vector2[] points = RentBezierPoints(segments + 1);
+            float[] lengths = RentBezierLengths(segments + 1);
+
+            points[0] = p0;
+            lengths[0] = 0f;
             for (int i = 1; i <= segments; i++)
             {
                 float t = i / (float)segments;
                 float u = 1f - t;
-                Vector2 point =
+                points[i] =
                     u * u * u * p0
                     + 3f * u * u * t * c0
                     + 3f * u * t * t * c1
                     + t * t * t * p1;
-                manager.DrawThickLine(previous, point, color, thickness);
-                previous = point;
+                lengths[i] = lengths[i - 1] + (points[i] - points[i - 1]).Length();
             }
+
+            float total = lengths[segments];
+            bool graded = fromColor != toColor;
+
+            // A zero-length curve would divide by zero below, and there is
+            // nothing to draw anyway.
+            if (total <= 0.0001f)
+            {
+                return;
+            }
+
+            for (int i = 1; i <= segments; i++)
+            {
+                Color color = fromColor;
+                if (graded)
+                {
+                    // The MIDPOINT of the segment, so a segment is the colour
+                    // of where it is rather than of where it started — which
+                    // matters most at the ends, where the first segment would
+                    // otherwise be pure fromColor for its whole length.
+                    float at = (lengths[i - 1] + lengths[i]) * 0.5f / total;
+                    color = Color.Lerp(fromColor, toColor, at);
+                }
+
+                manager.DrawThickLine(points[i - 1], points[i], color, thickness);
+            }
+        }
+
+        // Two scratch arrays rather than an allocation per curve. The wire
+        // layer redraws every wire every frame, so a hundred wires at sixty
+        // frames is six thousand arrays a second straight into gen 0. Not
+        // thread-safe and does not need to be: drawing is the game thread's.
+        [ThreadStatic]
+        private static Vector2[] bezierPoints;
+
+        [ThreadStatic]
+        private static float[] bezierLengths;
+
+        private static Vector2[] RentBezierPoints(int count)
+        {
+            if (bezierPoints == null || bezierPoints.Length < count)
+            {
+                bezierPoints = new Vector2[Math.Max(count, MaxSegments + 1)];
+            }
+
+            return bezierPoints;
+        }
+
+        private static float[] RentBezierLengths(int count)
+        {
+            if (bezierLengths == null || bezierLengths.Length < count)
+            {
+                bezierLengths = new float[Math.Max(count, MaxSegments + 1)];
+            }
+
+            return bezierLengths;
         }
 
         public static void DrawRectangle(this DrawManager manager, Rectangle rectangle, Color color, int borderSize = 1)

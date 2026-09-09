@@ -21,6 +21,25 @@ namespace GustUI.Elements
         /// <summary>True when the wire carries a non-identity scaler — the
         /// affordance square draws filled instead of hollow.</summary>
         public bool HasScaler;
+
+        /// <summary>
+        /// The colour of each END, when the host knows what its ports are.
+        ///
+        /// A wire is drawn as a GRADIENT between them, so it leaves the output
+        /// wearing the output's colour and arrives wearing the input's, and
+        /// the halfway point of the line is the halfway point of the two. That
+        /// is what makes a canvas of thirty wires readable: you can see where
+        /// a cable is going from either end of it without following the curve.
+        ///
+        /// Null on either side falls back to the layer's own
+        /// <see cref="NodeWireLayerElement.WireColor"/>, which is what a host
+        /// that has no colour scheme gets — unchanged from before this
+        /// existed.
+        /// </summary>
+        public Color? FromColor;
+
+        /// <inheritdoc cref="FromColor"/>
+        public Color? ToColor;
     }
 
     /// <summary>
@@ -56,9 +75,20 @@ namespace GustUI.Elements
             return new Vector2(to.X - 16f, to.Y);
         }
 
+        /// <summary>
+        /// The two control points, which give the curve its horizontal
+        /// tangents at both ends — a wire leaves a socket going sideways,
+        /// which is what makes it read as a cable rather than a line.
+        ///
+        /// The bend is HALF THE HORIZONTAL SPAN, floored so a near-vertical
+        /// wire still bows instead of collapsing to a straight line, and
+        /// capped so a wire crossing the whole canvas does not throw its
+        /// control points so far out that the curve leaves the visible area
+        /// on its way between two points that are both on screen.
+        /// </summary>
         private static (Vector2 c0, Vector2 c1) ControlPoints(Vector2 from, Vector2 to)
         {
-            float bend = Math.Max(36f, Math.Abs(to.X - from.X) * 0.5f);
+            float bend = Math.Clamp(Math.Abs(to.X - from.X) * 0.5f, 36f, 320f);
             return (new Vector2(from.X + bend, from.Y), new Vector2(to.X - bend, to.Y));
         }
 
@@ -72,7 +102,14 @@ namespace GustUI.Elements
                 Vector2 from = origin + wire.From;
                 Vector2 to = origin + wire.To;
                 (Vector2 c0, Vector2 c1) = ControlPoints(from, to);
-                manager.DrawCubicBezier(from, c0, c1, to, wire.Selected ? WireSelectedColor : WireColor, 2);
+
+                // SELECTION OVERRIDES THE GRADIENT, on both ends. A selected
+                // wire has to be findable at a glance, and a gradient that
+                // merely brightened would be competing with thirty other
+                // coloured wires rather than standing out from them.
+                Color fromColor = wire.Selected ? WireSelectedColor : wire.FromColor ?? WireColor;
+                Color toColor = wire.Selected ? WireSelectedColor : wire.ToColor ?? WireColor;
+                manager.DrawCubicBezier(from, c0, c1, to, fromColor, toColor, 2);
 
                 // Scaler affordance on the INPUT end.
                 Vector2 anchor = origin + ScalerAnchor(wire.From, wire.To);
