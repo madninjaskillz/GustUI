@@ -44,6 +44,10 @@ namespace GustUI.Elements.InputElements
         /// user has to hunt for.</summary>
         private const int CaretWidth = 2;
 
+        /// <summary>Top inset of a multiline field's first line. A single-line
+        /// field centres its one line vertically instead (see SyncLayout).</summary>
+        private const int PadY = 4;
+
         /// <summary>Half a blink cycle — the Windows default. The clock is
         /// restarted on every caret move, so the caret is solid at the moment
         /// of typing and only starts blinking once the field goes quiet.</summary>
@@ -83,6 +87,21 @@ namespace GustUI.Elements.InputElements
 
         private bool focused;
         private bool dragging;
+
+        // ---- multiline state (see Multiline) ----
+        //
+        // One text element per VISUAL line, recycled frame to frame, plus one
+        // selection band per line. Kept apart from the single-line members so
+        // the single-line path is untouched by the mode existing.
+        private readonly List<TextElement> lineElements = new List<TextElement>();
+        private readonly List<FilledRectangleElement> lineSelections = new List<FilledRectangleElement>();
+        private readonly List<(int Start, int End, float[] Offsets)> lines = new List<(int, int, float[])>();
+        private float scrollY;
+        private int lineTextVersion = -1;
+        private float lineWidthMeasured = -1f;
+        private string lineFamilyMeasured;
+        private float lineSizeMeasured = float.MinValue;
+        private int textVersion;
         private bool caretPlacedByPress;
         private string valueAtFocus = "";
 
@@ -112,6 +131,25 @@ namespace GustUI.Elements.InputElements
 
         public int MaxLength { get; set; } = 60;
 
+        /// <summary>
+        /// A field that holds a PARAGRAPH rather than a value.
+        ///
+        /// Off (the default) is every field that existed before this: one
+        /// line, Enter submits, vertical keys go to the ends. On, the field
+        /// wraps at its own width, Enter inserts a line break (Ctrl+Enter
+        /// submits), Up and Down move between lines, Home and End go to the
+        /// ends of the CURRENT line, and the box scrolls vertically to keep the
+        /// caret in view. Give it a height of a few lines.
+        ///
+        /// The lines are laid out HERE rather than by handing the text to a
+        /// wrapping TextElement, and that is not duplication: the wrap in
+        /// TextElement collapses runs of spaces and re-breaks long words, so
+        /// its output does not map back to the source string one character to
+        /// one. A caret has to know exactly which character it is next to.
+        /// Every visual line is a range into the real text and nothing else.
+        /// </summary>
+        public bool Multiline { get; set; }
+
         public string Text
         {
             get => text;
@@ -125,6 +163,7 @@ namespace GustUI.Elements.InputElements
 
                 text = incoming;
                 textElement.Set<TextTrait>(new TVText(text));
+                textVersion++;
 
                 // A programmatic set is not an edit: it takes no undo entry
                 // and raises no OnTextChanged. The caret goes to the end of
@@ -332,6 +371,19 @@ namespace GustUI.Elements.InputElements
 
         private void SyncLayout()
         {
+            if (Multiline)
+            {
+                SyncMultilineLayout();
+                return;
+            }
+
+            // Coming BACK from multiline: the per-line elements must not keep
+            // drawing under the single line.
+            if (lineElements.Count > 0)
+            {
+                HideMultilineElements();
+            }
+
             SyncMetrics();
 
             TVVector size = this.GetSize();
@@ -392,6 +444,354 @@ namespace GustUI.Elements.InputElements
         }
 
         private bool CaretBlinkOn() => (int)(caretClock.Elapsed.TotalSeconds / BlinkSeconds) % 2 == 0;
+
+        // ---- multiline ----------------------------------------------------
+
+        /// <summary>
+        /// Rebuilds <see cref="lines"/> when the text, the font or the width
+        /// has changed: hard breaks at every '\n', soft breaks where a line
+        /// would run past the box, preferring the last space. Each entry is a
+        /// half-open range into <see cref="text"/> and that line's caret
+        /// offsets measured on its own, so mapping a caret to a pixel is a
+        /// lookup and never an estimate.
+        /// </summary>
+        private void SyncLines(float innerWidth)
+        {
+            TVFont font = Font;
+            if (lineTextVersion == textVersion && lineWidthMeasured == innerWidth
+                && lineFamilyMeasured == font.Family && lineSizeMeasured == font.Size)
+            {
+                return;
+            }
+
+            lines.Clear();
+            Managers.SdfFont sdf = Resources.StaticResources.FontManager.LoadSdfFont(font.Family);
+
+            int paragraphStart = 0;
+            while (paragraphStart <= text.Length)
+            {
+                int newline = text.IndexOf('\n', paragraphStart);
+                int paragraphEnd = newline < 0 ? text.Length : newline;
+                string paragraph = text.Substring(paragraphStart, paragraphEnd - paragraphStart);
+                float[] offsets = sdf.MeasureCaretOffsets(paragraph, font.Size);
+
+                int lineStart = 0;
+                while (true)
+                {
+                    // Find the last character that still fits on this line.
+                    int lineEnd = paragraph.Length;
+                    float origin = offsets[lineStart];
+                    for (int i = lineStart + 1; i <= paragraph.Length; i++)
+                    {
+                        if (offsets[i] - origin > innerWidth - CaretWidth)
+                        {
+                            lineEnd = i - 1;
+                            break;
+                        }
+                    }
+
+                    if (lineEnd < paragraph.Length && lineEnd > lineStart)
+                    {
+                        // Break after the last space if there is one on this
+                        // line, so words stay whole; a word longer than the
+                        // box is cut at the character, which is the only place
+                        // it can be.
+                        int space = paragraph.LastIndexOf(' ', lineEnd - 1, lineEnd - lineStart);
+                        if (space > lineStart)
+                        {
+                            lineEnd = space + 1;
+                        }
+                    }
+
+                    if (lineEnd <= lineStart)
+                    {
+                        lineEnd = Math.Min(paragraph.Length, lineStart + 1);
+                    }
+
+                    var lineOffsets = new float[lineEnd - lineStart + 1];
+                    for (int i = 0; i < lineOffsets.Length; i++)
+                    {
+                        lineOffsets[i] = offsets[lineStart + i] - origin;
+                    }
+
+                    lines.Add((paragraphStart + lineStart, paragraphStart + lineEnd, lineOffsets));
+
+                    if (lineEnd >= paragraph.Length)
+                    {
+                        break;
+                    }
+
+                    lineStart = lineEnd;
+                }
+
+                if (newline < 0)
+                {
+                    break;
+                }
+
+                paragraphStart = newline + 1;
+            }
+
+            lineTextVersion = textVersion;
+            lineWidthMeasured = innerWidth;
+            lineFamilyMeasured = font.Family;
+            lineSizeMeasured = font.Size;
+        }
+
+        /// <summary>Which visual line an index is on. An index sitting on a
+        /// soft break belongs to the line AFTER it — the caret at the start of
+        /// the next line, which is where a typist expects to keep typing.</summary>
+        private int LineOf(int index)
+        {
+            for (int i = 0; i < lines.Count; i++)
+            {
+                (int start, int end, float[] _) = lines[i];
+                bool last = i == lines.Count - 1;
+                bool hardEnd = end < text.Length && text[end] == '\n';
+                if (index < end || last || (index == end && hardEnd))
+                {
+                    return i;
+                }
+            }
+
+            return Math.Max(0, lines.Count - 1);
+        }
+
+        private float CaretXOn(int line, int index)
+        {
+            (int start, int _, float[] offsets) = lines[line];
+            int col = Math.Clamp(index - start, 0, offsets.Length - 1);
+            return offsets[col];
+        }
+
+        private int LineStartOf(int index)
+        {
+            EnsureLines();
+            return lines[LineOf(index)].Start;
+        }
+
+        private int LineEndOf(int index)
+        {
+            EnsureLines();
+            return lines[LineOf(index)].End;
+        }
+
+        private int IndexOnAdjacentLine(int index, int direction)
+        {
+            EnsureLines();
+            int line = LineOf(index);
+            int target = line + direction;
+            if (target < 0)
+            {
+                return 0;
+            }
+
+            if (target >= lines.Count)
+            {
+                return text.Length;
+            }
+
+            return NearestOn(target, CaretXOn(line, index));
+        }
+
+        private int NearestOn(int line, float x)
+        {
+            (int start, int _, float[] offsets) = lines[line];
+            int best = 0;
+            float bestDistance = float.MaxValue;
+            for (int i = 0; i < offsets.Length; i++)
+            {
+                float distance = Math.Abs(offsets[i] - x);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = i;
+                }
+            }
+
+            return start + best;
+        }
+
+        private int IndexAt(float globalX, float globalY)
+        {
+            EnsureLines();
+            if (lines.Count == 0)
+            {
+                return 0;
+            }
+
+            Vector2 origin = this.GetActualXnaPosition();
+            float lineHeight = Font.Size;
+            int line = (int)Math.Floor((globalY - origin.Y - PadY + scrollY) / lineHeight);
+            line = Math.Clamp(line, 0, lines.Count - 1);
+            return NearestOn(line, globalX - origin.X - PadX);
+        }
+
+        private void EnsureLines()
+        {
+            TVVector size = this.GetSize();
+            SyncLines(Math.Max(1f, size.X - (PadX * 2)));
+        }
+
+        private void HideMultilineElements()
+        {
+            foreach (TextElement line in lineElements)
+            {
+                line.Opacity = 0f;
+            }
+
+            foreach (FilledRectangleElement band in lineSelections)
+            {
+                band.Opacity = 0f;
+            }
+        }
+
+        /// <summary>The text element for visual line <paramref name="i"/>,
+        /// made on first use together with its selection band. The band is
+        /// added FIRST so it paints under the text, and the caret is moved
+        /// back to the front after both — paint order is child order, and
+        /// this is the whole layering, the same as the single-line case.</summary>
+        private TextElement LineElement(int i)
+        {
+            while (lineElements.Count <= i)
+            {
+                var band = new FilledRectangleElement();
+                band.Set<BackgroundFillTrait>(new TVFillSolidColor(() => Resources.StaticResources.Theme.AccentSelection) { Opacity = 0.55f });
+                band.Opacity = 0f;
+                AddChild(band, "line-selection-" + lineSelections.Count);
+                lineSelections.Add(band);
+
+                var element = new TextElement { WordWrap = false };
+                element.Set<ForegroundColorTrait>(new TVColor(Resources.StaticResources.Theme.BodyText));
+                element.Set<FontTrait>(Font);
+                element.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment() { Alignment = HorizontalAlignment.Left });
+                element.Set<TextTrait>(new TVText(""));
+                AddChild(element, "line-" + lineElements.Count);
+                lineElements.Add(element);
+
+                caretElement.MoveToFront();
+            }
+
+            return lineElements[i];
+        }
+
+        private FilledRectangleElement LineSelection(int i)
+        {
+            LineElement(i);
+            return lineSelections[i];
+        }
+
+        private void SyncMultilineLayout()
+        {
+            TVVector size = this.GetSize();
+            int width = Math.Max(1, (int)size.X);
+            int height = Math.Max(1, (int)size.Y);
+            float lineHeight = Font.Size;
+            float innerWidth = Math.Max(1f, width - (PadX * 2));
+            float innerHeight = Math.Max(lineHeight, height - (PadY * 2));
+
+            SyncLines(innerWidth);
+
+            // The single-line text element has nothing to say here.
+            textElement.Opacity = 0f;
+
+            // Scroll so the caret's line is inside the box.
+            int caretLine = LineOf(caret);
+            float caretTop = caretLine * lineHeight;
+            if (caretTop - scrollY < 0f)
+            {
+                scrollY = caretTop;
+            }
+
+            if (caretTop + lineHeight - scrollY > innerHeight)
+            {
+                scrollY = caretTop + lineHeight - innerHeight;
+            }
+
+            float maxScroll = Math.Max(0f, (lines.Count * lineHeight) - innerHeight);
+            scrollY = Math.Clamp(scrollY, 0f, maxScroll);
+
+            bool showSelection = focused && HasSelection;
+            int selStart = SelectionStart;
+            int selEnd = SelectionEnd;
+
+            for (int i = 0; i < lines.Count; i++)
+            {
+                (int start, int end, float[] offsets) = lines[i];
+                int top = (int)Math.Round(PadY + (i * lineHeight) - scrollY);
+
+                TextElement element = LineElement(i);
+                string content = text.Substring(start, end - start);
+                if (element.ElementTrait<TextTrait>().Value().Text != content)
+                {
+                    element.Set<TextTrait>(new TVText(content));
+                }
+
+                SetPosition(element, PadX, top);
+                SetSize(element, (int)Math.Max(innerWidth, offsets[offsets.Length - 1]), (int)Math.Ceiling(lineHeight));
+                element.Opacity = top + lineHeight < 0 || top > height ? 0f : 1f;
+
+                FilledRectangleElement band = LineSelection(i);
+                int bandStart = Math.Max(selStart, start);
+                int bandEnd = Math.Min(selEnd, end);
+                bool onThisLine = showSelection && bandEnd > bandStart;
+                // A selection that runs past a hard break shows a sliver at
+                // the end of the line, so the break reads as selected.
+                if (showSelection && selStart <= end && selEnd > end && end < text.Length && text[end] == '\n')
+                {
+                    onThisLine = true;
+                    bandEnd = Math.Max(bandEnd, end);
+                }
+
+                if (onThisLine)
+                {
+                    float left = PadX + offsets[Math.Clamp(bandStart - start, 0, offsets.Length - 1)];
+                    float right = PadX + offsets[Math.Clamp(bandEnd - start, 0, offsets.Length - 1)];
+                    if (right <= left)
+                    {
+                        right = left + (lineHeight * 0.4f);
+                    }
+
+                    band.Set<PositionTrait>(new TVVector((int)left, top));
+                    band.Set<SizeTrait>(new TVVector(Math.Max(1, (int)Math.Round(right - left)), (int)Math.Ceiling(lineHeight)));
+                    band.Opacity = 1f;
+                }
+                else
+                {
+                    band.Opacity = 0f;
+                }
+            }
+
+            for (int i = lines.Count; i < lineElements.Count; i++)
+            {
+                lineElements[i].Opacity = 0f;
+            }
+
+            for (int i = lines.Count; i < lineSelections.Count; i++)
+            {
+                lineSelections[i].Opacity = 0f;
+            }
+
+            if (placeholderElement != null)
+            {
+                SetPosition(placeholderElement, PadX, PadY);
+                placeholderElement.Opacity = text.Length == 0 ? 1f : 0f;
+            }
+
+            // The old single-line band never shows in this mode.
+            SetVisible(selectionElement, ref lastSelectionVisible, false);
+
+            bool showCaret = focused && CaretBlinkOn();
+            if (showCaret && lines.Count > 0)
+            {
+                int caretX = (int)Math.Round(PadX + CaretXOn(caretLine, caret));
+                int caretY = (int)Math.Round(PadY + (caretLine * lineHeight) - scrollY);
+                SetRect(caretElement, ref lastCaretRect,
+                    Math.Clamp(caretX, PadX - CaretWidth, width - CaretWidth), caretY, CaretWidth, (int)Math.Ceiling(lineHeight));
+            }
+
+            SetVisible(caretElement, ref lastCaretVisible, showCaret);
+        }
 
         /// <summary>Scrolls the view the least amount that brings the caret
         /// back inside the box, then pulls it back so there is never a gap
@@ -471,7 +871,9 @@ namespace GustUI.Elements.InputElements
             caretPlacedByPress = true;
             SyncMetrics();
 
-            int index = IndexAt(e.GlobalMousePosition.X);
+            int index = Multiline
+                ? IndexAt(e.GlobalMousePosition.X, e.GlobalMousePosition.Y)
+                : IndexAt(e.GlobalMousePosition.X);
             if (e.ClickCount >= 3)
             {
                 SelectAll();
@@ -498,7 +900,11 @@ namespace GustUI.Elements.InputElements
         {
             if (dragging)
             {
-                SetCaret(IndexAt(e.GlobalMousePosition.X), extend: true);
+                SetCaret(
+                    Multiline
+                        ? IndexAt(e.GlobalMousePosition.X, e.GlobalMousePosition.Y)
+                        : IndexAt(e.GlobalMousePosition.X),
+                    extend: true);
             }
         }
 
@@ -555,15 +961,38 @@ namespace GustUI.Elements.InputElements
 
                 // A single-line field has nowhere to go up or down, so the
                 // vertical keys land on the ends of the line — what a Win32
-                // single-line edit does with them too.
+                // single-line edit does with them too. A multiline one has
+                // lines, and these mean what they mean everywhere else.
                 case Keys.Home:
+                    SetCaret(Multiline && !control ? LineStartOf(caret) : 0, shift);
+                    return;
+
                 case Keys.Up:
-                    SetCaret(0, shift);
+                    if (Multiline)
+                    {
+                        SetCaret(IndexOnAdjacentLine(caret, -1), shift);
+                    }
+                    else
+                    {
+                        SetCaret(0, shift);
+                    }
+
                     return;
 
                 case Keys.End:
+                    SetCaret(Multiline && !control ? LineEndOf(caret) : text.Length, shift);
+                    return;
+
                 case Keys.Down:
-                    SetCaret(text.Length, shift);
+                    if (Multiline)
+                    {
+                        SetCaret(IndexOnAdjacentLine(caret, +1), shift);
+                    }
+                    else
+                    {
+                        SetCaret(text.Length, shift);
+                    }
+
                     return;
 
                 case Keys.Back:
@@ -575,6 +1004,16 @@ namespace GustUI.Elements.InputElements
                     return;
 
                 case Keys.Enter:
+                    // In a paragraph, Enter is a line break and Ctrl+Enter is
+                    // the submit — the convention of every chat box and
+                    // commit-message field, and the one thing a person typing
+                    // prose into a box expects Enter NOT to do is send it.
+                    if (Multiline && !control)
+                    {
+                        Insert("\n");
+                        return;
+                    }
+
                     OnSubmit?.Invoke(text);
                     return;
 
@@ -675,7 +1114,21 @@ namespace GustUI.Elements.InputElements
             var cleaned = new StringBuilder(incoming.Length);
             foreach (char c in incoming)
             {
-                if (c == '\n' || c == '\r' || c == '\t')
+                // A multiline field keeps its line breaks. Carriage returns
+                // are dropped either way — a Windows clipboard hands over
+                // \r\n and the field stores \n — and tabs never belong in
+                // either kind of box.
+                if (c == '\n')
+                {
+                    if (Multiline)
+                    {
+                        cleaned.Append(c);
+                    }
+
+                    continue;
+                }
+
+                if (c == '\r' || c == '\t')
                 {
                     continue;
                 }
@@ -755,6 +1208,7 @@ namespace GustUI.Elements.InputElements
 
             text = text.Substring(0, start) + replacement + text.Substring(end);
             textElement.Set<TextTrait>(new TVText(text));
+            textVersion++;
             caret = anchor = start + replacement.Length;
             caretClock.Restart();
 
