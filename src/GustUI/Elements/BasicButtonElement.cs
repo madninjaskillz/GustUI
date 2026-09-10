@@ -63,6 +63,16 @@ namespace GustUI.Elements
         /// from this button's, so anything set here is overwritten on the next
         /// resize; re-apply rather than assuming it sticks.</summary>
         protected TextElement Label => textElement;
+
+        /// <summary>The caption, readable and settable after construction. A
+        /// button whose job changes — "Check version" becoming "Publish v2"
+        /// once the check has run — should say so, and until this the only
+        /// way was to build a second button.</summary>
+        public string Text
+        {
+            get => textElement.ElementTrait<TextTrait>().Value().Text;
+            set => textElement.Set<TextTrait>(new TVText(value ?? ""));
+        }
         public BasicButtonElement()
         {
             textElement = this.AddChildElement<TextElement>();
