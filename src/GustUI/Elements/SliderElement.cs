@@ -10,11 +10,16 @@ using Microsoft.Xna.Framework.Graphics;
 namespace GustUI.Elements;
 
 /// <summary>
-/// A horizontal slider: value 0..1 along the track. Pressing anywhere jumps
-/// the thumb to the pointer and starts a drag; dragging uses pointer capture,
-/// so fast drags that leave the element keep working (same input model as
+/// A slider: value 0..1 along the track. Pressing anywhere jumps the thumb to
+/// the pointer and starts a drag; dragging uses pointer capture, so fast drags
+/// that leave the element keep working (same input model as
 /// <see cref="KnobElement"/>). The thumb is an antialiased disc baked once per
 /// diameter.
+///
+/// HORIZONTAL BY DEFAULT, <see cref="Vertical"/> to stand it up. A vertical
+/// slider reads BOTTOM = 0, TOP = 1, which is the way every fader ever built
+/// reads and the opposite of screen coordinates — so a panel of them is a
+/// mixer or a synth's front face rather than a column of progress bars.
 /// </summary>
 [ElementTraits(typeof(PositionTrait), typeof(SizeTrait), typeof(OnMousePress), typeof(OnMouseButtonHeldDown), typeof(OnMouseRelease))]
 public class SliderElement : Element
@@ -31,6 +36,25 @@ public class SliderElement : Element
 
     public int TrackThickness { get; set; } = 4;
     public int ThumbDiameter { get; set; } = 14;
+
+    /// <summary>Stand the slider up: the track runs down the middle of the
+    /// element, 0 at the bottom and 1 at the top. Everything else — skins,
+    /// bipolar mode, the live marker — behaves the same, rotated.</summary>
+    public bool Vertical
+    {
+        get => vertical;
+        set
+        {
+            vertical = value;
+
+            // The pointer that says which way it drags (#224) is part of the
+            // orientation, not something a caller should have to remember.
+            ElementTrait<CursorTrait>().Set(new TVText(
+                value ? Managers.StandardCursors.ResizeVertical : Managers.StandardCursors.ResizeHorizontal));
+        }
+    }
+
+    private bool vertical;
 
     /// <summary>Bipolar mode (e.g. pan/balance): the fill draws from the
     /// CENTER (0.5) to the thumb instead of from the left edge, and a
@@ -80,12 +104,12 @@ public class SliderElement : Element
         ElementTrait<OnMousePress>().Set(new TVEvent<ClickEventArgs>(args =>
         {
             CapturePointer();
-            Value = ValueAt(args.MouseState.X);
+            Value = ValueAt(args.MouseState.X, args.MouseState.Y);
         }));
 
         ElementTrait<OnMouseButtonHeldDown>().Set(new TVEvent<ClickEventArgs>(args =>
         {
-            Value = ValueAt(args.MouseState.X);
+            Value = ValueAt(args.MouseState.X, args.MouseState.Y);
         }));
 
         ElementTrait<OnMouseRelease>().Set(new TVEvent<ClickEventArgs>(args =>
@@ -94,16 +118,30 @@ public class SliderElement : Element
         }));
     }
 
-    private float ValueAt(float screenX)
+    private float ValueAt(float screenX, float screenY)
     {
-        float left = this.GetActualXnaPosition().X;
-        float span = this.GetSize().X - ThumbDiameter;
+        Vector2 pos = this.GetActualXnaPosition();
+        Vector2 size = this.GetSize().AsXna;
+        if (vertical)
+        {
+            float spanY = size.Y - ThumbDiameter;
+            if (spanY <= 0f)
+            {
+                return 0f;
+            }
+
+            // INVERTED: the top of the element is 1. Screen y grows downward
+            // and a fader does not.
+            return 1f - ((screenY - pos.Y - (ThumbDiameter / 2f)) / spanY); // Value clamps
+        }
+
+        float span = size.X - ThumbDiameter;
         if (span <= 0f)
         {
             return 0f;
         }
 
-        return (screenX - left - ThumbDiameter / 2f) / span; // Value clamps
+        return (screenX - pos.X - (ThumbDiameter / 2f)) / span; // Value clamps
     }
 
     public override void Draw()
@@ -112,114 +150,149 @@ public class SliderElement : Element
         Vector2 pos = this.GetActualXnaPosition();
         Vector2 size = this.GetSize().AsXna;
 
-        if (size.X > ThumbDiameter && size.Y >= TrackThickness)
+        // ALONG is the axis the value travels; ACROSS is the other one. Every
+        // number below is written once in those terms and turned back into a
+        // rectangle at the point of drawing, which is why the skins did not
+        // have to learn about orientation.
+        float along = vertical ? size.Y : size.X;
+        float across = vertical ? size.X : size.Y;
+        if (along <= ThumbDiameter || across < TrackThickness)
         {
-            float centerY = pos.Y + size.Y / 2f;
-            int trackLeft = (int)(pos.X + ThumbDiameter / 2f);
-            int trackWidth = (int)(size.X - ThumbDiameter);
-            int trackTop = (int)(centerY - TrackThickness / 2f);
-            float thumbCenterX = pos.X + ThumbDiameter / 2f + value * (size.X - ThumbDiameter);
+            base.Draw();
+            return;
+        }
 
-            var trackRect = new Rectangle(trackLeft, trackTop, trackWidth, TrackThickness);
-            switch (Skin)
+        float centreAcross = (vertical ? pos.X : pos.Y) + (across / 2f);
+        float trackStart = (vertical ? pos.Y : pos.X) + (ThumbDiameter / 2f);
+        float trackLength = along - ThumbDiameter;
+
+        // The thumb's position along the axis, and the point 0 fills from.
+        // Vertical counts DOWN from the far end, so a full fader is a full
+        // track and an empty one is an empty track.
+        float thumbAlong = vertical
+            ? trackStart + ((1f - value) * trackLength)
+            : trackStart + (value * trackLength);
+        float zeroAlong = vertical ? trackStart + trackLength : trackStart;
+        float centreValueAlong = trackStart + (vertical ? 1f - 0.5f : 0.5f) * trackLength;
+
+        Rectangle Band(float from, float to)
+        {
+            float lo = Math.Min(from, to);
+            float length = Math.Abs(to - from);
+            int thin = (int)(centreAcross - (TrackThickness / 2f));
+            return vertical
+                ? new Rectangle(thin, (int)lo, TrackThickness, (int)length)
+                : new Rectangle((int)lo, thin, (int)length, TrackThickness);
+        }
+
+        Rectangle trackRect = Band(trackStart, trackStart + trackLength);
+        Vector2 thumbCentre = vertical
+            ? new Vector2(centreAcross, thumbAlong)
+            : new Vector2(thumbAlong, centreAcross);
+
+        switch (Skin)
+        {
+            case ControlSkin.Soft:
+                // A groove pressed INTO the panel: the shadow sits inside the
+                // leading edge, which is what inverts the raised look the
+                // thumb has and makes the pair read as track-and-slider.
+                manager.DrawFilledCapsule(Inflate(trackRect, 0, 1), Color.Black * 0.16f);
+                manager.DrawFilledCapsule(trackRect, TrackColor);
+                break;
+
+            case ControlSkin.Hardware:
+                // Inset channel with a lip along its far edge, and a milled
+                // scale beside it -- the tick row is the thing that reads as
+                // a piece of gear rather than a progress bar.
+                manager.DrawFilledRectangle(trackRect, Color.Lerp(TrackColor, Color.Black, 0.45f));
+                manager.DrawFilledRectangle(FarLip(trackRect), Color.Lerp(TrackColor, Color.White, 0.25f));
+                DrawHardwareScale(manager, trackRect);
+                break;
+
+            case ControlSkin.Amp:
+                // A printed scale and a plain slot. Like the Amp knob, what
+                // carries the value is the THUMB read against marks that do
+                // not change, so the track stays one colour end to end.
+                manager.DrawFilledRectangle(trackRect, Color.Lerp(TrackColor, Color.Black, 0.35f));
+                DrawHardwareScale(manager, trackRect);
+                break;
+
+            case ControlSkin.Neon:
+                manager.DrawFilledCapsule(trackRect, TrackColor);
+                break;
+
+            case ControlSkin.Modern:
+                manager.DrawFilledCapsule(trackRect, Color.Lerp(TrackColor, Color.Black, 0.25f));
+                break;
+
+            case ControlSkin.Pixel:
+                manager.DrawFilledRectangle(Inflate(trackRect, 1, 1), Color.Lerp(TrackColor, Color.Black, 0.6f));
+                manager.DrawFilledRectangle(trackRect, TrackColor);
+                break;
+
+            default:
+                manager.DrawFilledRectangle(trackRect, TrackColor);
+                break;
+        }
+
+        if (Bipolar)
+        {
+            if (Math.Abs(thumbAlong - centreValueAlong) >= 1f)
             {
-                case ControlSkin.Soft:
-                    // A groove pressed INTO the panel: the shadow sits inside
-                    // the top edge, which is what inverts the raised look the
-                    // thumb has and makes the pair read as track-and-slider.
-                    manager.DrawFilledCapsule(new Rectangle(
-                        trackRect.X, trackRect.Y - 1, trackRect.Width, trackRect.Height + 2),
-                        Color.Black * 0.16f);
-                    manager.DrawFilledCapsule(trackRect, TrackColor);
-                    break;
-                case ControlSkin.Hardware:
-                    // Inset channel with a lip along the bottom, and a milled
-                    // scale above it -- the tick row is the thing that reads
-                    // as a piece of gear rather than a progress bar.
-                    manager.DrawFilledRectangle(trackRect, Color.Lerp(TrackColor, Color.Black, 0.45f));
-                    manager.DrawFilledRectangle(new Rectangle(
-                        trackRect.X, trackRect.Bottom - 1, trackRect.Width, 1),
-                        Color.Lerp(TrackColor, Color.White, 0.25f));
-                    DrawHardwareScale(manager, trackRect);
-                    break;
-
-                case ControlSkin.Amp:
-                    // A printed scale and a plain slot. Like the Amp knob, what
-                    // carries the value is the THUMB read against marks that do
-                    // not change, so the track stays one colour end to end.
-                    manager.DrawFilledRectangle(trackRect, Color.Lerp(TrackColor, Color.Black, 0.35f));
-                    DrawHardwareScale(manager, trackRect);
-                    break;
-
-                case ControlSkin.Neon:
-                    // An unlit channel with a thin outline; the fill below does
-                    // the glowing.
-                    manager.DrawFilledCapsule(trackRect, TrackColor);
-                    break;
-
-                case ControlSkin.Modern:
-                    // A thin recessed rail. The fill and the small pale thumb
-                    // carry it; nothing here is drawn to look physical.
-                    manager.DrawFilledCapsule(trackRect, Color.Lerp(TrackColor, Color.Black, 0.25f));
-                    break;
-
-                case ControlSkin.Pixel:
-                    // Chunky recessed trough: dark base, darker top edge, hard
-                    // corners. No capsule anywhere on a pixel panel.
-                    manager.DrawFilledRectangle(new Rectangle(
-                        trackRect.X - 1, trackRect.Y - 1, trackRect.Width + 2, trackRect.Height + 2),
-                        Color.Lerp(TrackColor, Color.Black, 0.6f));
-                    manager.DrawFilledRectangle(trackRect, TrackColor);
-                    break;
-                default:
-                    manager.DrawFilledRectangle(trackRect, TrackColor);
-                    break;
+                DrawFill(manager, Band(centreValueAlong, thumbAlong));
             }
 
-            if (Bipolar)
-            {
-                float centerX = pos.X + ThumbDiameter / 2f + 0.5f * (size.X - ThumbDiameter);
-                int fillLeft = (int)Math.Min(centerX, thumbCenterX);
-                int fillWidth = (int)Math.Abs(thumbCenterX - centerX);
-                if (fillWidth > 0)
-                {
-                    DrawFill(manager, new Rectangle(fillLeft, trackTop, fillWidth, TrackThickness));
-                }
+            // Centre tick, drawn OVER the fill so it stays visible however
+            // far the thumb has travelled.
+            int tickLong = TrackThickness + 6;
+            manager.DrawFilledRectangle(
+                vertical
+                    ? new Rectangle((int)(centreAcross - (tickLong / 2f)), (int)centreValueAlong - 1, tickLong, 2)
+                    : new Rectangle((int)centreValueAlong - 1, (int)(centreAcross - (tickLong / 2f)), 2, tickLong),
+                CenterMarkColor);
+        }
+        else if (Math.Abs(thumbAlong - zeroAlong) >= 1f)
+        {
+            DrawFill(manager, Band(zeroAlong, thumbAlong));
+        }
 
-                // Center tick mark, drawn OVER the fill so it stays visible
-                // no matter how far the thumb has traveled.
-                int tickHeight = TrackThickness + 6;
-                manager.DrawFilledRectangle(new Rectangle((int)centerX - 1, (int)(centerY - tickHeight / 2f), 2, tickHeight), CenterMarkColor);
-            }
-            else
-            {
-                int fillWidth = (int)(thumbCenterX - trackLeft);
-                if (fillWidth > 0)
-                {
-                    DrawFill(manager, new Rectangle(trackLeft, trackTop, fillWidth, TrackThickness));
-                }
-            }
+        int d = Math.Min(ThumbDiameter, (int)across);
+        if (d >= 4)
+        {
+            DrawThumb(manager, thumbCentre, d / 2f);
+        }
 
-            int d = Math.Min(ThumbDiameter, (int)size.Y);
-            if (d >= 4)
-            {
-                DrawThumb(manager, new Vector2(thumbCenterX, centerY), d / 2f);
-            }
-
-            if (LiveValue.HasValue)
-            {
-                // Live marker rides ABOVE the track (never the draggable
-                // thumb itself) so base position and live automated position
-                // read as two independent marks.
-                float liveX = pos.X + ThumbDiameter / 2f + MathHelper.Clamp(LiveValue.Value, 0f, 1f) * (size.X - ThumbDiameter);
-                float ld = Math.Max(4f, d * 0.7f);
-                float liveY = trackTop - ld * 0.5f - 1f;
-                manager.DrawFilledCircle(new Vector2(liveX, liveY + ld / 2f), ld / 2f, LiveColor);
-            }
+        if (LiveValue.HasValue)
+        {
+            // The live marker rides BESIDE the track (never the draggable
+            // thumb itself) so base position and live automated position read
+            // as two independent marks.
+            float live = MathHelper.Clamp(LiveValue.Value, 0f, 1f);
+            float liveAlong = trackStart + ((vertical ? 1f - live : live) * trackLength);
+            float ld = Math.Max(4f, d * 0.7f);
+            float liveAcross = centreAcross - (TrackThickness / 2f) - (ld * 0.5f) - 1f;
+            manager.DrawFilledCircle(
+                vertical ? new Vector2(liveAcross, liveAlong) : new Vector2(liveAlong, liveAcross),
+                ld / 2f, LiveColor);
         }
 
         base.Draw();
     }
+
+    /// <summary>Grow a band by <paramref name="acrossBy"/> across its own
+    /// axis and <paramref name="alongBy"/> along it, whichever way it
+    /// runs.</summary>
+    private Rectangle Inflate(Rectangle band, int acrossBy, int alongBy)
+        => vertical
+            ? new Rectangle(band.X - acrossBy, band.Y - alongBy, band.Width + (acrossBy * 2), band.Height + (alongBy * 2))
+            : new Rectangle(band.X - alongBy, band.Y - acrossBy, band.Width + (alongBy * 2), band.Height + (acrossBy * 2));
+
+    /// <summary>The one-pixel lip along a band's far edge — the bottom of a
+    /// horizontal channel, the right of a vertical one.</summary>
+    private Rectangle FarLip(Rectangle band)
+        => vertical
+            ? new Rectangle(band.Right - 1, band.Y, 1, band.Height)
+            : new Rectangle(band.X, band.Bottom - 1, band.Width, 1);
 
     /// <summary>The travelled part of the track. Rounded under
     /// <see cref="ControlSkin.Soft"/> so it matches the groove it sits in;
@@ -237,9 +310,7 @@ public class SliderElement : Element
                 // as close to a glow as geometry gets without a shader.
                 for (int i = 2; i >= 0; i--)
                 {
-                    manager.DrawFilledCapsule(
-                        new Rectangle(rect.X, rect.Y - i, rect.Width, rect.Height + i * 2),
-                        FillColor * (i == 0 ? 1f : 0.18f / i));
+                    manager.DrawFilledCapsule(Inflate(rect, i, 0), FillColor * (i == 0 ? 1f : 0.18f / i));
                 }
 
                 break;
@@ -320,19 +391,24 @@ public class SliderElement : Element
         }
     }
 
-    /// <summary>The milled scale above a <see cref="ControlSkin.Hardware"/>
+    /// <summary>The milled scale beside a <see cref="ControlSkin.Hardware"/>
     /// track: evenly spaced ticks, spaced by SIZE rather than by a fixed count
     /// so a short slider does not become a solid bar.</summary>
     private void DrawHardwareScale(DrawManager manager, Rectangle track)
     {
-        int ticks = Math.Max(5, Math.Min(33, track.Width / 12));
-        int height = Math.Max(2, TrackThickness);
+        int length = vertical ? track.Height : track.Width;
+        int ticks = Math.Max(5, Math.Min(33, length / 12));
+        int reach = Math.Max(2, TrackThickness);
         Color tick = Color.Lerp(TrackColor, Color.White, 0.35f);
 
         for (int i = 0; i < ticks; i++)
         {
-            int x = track.X + (int)(i / (float)(ticks - 1) * (track.Width - 1));
-            manager.DrawFilledRectangle(new Rectangle(x, track.Y - height - 2, 1, height), tick);
+            int at = (int)(i / (float)(ticks - 1) * (length - 1));
+            manager.DrawFilledRectangle(
+                vertical
+                    ? new Rectangle(track.X - reach - 2, track.Y + at, reach, 1)
+                    : new Rectangle(track.X + at, track.Y - reach - 2, 1, reach),
+                tick);
         }
     }
 }
