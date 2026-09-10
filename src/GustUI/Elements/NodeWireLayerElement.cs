@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using GustUI.Attributes;
 using GustUI.Extensions;
+using GustUI.Managers;
 using GustUI.Traits;
 using Microsoft.Xna.Framework;
 
@@ -40,6 +41,14 @@ namespace GustUI.Elements
 
         /// <inheritdoc cref="FromColor"/>
         public Color? ToColor;
+
+        /// <summary>
+        /// Draw this wire DASHED. For a cable that carries a pointer rather
+        /// than a signal — a handle to a file, say — so it can be told apart
+        /// from every other wire on the canvas with the colour switched off.
+        /// The host decides which wires qualify; the layer only draws.
+        /// </summary>
+        public bool Dashed;
     }
 
     /// <summary>
@@ -109,7 +118,14 @@ namespace GustUI.Elements
                 // coloured wires rather than standing out from them.
                 Color fromColor = wire.Selected ? WireSelectedColor : wire.FromColor ?? WireColor;
                 Color toColor = wire.Selected ? WireSelectedColor : wire.ToColor ?? WireColor;
-                manager.DrawCubicBezier(from, c0, c1, to, fromColor, toColor, 2);
+                if (wire.Dashed)
+                {
+                    DrawDashedBezier(manager, from, c0, c1, to, fromColor, toColor);
+                }
+                else
+                {
+                    manager.DrawCubicBezier(from, c0, c1, to, fromColor, toColor, 2);
+                }
 
                 // Scaler affordance on the INPUT end.
                 Vector2 anchor = origin + ScalerAnchor(wire.From, wire.To);
@@ -129,6 +145,8 @@ namespace GustUI.Elements
 
             if (PreviewFrom.HasValue && PreviewTo.HasValue)
             {
+                // (the preview is never dashed: it does not know yet what
+                // it will connect)
                 Vector2 from = origin + PreviewFrom.Value;
                 Vector2 to = origin + PreviewTo.Value;
                 (Vector2 c0, Vector2 c1) = ControlPoints(from, to);
@@ -136,6 +154,55 @@ namespace GustUI.Elements
             }
 
             base.Draw();
+        }
+
+        /// <summary>Dash length in pixels, and the gap the same, so the
+        /// cable reads as a dotted pointer at any zoom rather than a wire
+        /// with a flicker in it.</summary>
+        public const float DashLength = 7f;
+
+        /// <summary>
+        /// The dashed stroke: the curve is walked in short straight steps
+        /// and every other run of <see cref="DashLength"/> is drawn. Each
+        /// dash takes the gradient colour at its own position, so a dashed
+        /// wire still leaves wearing the output's colour and arrives
+        /// wearing the input's, the way a solid one does.
+        /// </summary>
+        private static void DrawDashedBezier(DrawManager manager, Vector2 p0, Vector2 c0, Vector2 c1, Vector2 p1,
+            Color fromColor, Color toColor)
+        {
+            // Step count from the chord, generously: the dash boundaries
+            // are what have to look right, and they land between samples.
+            float chord = Vector2.Distance(p0, p1);
+            int steps = Math.Max(24, (int)(chord / 3f));
+            Vector2 previous = p0;
+            float run = 0f;
+            bool on = true;
+            for (int i = 1; i <= steps; i++)
+            {
+                float t = i / (float)steps;
+                float u = 1f - t;
+                Vector2 point =
+                    (u * u * u * p0)
+                    + (3f * u * u * t * c0)
+                    + (3f * u * t * t * c1)
+                    + (t * t * t * p1);
+
+                float length = Vector2.Distance(previous, point);
+                if (on)
+                {
+                    manager.DrawThickLine(previous, point, Color.Lerp(fromColor, toColor, t), 2);
+                }
+
+                run += length;
+                if (run >= DashLength)
+                {
+                    run = 0f;
+                    on = !on;
+                }
+
+                previous = point;
+            }
         }
     }
 }
