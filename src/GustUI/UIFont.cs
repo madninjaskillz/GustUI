@@ -1049,7 +1049,17 @@ namespace GustUI
             // the signal that still works when colour does not.
             Warning = 59322,
             Info = 59718,
-            Completed = 59696
+            Completed = 59696,
+            //
+            // Summary:
+            //     A padlock, closed and open (E72E / E785) - for anything whose
+            //     state is "you may not change this from here", and the control
+            //     that lifts it. Outside the WinRT Symbol subset for the same
+            //     reason the three above are: that list has no padlock at all,
+            //     and a lock is a shape everybody already reads without a
+            //     label. Added for ezmuze studio's locked pack channels.
+            Lock = 59182,
+            Unlock = 59269
         }
     }
 }
