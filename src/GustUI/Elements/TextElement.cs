@@ -399,6 +399,53 @@ namespace GustUI.Elements
         }
 
         /// <summary>
+        /// <paramref name="text"/> shortened with an ellipsis until it fits
+        /// <paramref name="maxWidth"/>, or unchanged when it already does.
+        ///
+        /// An unwrapped TextElement does not clip — it draws straight out
+        /// through its own box and over whatever is beside it (and a
+        /// right-ALIGNED one draws leftward out of the box, which is how a
+        /// label ends up somewhere its owner never put it). The two usual
+        /// answers are a per-label ClipChildren wrapper, which costs a GPU
+        /// scissor push and a flush each way, and letting it overflow. This
+        /// is the third: shorten the string, once, at build time.
+        ///
+        /// Measures the candidate INCLUDING the ellipsis, so the result is
+        /// really narrower than the box rather than narrower by a character
+        /// and wider by a "…".
+        /// </summary>
+        public static string Truncate(string text, TVFont font, float maxWidth)
+        {
+            if (string.IsNullOrEmpty(text) || maxWidth <= 0f)
+            {
+                return text ?? "";
+            }
+
+            if (Measure(text, font).X <= maxWidth)
+            {
+                return text;
+            }
+
+            const string Ellipsis = "…";
+
+            // Too narrow for even one character plus the ellipsis: the
+            // ellipsis alone still says "there is more", which is more than
+            // a single arbitrary letter says.
+            int take = 0;
+            for (int i = 1; i <= text.Length; i++)
+            {
+                if (Measure(text.Substring(0, i) + Ellipsis, font).X > maxWidth)
+                {
+                    break;
+                }
+
+                take = i;
+            }
+
+            return take == 0 ? Ellipsis : text.Substring(0, take) + Ellipsis;
+        }
+
+        /// <summary>
         /// <paramref name="text"/> trimmed with an ellipsis until it measures
         /// within <paramref name="width"/>, or unchanged when it already does.
         /// The companion to <see cref="Measure"/>, here rather than in each
