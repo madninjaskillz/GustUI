@@ -85,6 +85,16 @@ public class FilledRectangleElement : RectangleElement
                 }
 
                 break;
+            case TVFillHatch hatch:
+                if (hatch.Background.HasValue)
+                {
+                    Resources.StaticResources.DrawManager.DrawFilledRectangle(
+                        rect, hatch.Background.Value * hatch.Opacity);
+                }
+
+                Extensions.ShapeDrawExtensions.DrawHatch(Resources.StaticResources.DrawManager, rect,
+                    hatch.ResolvedColor * hatch.Opacity, hatch.Spacing, hatch.Thickness, hatch.Angle);
+                break;
             case TVFillLoopOutline loop:
                 Resources.StaticResources.DrawManager.DrawLoopOutline(rect,
                     loop.ResolvedColor * loop.Opacity, loop.Radius, loop.Thickness,

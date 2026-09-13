@@ -47,6 +47,44 @@ namespace GustUI.Extensions
         }
 
         /// <summary>
+        /// Diagonal stripes filling <paramref name="rectangle"/>, CLIPPED to
+        /// it — the drawing half of <see cref="TVFillHatch"/>.
+        ///
+        /// Each stripe is one rotated quad, so a band the width of a bar costs
+        /// a few dozen quads and nothing is baked. The clip is the rectangle
+        /// itself, passed per-vertex the way every other geometry append does
+        /// it, which is what lets a stripe overhang the ends and simply stop
+        /// at them instead of needing a scissored container of its own.
+        /// </summary>
+        public static void DrawHatch(
+            this DrawManager manager, Rectangle rectangle, Color color,
+            float spacing, float thickness, float angle)
+        {
+            if (rectangle.Width <= 0 || rectangle.Height <= 0 || spacing <= 0.01f || thickness <= 0.01f)
+            {
+                return;
+            }
+
+            AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
+            Vector4 clip = manager.GetClipRectForGeometry(rectangle);
+
+            // Long enough to cross the box from any start on the bottom edge,
+            // whatever the angle: the diagonal plus a stripe's own width.
+            int length = rectangle.Width + rectangle.Height + (int)thickness;
+
+            // Start left of the box by its height, so the stripes that enter
+            // through the LEFT edge are drawn too rather than beginning
+            // abruptly at the corner.
+            for (float x = rectangle.Left - rectangle.Height; x < rectangle.Right; x += spacing)
+            {
+                var stripe = new Rectangle((int)x, rectangle.Bottom, length, (int)Math.Max(1f, thickness));
+                manager.GeometryBatch.AppendRotatedQuad(
+                    white.Texture, stripe, white.Pixels, color, angle,
+                    new Vector2(0, 0), clip, manager.CurrentBlend);
+            }
+        }
+
+        /// <summary>
         /// Filled circle, drawn as REAL vector geometry (a triangle fan plus
         /// a feathered edge strip) instead of a rasterized-once atlas
         /// bitmap — the direct fix for TextureAtlas-baked discs (KnobElement's

@@ -209,6 +209,61 @@ namespace GustUI.TraitValues
     }
 
     /// <summary>
+    /// DIAGONAL STRIPES — the universal "this stretch is not right", drawn
+    /// over whatever is already there.
+    ///
+    /// A flat tint cannot do this job: the sequencer already spends flat
+    /// washes on selection and on the playhead, and a third one reads as a
+    /// fourth kind of selection rather than as a problem. Stripes read as
+    /// hazard tape at any size and survive being drawn over a busy waveform,
+    /// which is exactly where this lands.
+    ///
+    /// Clipped to the element's own rectangle, so a stripe that runs off the
+    /// end is cut rather than spilling into the row above — that is what makes
+    /// this usable as an overlay rather than something needing its own
+    /// scissored container.
+    /// </summary>
+    public class TVFillHatch : TVFill
+    {
+        /// <summary>The stripes.</summary>
+        public Color Color { get; set; }
+
+        /// <summary>Optional flat wash UNDER them. Null draws stripes
+        /// alone, which is what an overlay usually wants.</summary>
+        public Color? Background { get; set; }
+
+        /// <summary>Gap between stripe starts along the top edge, in pixels.
+        /// The perpendicular gap is this times cos 45°.</summary>
+        public float Spacing { get; set; } = 10f;
+
+        public float Thickness { get; set; } = 3f;
+
+        /// <summary>Stripe angle in radians. The default leans the way a
+        /// forward slash does.</summary>
+        public float Angle { get; set; } = -Microsoft.Xna.Framework.MathHelper.PiOver4;
+
+        private readonly Func<Color> colorFunc;
+
+        public Color ResolvedColor => colorFunc != null ? colorFunc() : Color;
+
+        public TVFillHatch() { }
+
+        public TVFillHatch(Color color, float spacing = 10f, float thickness = 3f)
+        {
+            Color = color;
+            Spacing = spacing;
+            Thickness = thickness;
+        }
+
+        public TVFillHatch(Func<Color> colorFunc, float spacing = 10f, float thickness = 3f)
+        {
+            this.colorFunc = colorFunc;
+            Spacing = spacing;
+            Thickness = thickness;
+        }
+    }
+
+    /// <summary>
     /// A 1px ROUNDED OUTLINE with a pinch at each repeat boundary — how a
     /// sequencer block says where its pattern starts over (bug board #212).
     ///
