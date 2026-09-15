@@ -164,6 +164,7 @@ namespace GustUI.Elements
 
             };
             var more = menuItem.SubItems?.Count > 0;
+            activate = action;
             Set<SizeTrait>(new TVVector(width, RowHeight));
             highlightFill = new TVSmartFill
             {
@@ -289,6 +290,64 @@ namespace GustUI.Elements
                 Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Black * 0.3f));
             }
 
+        }
+
+        /// <summary>What a click on this row runs — held so the KEYBOARD can
+        /// run the same thing. Enter on a row and a click on it must do one
+        /// thing, not two implementations of one thing.</summary>
+        private Action<ClickEventArgs> activate;
+
+        /// <summary>The model this row was built from, for the popup's own
+        /// navigation: whether the row can be landed on, and whether it opens
+        /// onto something.</summary>
+        internal MenuItemModel Model => _menuItem;
+
+        /// <summary>Whether a keyboard can land on this row: a separator has
+        /// nothing to land on and a disabled row has nothing to do.</summary>
+        internal bool Selectable => _menuItem != null
+                                    && !string.IsNullOrEmpty(_menuItem.Text)
+                                    && _menuItem.Enabled;
+
+        internal bool HasSubmenu => _menuItem?.SubItems?.Count > 0;
+
+        /// <summary>Draws this row as though the pointer were on it — see
+        /// <see cref="TVSmartFill.ForceHovered"/>.</summary>
+        internal bool KeyboardHighlighted
+        {
+            get => highlightFill != null && highlightFill.ForceHovered;
+            set
+            {
+                if (highlightFill != null)
+                {
+                    highlightFill.ForceHovered = value;
+                }
+            }
+        }
+
+        /// <summary>Runs the row, exactly as a click would.</summary>
+        internal void Activate()
+        {
+            activate?.Invoke(new ClickEventArgs { Element = this });
+        }
+
+        /// <summary>
+        /// Opens this row's submenu from the keyboard, beside the row, and
+        /// hands it back so the caller can move into it.
+        ///
+        /// The same placement and the same ownership registration the pointer
+        /// path uses (<see cref="clickMore"/>) — a submenu opened by the right
+        /// arrow and one opened by dwelling on the row are the same submenu,
+        /// and one of them being a special case is how the two get out of step.
+        /// </summary>
+        internal FruitPopupMenu OpenSubmenuFromKeyboard()
+        {
+            if (!HasSubmenu)
+            {
+                return null;
+            }
+
+            clickMore(new ClickEventArgs { Element = this }, _menuItem.SubItems);
+            return popup;
         }
 
         /// <summary>Called by the popup this item lives on when it closes

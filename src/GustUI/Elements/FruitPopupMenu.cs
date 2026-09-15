@@ -1,5 +1,6 @@
 ﻿using GustUI.Elements.InputElements;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Input;
 using GustUI.Extensions;
 using GustUI.Models;
 using GustUI.Traits;
@@ -185,6 +186,7 @@ namespace GustUI.Elements
             }
 
             itemRows.Clear();
+            keyboardRow = -1;
 
             float ps = itemsTop;
             foreach (MenuItemModel item in menuItems)
@@ -363,6 +365,7 @@ namespace GustUI.Elements
             base.Update(parent);
 
             ApplySearch();
+            HandleKeys();
 
             // Self-clamp to the window (mirrors ModalWindowElement's own
             // screen-clamp) — a popup taller/wider than the space below/
@@ -446,6 +449,16 @@ namespace GustUI.Elements
             CloseSubmenu();
             submenuOwner = owner;
             submenu = opening;
+
+            // Told, rather than worked out from the element tree: a submenu is
+            // a child of the WINDOW (it has to be, to draw over everything),
+            // so there is nothing in its parentage that says which row it hangs
+            // off. The left arrow needs both.
+            if (opening != null)
+            {
+                opening.openedFrom = this;
+                opening.openedBy = owner;
+            }
         }
 
         /// <summary>
@@ -474,6 +487,201 @@ namespace GustUI.Elements
         {
             CloseSubmenu();
             base.Kill();
+        }
+
+        /// <summary>The popup this one is a submenu OF, and the row it hangs
+        /// off — set by <see cref="OpenSubmenu"/>. Null for a top-level
+        /// popup.</summary>
+        private FruitPopupMenu openedFrom;
+        private FruitMenuItem openedBy;
+
+        /// <summary>Which row the keyboard is on, or -1 for none. Nothing is
+        /// highlighted until an arrow key is pressed: a menu that opened with
+        /// its first row already lit looks like a menu that is about to do
+        /// something.</summary>
+        private int keyboardRow = -1;
+
+        private KeyboardState previousKeys;
+        private bool keysReady;
+
+        /// <summary>
+        /// Arrow-key navigation, for the DEEPEST open popup only.
+        ///
+        /// Down and Up move a highlight that looks exactly like a hover (see
+        /// TVSmartFill.ForceHovered), skipping separators and disabled rows.
+        /// Right opens a submenu and moves into it; Left closes one and comes
+        /// back out; Enter runs the row; Escape closes this level.
+        ///
+        /// LEFT AND RIGHT BELONG TO A SEARCH FIELD when there is one and it
+        /// has the focus, because that is where the caret lives and a caret
+        /// that cannot be moved is a box you cannot correct a typo in. Up,
+        /// Down, Enter and Escape are the menu's either way: in a single-line
+        /// field Up and Down only jump the caret to the ends, which is worth
+        /// less than moving down a list of results.
+        /// </summary>
+        private void HandleKeys()
+        {
+            KeyboardState keys = Resources.StaticResources.InputManager.CurrentKeyboardState;
+            KeyboardState was = previousKeys;
+            previousKeys = keys;
+
+            // The first frame has no "before" to compare against, and a key
+            // still held from whatever opened the menu is not a press in it.
+            if (!keysReady)
+            {
+                keysReady = true;
+                return;
+            }
+
+            // One level navigates at a time, and it is the innermost: a
+            // submenu is what the person is looking at.
+            if (submenu != null)
+            {
+                return;
+            }
+
+            bool Pressed(Keys key) => keys.IsKeyDown(key) && !was.IsKeyDown(key);
+
+            if (Pressed(Keys.Down))
+            {
+                MoveHighlight(+1);
+            }
+            else if (Pressed(Keys.Up))
+            {
+                MoveHighlight(-1);
+            }
+            else if (Pressed(Keys.Enter))
+            {
+                Activate();
+            }
+            else if (Pressed(Keys.Escape))
+            {
+                CloseLevel();
+            }
+            else if (Pressed(Keys.Right) && !TypingInSearch())
+            {
+                EnterSubmenu();
+            }
+            else if (Pressed(Keys.Left) && !TypingInSearch())
+            {
+                CloseLevel();
+            }
+        }
+
+        private bool TypingInSearch()
+            => search != null && Resources.StaticResources.InputManager.CurrentlyFocused == search;
+
+        /// <summary>Moves to the next row that can be landed on, wrapping at
+        /// the ends — a menu is a ring, and arrowing down past the last item to
+        /// reach the first is faster than arrowing back up through nine.</summary>
+        private void MoveHighlight(int step)
+        {
+            if (itemRows.Count == 0)
+            {
+                return;
+            }
+
+            int from = keyboardRow;
+            for (int n = 0; n < itemRows.Count; n++)
+            {
+                from = ((from + step) % itemRows.Count + itemRows.Count) % itemRows.Count;
+                if (itemRows[from].Item.Selectable)
+                {
+                    SetHighlight(from);
+                    return;
+                }
+            }
+        }
+
+        private void SetHighlight(int index)
+        {
+            for (int i = 0; i < itemRows.Count; i++)
+            {
+                itemRows[i].Item.KeyboardHighlighted = i == index;
+            }
+
+            keyboardRow = index;
+
+            // A highlight below the fold is one nobody can see.
+            if (index >= 0 && index < itemRows.Count)
+            {
+                float rowTop = itemRows[index].NaturalY;
+                float rowBottom = rowTop + FruitMenuItem.RowHeight;
+                float height = ElementTrait<SizeTrait>().Value().Y;
+
+                if (rowTop - scroll < itemsTop)
+                {
+                    ApplyScroll(rowTop - itemsTop);
+                }
+                else if (rowBottom - scroll > height)
+                {
+                    ApplyScroll(rowBottom - height);
+                }
+            }
+        }
+
+        private void Activate()
+        {
+            if (keyboardRow < 0 || keyboardRow >= itemRows.Count)
+            {
+                return;
+            }
+
+            FruitMenuItem row = itemRows[keyboardRow].Item;
+            if (row.HasSubmenu)
+            {
+                EnterSubmenu();
+                return;
+            }
+
+            row.Activate();
+        }
+
+        private void EnterSubmenu()
+        {
+            if (keyboardRow < 0 || keyboardRow >= itemRows.Count)
+            {
+                return;
+            }
+
+            FruitMenuItem row = itemRows[keyboardRow].Item;
+            FruitPopupMenu opened = row.OpenSubmenuFromKeyboard();
+
+            // Straight onto its first row: having asked for the submenu, the
+            // next arrow press should move WITHIN it rather than open it a
+            // second time.
+            opened?.MoveHighlight(+1);
+        }
+
+        /// <summary>Escape and Left: closes this level. A submenu hands the
+        /// highlight back to the row it came from; a top-level popup closes
+        /// the menu.</summary>
+        private void CloseLevel()
+        {
+            FruitPopupMenu parent = openedFrom;
+
+            if (parent == null)
+            {
+                Kill();
+                return;
+            }
+
+            parent.CloseSubmenu();
+            parent.RestoreHighlight(openedBy);
+        }
+
+        /// <summary>Puts the keyboard back on the row whose submenu just
+        /// closed.</summary>
+        private void RestoreHighlight(FruitMenuItem row)
+        {
+            for (int i = 0; i < itemRows.Count; i++)
+            {
+                if (ReferenceEquals(itemRows[i].Item, row))
+                {
+                    SetHighlight(i);
+                    return;
+                }
+            }
         }
 
         private void HandleWheel(ScrollEventArgs args)

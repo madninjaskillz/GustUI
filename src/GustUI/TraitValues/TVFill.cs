@@ -70,8 +70,26 @@ namespace GustUI.TraitValues
         /// falls back to the pre-existing instant snap rather than a wrong
         /// or partial animation.
         /// </summary>
+        /// <summary>
+        /// Draw as though the pointer were on it.
+        ///
+        /// For a row a KEYBOARD is on: arrowing down a menu has to look like
+        /// hovering down it, and it has to look like it in the same colours,
+        /// with the same crossfade, and — because ink is read off
+        /// <see cref="HighlightWeight"/> — with the same guarantee that the
+        /// label stays legible over the highlight. A second highlight
+        /// mechanism beside this one is two things to keep in step, and the
+        /// first thing to drift is the one nobody is looking at.
+        /// </summary>
+        public bool ForceHovered { get; set; }
+
         public TVFill Resolve(Managers.InputManager.ElementState state)
         {
+            if (ForceHovered && state == Managers.InputManager.ElementState.Normal)
+            {
+                state = Managers.InputManager.ElementState.Hovered;
+            }
+
             // Advanced BEFORE the gradients-only test below, so
             // <see cref="HighlightWeight"/> is honest even for a fill that
             // cannot itself crossfade — a caller colouring text off this
