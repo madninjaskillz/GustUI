@@ -208,7 +208,8 @@ namespace GustUI.Elements.InputElements
                 {
                     var theme = Resources.StaticResources.Theme;
                     placeholderElement = new TextElement { WordWrap = false };
-                    placeholderElement.Set<ForegroundColorTrait>(new TVColor(theme.BodyText * 0.45f));
+                    placeholderElement.Set<ForegroundColorTrait>(new TVColor(
+                        (ink == Color.Transparent ? theme.BodyText : ink) * 0.45f));
                     placeholderElement.Set<FontTrait>(Font);
                     placeholderElement.Set<PositionTrait>(new TVVector(PadX, 0));
                     placeholderElement.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment() { Alignment = HorizontalAlignment.Left });
@@ -310,6 +311,85 @@ namespace GustUI.Elements.InputElements
                 textElement.Set<FontTrait>(value);
                 placeholderElement?.Set<FontTrait>(value);
             }
+        }
+
+        /// <summary>
+        /// The colour the text, the caret and the placeholder are drawn in.
+        ///
+        /// Defaults to the theme's BodyText, which is right for a field on a
+        /// panel and wrong for one somewhere that is not a panel: a menu popup
+        /// is a light strip in both themes (Theme.MenuBarFillTop), so a field
+        /// dropped into one drew pale ink on pale chrome. A field should take
+        /// the ink of the thing it is sitting on, and only the thing it is
+        /// sitting on knows what that is.
+        ///
+        /// The placeholder follows at the same strength it always had, so a
+        /// prompt stays a prompt rather than becoming as loud as the answer.
+        /// </summary>
+        public Color Ink
+        {
+            get => ink;
+            set
+            {
+                ink = value;
+                textElement.Set<ForegroundColorTrait>(new TVColor(value));
+                caretElement.Set<BackgroundFillTrait>(new TVFillSolidColor(value));
+                placeholderElement?.Set<ForegroundColorTrait>(new TVColor(value * 0.45f));
+
+                foreach (TextElement line in lineElements)
+                {
+                    line.Set<ForegroundColorTrait>(new TVColor(value));
+                }
+            }
+        }
+
+        private Color ink = Color.Transparent;
+
+        /// <summary>
+        /// The box's own colours, for a field that is not sitting on a panel.
+        ///
+        /// Null means "the theme's", which is what every field in a dialog
+        /// wants. A field in MENU chrome does not: the popup it lives in is a
+        /// light strip in both themes, so the panel surfaces would put a dark
+        /// box on a pale menu — and the focus state would put it back even if
+        /// the caller had painted over the resting one, which is the shape of
+        /// bug this exists to make impossible.
+        ///
+        /// Four colours because focus is a state change you have to be able to
+        /// SEE, and the theme's own answer (a header fill and an accent border)
+        /// is tuned for its own surfaces.
+        /// </summary>
+        public Color? Surface { get => surface; set { surface = value; ApplySurface(); } }
+
+        public Color? SurfaceFocused { get => surfaceFocused; set { surfaceFocused = value; ApplySurface(); } }
+
+        public Color? BorderColour { get => borderColour; set { borderColour = value; ApplySurface(); } }
+
+        public Color? BorderFocusedColour { get => borderFocusedColour; set { borderFocusedColour = value; ApplySurface(); } }
+
+        private Color? surface;
+        private Color? surfaceFocused;
+        private Color? borderColour;
+        private Color? borderFocusedColour;
+
+        /// <summary>Paints the box for the state it is in — the one place the
+        /// resting and focused looks are decided, so the two handlers cannot
+        /// disagree with the caller or with each other.</summary>
+        private void ApplySurface()
+        {
+            var theme = Resources.StaticResources.Theme;
+
+            if (focused)
+            {
+                this.Set<BackgroundFillTrait>(new TVFillSolidColor(surfaceFocused ?? surface ?? theme.SurfaceHeader));
+                this.Set<BorderFillTrait>(new TVBorderColorFill(borderFocusedColour ?? theme.AccentSelection));
+                this.Set<BorderSizeTrait>(new TVInt(2));
+                return;
+            }
+
+            this.Set<BackgroundFillTrait>(new TVFillSolidColor(surface ?? theme.SurfaceRaised));
+            this.Set<BorderFillTrait>(new TVBorderColorFill(borderColour ?? theme.SurfaceBorder));
+            this.Set<BorderSizeTrait>(new TVInt(1));
         }
 
         /// <summary>
@@ -1483,12 +1563,9 @@ namespace GustUI.Elements.InputElements
         // even for someone not sensitive to the border color alone.
         private void OnFocusedHandler(TVEventArgs x)
         {
-            var theme = Resources.StaticResources.Theme;
-            this.Set<BackgroundFillTrait>(new TVFillSolidColor(theme.SurfaceHeader));
-            this.Set<BorderFillTrait>(new TVBorderColorFill(theme.AccentSelection));
-            this.Set<BorderSizeTrait>(new TVInt(2));
-
             focused = true;
+            ApplySurface();
+
             valueAtFocus = text;
             ResetUndo();
             caretClock.Restart();
@@ -1507,10 +1584,8 @@ namespace GustUI.Elements.InputElements
 
         private void OnUnfocusedHandler(TVEventArgs x)
         {
-            var theme = Resources.StaticResources.Theme;
-            this.Set<BackgroundFillTrait>(new TVFillSolidColor(theme.SurfaceRaised));
-            this.Set<BorderFillTrait>(new TVBorderColorFill(theme.SurfaceBorder));
-            this.Set<BorderSizeTrait>(new TVInt(1));
+            focused = false;
+            ApplySurface();
 
             focused = false;
             dragging = false;

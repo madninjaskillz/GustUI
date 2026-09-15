@@ -1,4 +1,5 @@
 ﻿using GustUI.Elements.InputElements;
+using Microsoft.Xna.Framework;
 using GustUI.Extensions;
 using GustUI.Models;
 using GustUI.Traits;
@@ -137,13 +138,33 @@ namespace GustUI.Elements
 
         private void BuildSearchRow()
         {
-            search = new TextFieldElement { MaxLength = 64, Text = "" };
-            search.Set<PositionTrait>(new TVVector(4, 4));
-            search.Set<SizeTrait>(new TVVector(rowWidth - 8, FruitMenuItem.RowHeight));
+            // A MENU ROW THAT HAPPENS TO TAKE TYPING. A TextFieldElement dresses
+            // itself for a dialog — SurfaceRaised with BodyText on it — and a
+            // popup is a LIGHT strip in both themes (see Theme.MenuBarFillTop),
+            // so the default look put a dark box with pale text at the top of a
+            // pale menu. Everything here is the palette the rows beside it use:
+            // the menu's own fill, black ink, MenuFont, and the row height that
+            // makes it line up with them.
+            search = new TextFieldElement
+            {
+                MaxLength = 64,
+                Text = "",
+                Placeholder = searchHint,
+                Font = Resources.StaticResources.Theme.MenuFont,
+            };
+
+            search.Set<PositionTrait>(new TVVector(SearchInset, SearchInset));
+            search.Set<SizeTrait>(new TVVector(rowWidth - (SearchInset * 2), FruitMenuItem.RowHeight));
+            Color menuFill = Resources.StaticResources.Theme.MenuBarFillBottom;
+            search.Surface = Color.Lerp(menuFill, Color.White, 0.5f);
+            search.SurfaceFocused = Color.White;
+            search.BorderColour = Color.Lerp(menuFill, Color.Black, 0.25f);
+            search.BorderFocusedColour = Resources.StaticResources.Theme.MenuHighlight;
+            search.Ink = Color.Black;
             search.FitText();
             AddChild(search, "menu search");
 
-            itemsTop = FruitMenuItem.RowHeight + 8;
+            itemsTop = FruitMenuItem.RowHeight + (SearchInset * 2);
             lastQuery = "";
 
             // FOCUSED ON OPEN, which is the whole point: the menu appears and
@@ -187,9 +208,33 @@ namespace GustUI.Elements
 
             }
 
+            // THE BOX DOES NOT MOVE WHILE YOU TYPE. Every keystroke changes how
+            // many results there are, and a popup that resized to fit them
+            // jumped under the pointer on each one — worse near the bottom of
+            // the window, where the on-screen clamp then slid it up as well.
+            // So the first layout fixes the height and every later one lives
+            // inside it: the list scrolls, the frame stays where it opened.
             naturalHeight = ps;
-            Set<SizeTrait>(new TVVector(rowWidth, ps));
+            if (search == null)
+            {
+                Set<SizeTrait>(new TVVector(rowWidth, ps));
+                return;
+            }
+
+            if (lockedHeight <= 0)
+            {
+                lockedHeight = ps;
+            }
+
+            Set<SizeTrait>(new TVVector(rowWidth, lockedHeight));
         }
+
+        /// <summary>The height a searchable popup keeps for its whole life —
+        /// whatever its unfiltered list needed. Zero until the first layout.</summary>
+        private float lockedHeight;
+
+        /// <summary>Margin around the search row, and what the items clear.</summary>
+        private const float SearchInset = 4f;
 
         /// <summary>
         /// Re-reads the search box and, when the query has changed, replaces
@@ -349,8 +394,12 @@ namespace GustUI.Elements
             // children, and scrolls (2026-08-23; File's dropdown crossed this
             // line at a modest window size and took Preferences with it).
             float available = Math.Max(80, windowSize.Y - topLimit - 8);
-            bool scrolls = naturalHeight > available;
-            float shownHeight = scrolls ? available : naturalHeight;
+
+            // A searchable popup keeps the height it opened at (see
+            // LayOutItems), so what it shows is that, capped to the window.
+            float wanted = search != null && lockedHeight > 0 ? lockedHeight : naturalHeight;
+            bool scrolls = Math.Max(naturalHeight, wanted) > available || naturalHeight > wanted;
+            float shownHeight = Math.Min(wanted, available);
 
             if (Math.Abs(size.Y - shownHeight) > 0.5f)
             {
