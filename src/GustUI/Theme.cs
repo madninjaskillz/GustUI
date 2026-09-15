@@ -289,6 +289,17 @@ namespace GustUI
         public Color CategorySource, CategoryEffects, CategoryModulation, CategoryUtility, CategoryComposite;
         public Color ElevationShadow;
 
+        /// <summary>The neutral CONTROL faces — an ordinary button or an
+        /// unlit toggle, as opposed to a surface behind content.
+        ///
+        /// The palette has carried these all along, but only reached call
+        /// sites as the ready-made <see cref="NeutralButtonFill"/> gradient,
+        /// which is no use to one that wants the FLAT colour: a small pill
+        /// button, a switch's off half. Those were therefore writing dark
+        /// literals and going near-black-on-near-black in Light (ezmuze #228).
+        /// Exposing the colour is what lets them stop.</summary>
+        public Color NeutralBase, NeutralHover, NeutralPress;
+
         public TVFill PositiveButtonFill;
         public TVFill NegativeButtonFill;
         public TVFill NeutralButtonFill;
@@ -380,6 +391,10 @@ namespace GustUI
             PositiveButtonFill = new TVFillSimpleGradient(p.PositiveBase, p.PositiveBase * 0.75f, Direction.Vertically);
             NegativeButtonFill = new TVFillSimpleGradient(p.NegativeBase, p.NegativeBase * 0.75f, Direction.Vertically);
             NeutralButtonFill = new TVFillSimpleGradient(p.NeutralBase, p.NeutralBase * 0.75f, Direction.Vertically);
+
+            NeutralBase = p.NeutralBase;
+            NeutralHover = p.NeutralHover;
+            NeutralPress = p.NeutralPress;
 
             // A MENU ROW'S HIGHLIGHT. Three things about this are load-bearing.
             //
