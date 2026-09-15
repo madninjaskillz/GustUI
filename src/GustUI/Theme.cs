@@ -148,7 +148,17 @@ namespace GustUI
         /// target's proportions and in a dense app reads as a menu shouting.
         /// The scale above governs prose and headings, not chrome this small.
         /// </summary>
-        public TVFont MenuFont = new() { Family = "segoeuisl.ttf", Size = 18, Border = 0 };
+        /// <summary>
+        /// The face menus are set in — the bar and every row of every dropdown.
+        ///
+        /// 16, down from 18 (2026-09-15). Menus are chrome: they are read at a
+        /// glance and then got out of the way of, and at 18 a dropdown was the
+        /// loudest type on a screen full of a person's own work. The width of a
+        /// menu did not change with it, which is the point — the same column now
+        /// holds about a tenth more characters, and a menu whose rows say where
+        /// a search result came from needs them.
+        /// </summary>
+        public TVFont MenuFont = new() { Family = "segoeuisl.ttf", Size = 16, Border = 0 };
 
         /// <summary>Segoe UI Bold (segoeuib.ttf) — the app's ONLY other font
         /// weight (everything else is Semilight): titles/headers that need

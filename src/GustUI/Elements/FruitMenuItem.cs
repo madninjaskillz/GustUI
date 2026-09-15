@@ -95,7 +95,7 @@ namespace GustUI.Elements
         /// shrinking the type alone would have left small text marooned in a
         /// tall row, which looks like a bug rather than like a smaller menu.
         /// </summary>
-        public const int RowHeight = 30;
+        public const int RowHeight = 27;
 
         /// <summary>The icon COLUMN's width — layout space, so every row's
         /// label starts at the same x whatever its glyph. Not the glyph's own
@@ -104,7 +104,7 @@ namespace GustUI.Elements
 
         /// <summary>
         /// The glyph's type size, matched to the label's (Theme.MenuFont is
-        /// 18) rather than to Theme.SymbolFont's own 24 (#40).
+        /// 16) rather than to Theme.SymbolFont's own 24 (#40).
         ///
         /// A symbol font is type, and 24pt icons beside 18pt text read as a
         /// row of oversized pictures with the words as an afterthought — the
@@ -112,14 +112,14 @@ namespace GustUI.Elements
         /// COLUMN stays 24 wide: that is alignment, and shrinking it would
         /// pull every label left for no reason.
         /// </summary>
-        private const int IconFontSize = 18;
+        private const int IconFontSize = 16;
 
         private const int LabelLeft = 38;
 
         /// <summary>The label's own inset from the top of the row. The icon
         /// takes the same one, so glyph and text sit on one line rather than
         /// the icon riding 2px high as it did while it was taller.</summary>
-        private const int RowTextTop = 5;
+        private const int RowTextTop = 4;
 
         /// <summary>Theme.SymbolFont's family at the label's size — the icon
         /// font this menu actually wants (#40).</summary>
