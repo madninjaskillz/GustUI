@@ -24,6 +24,14 @@ namespace GustUI.Extensions
                     Vector2 mx = Vector2.Zero;
                     foreach(var item in items)
                     {
+                        // A hidden child contributes no extent, or a container
+                        // would keep the space for something nobody can see
+                        // (#232).
+                        if (!item.Visible)
+                        {
+                            continue;
+                        }
+
                         var size = (item.Parent is VerticalStackElement ? Vector2.Zero : item.GetRelativePosition().AsXna) + item.GetSize().AsXna;
                         if (size.X > mx.X || size.Y > mx.Y)
                         {

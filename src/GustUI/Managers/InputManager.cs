@@ -1289,6 +1289,14 @@ namespace GustUI.Managers
 
         private static void CollectHovered(Element element, Vector2 position, Vector2 parentContribution, List<Element> into)
         {
+            // Invisible means unhittable, subtree included -- a hidden thing
+            // that still swallowed clicks would be worse than one that draws
+            // (#232).
+            if (!element.Visible)
+            {
+                return;
+            }
+
             PositionTrait positionTrait = element.CachedPositionTrait;
             SizeTrait sizeTrait = element.CachedSizeTrait;
             if (positionTrait == null || sizeTrait == null)

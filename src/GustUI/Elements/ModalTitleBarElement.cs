@@ -368,16 +368,22 @@ namespace GustUI.Elements
 
             accentUnderline?.Set<SizeTrait>(new TVVector(size.X, 2));
             accentUnderline?.Set<PositionTrait>(new TVVector(0, BarHeight - 2));
+            // Visible, NOT a zero size. Zeroing the button left its LABEL at
+            // its own 15px height with nothing clipping it, so a tabbed window
+            // drew a ghost maximise and close above the tab strip -- the same
+            // two glyphs the active tab was already drawing properly (#232).
             if (closable)
             {
+                closeButton.Visible = !ChromeHidden;
                 closeButton.Set<PositionTrait>(new TVVector(size.X - BarHeight, 0));
-                closeButton.Set<SizeTrait>(ChromeHidden ? new TVVector(0, 0) : new TVVector(BarHeight, BarHeight));
+                closeButton.Set<SizeTrait>(new TVVector(BarHeight, BarHeight));
             }
 
             if (hasMaximimizeButton)
             {
+                sizeButton.Visible = !ChromeHidden;
                 sizeButton.Set<PositionTrait>(new TVVector(size.X - RightChromeWidth, 0));
-                sizeButton.Set<SizeTrait>(ChromeHidden ? new TVVector(0, 0) : new TVVector(BarHeight, BarHeight));
+                sizeButton.Set<SizeTrait>(new TVVector(BarHeight, BarHeight));
                 sizeButton.Set<TextTrait>(((ModalWindowElement)Parent).isFullScreen ? Resources.StaticResources.Theme.Icons.MinimizeIcon.ToTextTrait() : Resources.StaticResources.Theme.Icons.MaximizeIcon.ToTextTrait());
             }
 

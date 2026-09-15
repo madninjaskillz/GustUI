@@ -36,6 +36,30 @@ public class Element : IDisposable
     }
     public bool SizeFitsChildren { get; set; } = false;
 
+    /// <summary>
+    /// Whether this element and its whole subtree take part in the frame.
+    /// False means: not drawn, not hoverable or clickable, and contributing
+    /// nothing to a <see cref="SizeFitsChildren"/> parent's extent.
+    ///
+    /// THIS EXISTS BECAUSE "HIDDEN" USED TO MEAN "0x0", AND THAT IS NOT THE
+    /// SAME THING (ezmuze #232). Zeroing an element's SizeTrait shrinks the
+    /// element, not its children: a button hidden that way still drew its
+    /// label, because the label has a size of its own and nothing clips it.
+    /// That put a ghost maximise and close above every tabbed window's tab
+    /// strip. Code that knew the trick did not work reached for the other
+    /// workaround instead and parked things at x = -10000, which draws and
+    /// hit-tests as normal, just somewhere nobody looks.
+    ///
+    /// Both are now spelled <c>Visible = false</c>, which actually means it.
+    ///
+    /// It is a FRAME-TIME flag, not a layout one: hiding does not move
+    /// anything, and showing again restores exactly what was there, so this
+    /// is the right tool for something that comes and goes (a drag ghost, a
+    /// preview overlay, chrome a tab strip has taken over) and the wrong one
+    /// for something that should never have been built.
+    /// </summary>
+    public bool Visible { get; set; } = true;
+
     [JsonIgnore]
     public Element Parent { get; set; } = null;
     private string elementName = null;
@@ -669,6 +693,13 @@ public class Element : IDisposable
     /// <summary>Draws one child.</summary>
     private static void DrawChild(Element child)
     {
+        // The whole subtree goes with it: returning here never reaches the
+        // child's own Draw, which is what walks ITS children (#232).
+        if (!child.Visible)
+        {
+            return;
+        }
+
         Rendering.GeometryBatch batch = Resources.StaticResources.DrawManager.GeometryBatch;
 
         // Opacity MULTIPLIES down the tree and is restored afterwards, the same

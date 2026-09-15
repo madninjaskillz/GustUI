@@ -25,7 +25,7 @@ namespace GustUI.Elements
                 return;
             }
 
-            overlay = new FilledRectangleElement(-10000, 0, 0, 0,
+            overlay = new FilledRectangleElement(0, 0, 0, 0,
                 new TVFillSolidColor(() => Resources.StaticResources.Theme.AccentSelection * 0.35f),
                 2, Resources.StaticResources.Theme.AccentSelection);
             overlay.Depth = DockPreviewOverlay.Depth;
@@ -35,6 +35,7 @@ namespace GustUI.Elements
         public static void Show(Vector2 position, Vector2 size)
         {
             Ensure();
+            overlay.Visible = true;
             overlay.ElementTrait<PositionTrait>().Set(new TVVector(position));
             overlay.ElementTrait<SizeTrait>().Set(new TVVector(size));
         }
@@ -46,8 +47,10 @@ namespace GustUI.Elements
                 return;
             }
 
-            overlay.ElementTrait<PositionTrait>().Set(new TVVector(-10000, 0));
-            overlay.ElementTrait<SizeTrait>().Set(new TVVector(0, 0));
+            // Both belt and braces at once until 2026-09-16: parked offscreen
+            // AND zeroed, because neither on its own was trusted to hide it
+            // (#232). One flag says it.
+            overlay.Visible = false;
         }
     }
 }
