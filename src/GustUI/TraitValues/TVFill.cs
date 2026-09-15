@@ -115,8 +115,8 @@ namespace GustUI.TraitValues
             }
 
             float sum = Math.Max(0.0001f, weightNormal + weightHovered + weightPressed);
-            Color primary = BlendColor(normalG.PrimaryColor, hoverG.PrimaryColor, pressG.PrimaryColor, sum);
-            Color secondary = BlendColor(normalG.SecondaryColor, hoverG.SecondaryColor, pressG.SecondaryColor, sum);
+            Color primary = BlendColor(normalG.ResolvedPrimary, hoverG.ResolvedPrimary, pressG.ResolvedPrimary, sum);
+            Color secondary = BlendColor(normalG.ResolvedSecondary, hoverG.ResolvedSecondary, pressG.ResolvedSecondary, sum);
             return new TVFillSimpleGradient(primary, secondary, normalG.Direction);
 
             Color BlendColor(Color a, Color b, Color c, float weightSum)
@@ -427,10 +427,37 @@ namespace GustUI.TraitValues
         public Color SecondaryColor { get; }
         public Direction Direction { get; }
 
+        /// <summary>Optional live-computed alternatives to the two colours —
+        /// set via the <c>Func&lt;Color&gt;</c> constructor, the same escape
+        /// hatch <see cref="TVFillSolidColor"/> and
+        /// <see cref="TVFillRoundedColor"/> already had and this one did not.
+        ///
+        /// A gradient built from theme tokens with the plain constructor bakes
+        /// whatever the palette said at construction, so it keeps the old
+        /// colours through a light/dark switch while everything around it
+        /// changes — which is exactly what Theme.SetMode's summary promises
+        /// will NOT happen (ezmuze #231). Readers take
+        /// <see cref="ResolvedPrimary"/>/<see cref="ResolvedSecondary"/>, which
+        /// are evaluated fresh every frame.</summary>
+        private readonly Func<Color> primaryFunc;
+
+        private readonly Func<Color> secondaryFunc;
+
+        public Color ResolvedPrimary => primaryFunc != null ? primaryFunc() : PrimaryColor;
+
+        public Color ResolvedSecondary => secondaryFunc != null ? secondaryFunc() : SecondaryColor;
+
         public TVFillSimpleGradient(Color primary, Color secondary, Direction direction)
         {
             PrimaryColor = primary;
             SecondaryColor = secondary;
+            Direction = direction;
+        }
+
+        public TVFillSimpleGradient(Func<Color> primary, Func<Color> secondary, Direction direction)
+        {
+            primaryFunc = primary;
+            secondaryFunc = secondary;
             Direction = direction;
         }
     }

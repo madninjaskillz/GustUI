@@ -32,8 +32,35 @@ namespace GustUI.Elements
         /// where the thumb visually ended up.</summary>
         public float ClickThresholdPixels { get; set; } = 4f;
 
-        public Color OnColor { get; set; } = new Color(90, 170, 250);
-        public Color OffColor { get; set; } = new Color(70, 70, 84);
+        private Func<Color> onColorFunc;
+        private Func<Color> offColorFunc;
+        private Color onColorStored = new Color(90, 170, 250);
+        private Color offColorStored = new Color(70, 70, 84);
+
+        /// <summary>The track's lit and unlit colours. Reading these RESOLVES:
+        /// if a Source was given, the func runs, otherwise the stored colour
+        /// comes back — so Draw can keep saying OnColor/OffColor and a themed
+        /// switch still follows a light/dark change (ezmuze #231). Assigning a
+        /// plain Color clears any Source, because the last thing a caller set
+        /// is what it means.</summary>
+        public Color OnColor
+        {
+            get => onColorFunc != null ? onColorFunc() : onColorStored;
+            set { onColorStored = value; onColorFunc = null; }
+        }
+
+        public Color OffColor
+        {
+            get => offColorFunc != null ? offColorFunc() : offColorStored;
+            set { offColorStored = value; offColorFunc = null; }
+        }
+
+        /// <summary>Live alternatives to the two above — pass
+        /// <c>() =&gt; Theme.Whatever</c> and the switch tracks the theme for
+        /// the life of the element, with no rebuild.</summary>
+        public Func<Color> OnColorSource { set => onColorFunc = value; }
+
+        public Func<Color> OffColorSource { set => offColorFunc = value; }
         public Color ThumbColor { get; set; } = Color.White;
 
         /// <summary>
@@ -98,8 +125,8 @@ namespace GustUI.Elements
             // Default on/off colors track the live theme (design-guide.md §1)
             // — call sites that want a specific accent (e.g. Stack's
             // ControlAccent) still override these after construction.
-            OnColor = Resources.StaticResources.Theme.AccentSelection;
-            OffColor = Resources.StaticResources.Theme.SurfaceBorder;
+            OnColorSource = () => Resources.StaticResources.Theme.AccentSelection;
+            OffColorSource = () => Resources.StaticResources.Theme.SurfaceBorder;
 
             ElementTrait<OnMousePress>().Set(new TVEvent<ClickEventArgs>(args =>
             {

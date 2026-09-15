@@ -45,7 +45,7 @@ public class RectangleElement : Element
             {
                 Resources.StaticResources.DrawManager.DrawRectangle(
                     new Rectangle(actualPosition.X.AsInt(), actualPosition.Y.AsInt(), size.X.AsInt(), size.Y.AsInt()),
-                    borderColorFill.Color, borderSize);
+                    borderColorFill.ResolvedColor, borderSize);
             }
         }
 

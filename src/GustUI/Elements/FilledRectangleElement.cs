@@ -1,4 +1,5 @@
-﻿using GustUI.Attributes;
+﻿using System;
+using GustUI.Attributes;
 using GustUI.Extensions;
 using GustUI.Traits;
 using GustUI.TraitValues;
@@ -18,6 +19,26 @@ public class FilledRectangleElement : RectangleElement
     {
         backgroundFillTrait = ElementTrait<BackgroundFillTrait>();
     }
+    /// <summary>As the <see cref="Color"/> overload, but the border colour is
+    /// read every frame. For a border taken from the theme: a baked one keeps
+    /// the palette it was built under across a light/dark switch (#231).</summary>
+    public FilledRectangleElement(int left, int top, int width, int height, TVFill fill, int border, Func<Color> borderColor)
+        : this()
+    {
+        Set<PositionTrait>(new TVVector(left, top));
+        Set<SizeTrait>(new TVVector(width, height));
+        Set<BackgroundFillTrait>(fill);
+
+        if (border > 0)
+        {
+            Set<BorderSizeTrait>(new TVInt(border));
+            if (borderColor != null)
+            {
+                Set<BorderFillTrait>(new TVBorderColorFill(borderColor));
+            }
+        }
+    }
+
     public FilledRectangleElement(int left, int top, int width, int height, TVFill fill, int border = 0, Color? borderColor = null)
         : this()
     {
@@ -106,7 +127,7 @@ public class FilledRectangleElement : RectangleElement
                 break;
             case TVFillSimpleGradient gradient:
                 Resources.StaticResources.DrawManager.DrawFilledRectangleGradient(
-                    rect, gradient.PrimaryColor * gradient.Opacity, gradient.SecondaryColor * gradient.Opacity, gradient.Direction);
+                    rect, gradient.ResolvedPrimary * gradient.Opacity, gradient.ResolvedSecondary * gradient.Opacity, gradient.Direction);
                 break;
             case TVVideoFill video:
                 // Tagged (not just inline) because there's no occlusion
