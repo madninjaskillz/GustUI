@@ -1,4 +1,5 @@
-﻿using GustUI.Extensions;
+﻿using GustUI.Elements.InputElements;
+using GustUI.Extensions;
 using GustUI.Models;
 using GustUI.Traits;
 using GustUI.TraitValues;
@@ -67,11 +68,45 @@ namespace GustUI.Elements
         /// the button that just opened it.</summary>
         private readonly Element trigger;
 
+        /// <summary>
+        /// The search field, when this popup was asked for one, and the items
+        /// it filters. A menu with a hundred entries behind three levels of
+        /// submenu is a menu people stop reading; typing is how they ask it a
+        /// question instead.
+        /// </summary>
+        private TextFieldElement search;
+        private List<MenuItemModel> unfilteredItems;
+        private string searchHint = "";
+        private string lastQuery;
+
+        /// <summary>Most results shown at once. Past this the list is longer
+        /// than the window, and the query is the thing to narrow rather than
+        /// the scroll.</summary>
+        private const int MaxResults = 40;
+
         public FruitPopupMenu(List<MenuItemModel> items, int width, Element trigger = null)
+            : this(items, width, trigger, searchable: false, searchHint: null)
+        {
+        }
+
+        /// <summary>
+        /// A popup with a SEARCH ROW at the top, focused the moment it opens.
+        ///
+        /// Typing replaces the list with every leaf item that matches --
+        /// including the ones inside submenus, labelled with the trail that
+        /// leads to them ("With Module > Bass > Reese"). Clearing the box puts
+        /// the menu back exactly as it was. The point is that a nested menu
+        /// stops being somewhere you navigate and becomes somewhere you can
+        /// ask: a person who knows they want "Reese" should not have to
+        /// remember first whether it is a module, a template or a pack group.
+        /// </summary>
+        public FruitPopupMenu(List<MenuItemModel> items, int width, Element trigger, bool searchable, string searchHint = null)
         {
             this.trigger = trigger;
             Depth = PopupDepth;
             menuItems = items;
+            unfilteredItems = items;
+            this.searchHint = searchHint ?? "Search...";
             Set<SizeTrait>(new TVVector(width, FruitMenuItem.RowHeight * items.Count));
             Set<PositionTrait>(new TVVector(0, 0));
             // Same translucent chrome family as the fruit menu bar it extends
@@ -82,10 +117,58 @@ namespace GustUI.Elements
                 Resources.StaticResources.Theme.MenuBarFillBottom,
                 Direction.Vertically));
 
-            float ps = 0;
+            this.rowWidth = width;
+
+            if (searchable)
+            {
+                BuildSearchRow();
+            }
+
+            LayOutItems();
+
+            Set<OnScrollWheelChanged>(new TVEvent<ScrollEventArgs>(HandleWheel));
+        }
+
+        private int rowWidth;
+
+        /// <summary>Y the items start at: under the search row when there is
+        /// one.</summary>
+        private float itemsTop;
+
+        private void BuildSearchRow()
+        {
+            search = new TextFieldElement { MaxLength = 64, Text = "" };
+            search.Set<PositionTrait>(new TVVector(4, 4));
+            search.Set<SizeTrait>(new TVVector(rowWidth - 8, FruitMenuItem.RowHeight));
+            search.FitText();
+            AddChild(search, "menu search");
+
+            itemsTop = FruitMenuItem.RowHeight + 8;
+            lastQuery = "";
+
+            // FOCUSED ON OPEN, which is the whole point: the menu appears and
+            // you are already typing into it. Through the InputManager rather
+            // than a flag on the field, because focus is one thing for the
+            // whole UI and two ideas of who has it is how a keystroke ends up
+            // somewhere nobody is looking.
+            Resources.StaticResources.InputManager.SetFocus(search);
+        }
+
+        /// <summary>Places (or re-places) one row per item under the search
+        /// row, and sizes the popup to fit.</summary>
+        private void LayOutItems()
+        {
+            foreach ((FruitMenuItem row, float _) in itemRows)
+            {
+                row.Kill();
+            }
+
+            itemRows.Clear();
+
+            float ps = itemsTop;
             foreach (MenuItemModel item in menuItems)
             {
-                FruitMenuItem i = new FruitMenuItem(item,width: width);
+                FruitMenuItem i = new FruitMenuItem(item, width: rowWidth);
 
                 this.AddChild(i, "fruit item");
 
@@ -105,9 +188,109 @@ namespace GustUI.Elements
             }
 
             naturalHeight = ps;
-            Set<SizeTrait>(new TVVector(width, ps));
+            Set<SizeTrait>(new TVVector(rowWidth, ps));
+        }
 
-            Set<OnScrollWheelChanged>(new TVEvent<ScrollEventArgs>(HandleWheel));
+        /// <summary>
+        /// Re-reads the search box and, when the query has changed, replaces
+        /// the list with the matches.
+        ///
+        /// Polled rather than driven by a change event because a text field
+        /// reports what it holds and nothing else. It runs once a frame and
+        /// does nothing at all while the string is the same.
+        /// </summary>
+        private void ApplySearch()
+        {
+            if (search == null)
+            {
+                return;
+            }
+
+            string query = (search.Text ?? "").Trim();
+            if (string.Equals(query, lastQuery, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            lastQuery = query;
+            CloseSubmenu();
+
+            if (query.Length == 0)
+            {
+                menuItems = unfilteredItems;
+                LayOutItems();
+                return;
+            }
+
+            var results = new List<MenuItemModel>();
+            Collect(unfilteredItems, "", query, results);
+
+            if (results.Count == 0)
+            {
+                results.Add(new MenuItemModel { Text = "No matches", Enabled = false });
+            }
+
+            menuItems = results;
+            LayOutItems();
+        }
+
+        /// <summary>
+        /// Every leaf under <paramref name="items"/> that matches, labelled
+        /// with the trail that leads to it.
+        ///
+        /// A SUBMENU MATCHES THROUGH ITS CHILDREN. Only a leaf knows what it
+        /// does, so a heading whose own name matches contributes its children
+        /// rather than itself -- an entry that did nothing when picked would
+        /// be worse than no entry. The trail is part of what is matched, so
+        /// typing the heading finds everything under it.
+        /// </summary>
+        private static void Collect(List<MenuItemModel> items, string trail, string query, List<MenuItemModel> into)
+        {
+            if (items == null)
+            {
+                return;
+            }
+
+            foreach (MenuItemModel item in items)
+            {
+                if (into.Count >= MaxResults)
+                {
+                    return;
+                }
+
+                string text = item?.Text ?? "";
+                if (text.Length == 0)
+                {
+                    continue;   // a separator has nothing to match
+                }
+
+                string here = trail.Length == 0 ? text : trail + " \u203a " + text;
+
+                if (item.SubItems != null && item.SubItems.Count > 0)
+                {
+                    Collect(item.SubItems, here, query, into);
+                    continue;
+                }
+
+                if (item.Action == null)
+                {
+                    continue;   // a label is not a destination
+                }
+
+                if (here.IndexOf(query, StringComparison.CurrentCultureIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                into.Add(new MenuItemModel
+                {
+                    Text = here,
+                    Icon = item.Icon,
+                    Action = item.Action,
+                    Enabled = item.Enabled,
+                    Shortcut = item.Shortcut,
+                });
+            }
         }
 
         // Guards against the popup closing on the SAME click that opened it.
@@ -133,6 +316,8 @@ namespace GustUI.Elements
         public override void Update(Element parent = null)
         {
             base.Update(parent);
+
+            ApplySearch();
 
             // Self-clamp to the window (mirrors ModalWindowElement's own
             // screen-clamp) — a popup taller/wider than the space below/
