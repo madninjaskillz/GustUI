@@ -527,6 +527,13 @@ namespace GustUI.Elements
         /// <summary>Shows the tab at <paramref name="index"/> — its content
         /// becomes the window's body, which is what makes every sizing and
         /// scrolling rule below apply to whichever tab is on screen.</summary>
+        /// <summary>Where the active tab's content is parented — the scroll
+        /// viewport when this window scrolls its content, otherwise the window
+        /// itself. One definition, because ActivateTab now both removes from
+        /// and adds to it.</summary>
+        private Element ContentHost()
+            => contentScrolls && scrollViewport != null ? scrollViewport : (Element)this;
+
         private void ActivateTab(int index)
         {
             if (index < 0 || index >= tabs.Count)
@@ -544,25 +551,48 @@ namespace GustUI.Elements
             // takes focus back after something else raised its own scope.
             Resources.StaticResources?.InputManager?.RaiseHookScope(tabs[index].HookScope);
 
-            if (ReferenceEquals(outgoing, content))
+            // EVERY OTHER TAB'S CONTENT COMES OUT, not just the one this call
+            // happens to be replacing (ezmuze #233).
+            //
+            // Detaching only `outgoing` trusted a single reference to be the
+            // whole truth about what is attached, and it is not: a view that
+            // rebuilds its own shell swaps its content element out from under
+            // this field, and a merge can arrive while the window already
+            // holds something it did not put there. The Stack and the pattern
+            // explorer ended up with BOTH views live in one slot, drawn
+            // through each other, and the one underneath took no clicks --
+            // exactly overlapping controls mean the topmost wins regardless
+            // of which tab is selected.
+            //
+            // Stating the invariant is cheaper than chasing the ways it
+            // breaks: after this runs, the active tab's content is in the
+            // tree and no other tab's is. Detach rather than kill, so an
+            // inactive tab's view keeps all its state and is simply not in
+            // the tree.
+            foreach (Tab other in tabs)
             {
-                SwapChromeTo(tabs[index]);
-                RefreshTabStrip();
-                return;
+                if (!ReferenceEquals(other.Content, content))
+                {
+                    other.Content?.Parent?.Children?.Remove(other.Content);
+                }
             }
 
-            // Detach rather than kill: an inactive tab's view stays alive with
-            // all its state, it simply is not in the tree.
-            outgoing?.Parent?.Children?.Remove(outgoing);
+            if (outgoing != null && !ReferenceEquals(outgoing, content))
+            {
+                outgoing.Parent?.Children?.Remove(outgoing);
+            }
 
-            if (contentScrolls && scrollViewport != null)
-            {
-                scrollViewport.AddChild(content, "content");
-            }
-            else
-            {
-                AddChild(content, "content");
-            }
+            // REMOVE THEN ADD, UNCONDITIONALLY, and never branch on Parent:
+            // Children.Remove does not null the child's Parent, so a detached
+            // element still names the list it used to be in. Reading that as
+            // "already attached" is how the first cut of this fix emptied the
+            // panel completely -- it detached everything, believed the active
+            // content was still in place, and added nothing back.
+            //
+            // The remove is what keeps it out of a shell it was merged from;
+            // the add is what the original code did every time anyway.
+            content.Parent?.Children?.Remove(content);
+            ContentHost().AddChild(content, "content");
 
             content.Set<PositionTrait>(new TVVector(0, ContentTop));
             SwapChromeTo(tabs[index]);
