@@ -90,6 +90,33 @@ public class WaveformElement : Element
 
     public int GhostWidthPx { get; set; } = 32;
 
+    /// <summary>
+    /// Where playback has reached through this waveform, 0..1. Negative (the
+    /// default) draws no playhead at all, which is every waveform that is not
+    /// currently being auditioned.
+    ///
+    /// A fraction of the ELEMENT rather than of the data, so it is right
+    /// whatever <see cref="TileCount"/> is: the host knows how far through the
+    /// sound it is, and this is how far across the picture that falls.
+    /// </summary>
+    public float PlayheadFraction { get; set; } = -1f;
+
+    public Color PlayheadColor { get; set; } = Color.White * 0.85f;
+
+    /// <summary>
+    /// Laid over the part of the waveform playback has NOT reached yet, so
+    /// what is left to hear reads as quieter than what has gone. Transparent
+    /// (the default) dims nothing.
+    ///
+    /// A scrim rather than a second, dimmer pass of the waveform itself:
+    /// re-drawing the geometry for the unplayed remainder would mean choosing
+    /// a mip and triangulating twice per frame for an effect that is a flat
+    /// wash, and it would not dim the host's own tile background showing
+    /// through the quiet parts — which is exactly the part that makes the
+    /// unplayed end look unplayed.
+    /// </summary>
+    public Color UnplayedScrim { get; set; } = Color.Transparent;
+
     public override void Draw()
     {
         using (Managers.Telemetry.Scope("Draw.Waveform"))
@@ -184,10 +211,38 @@ public class WaveformElement : Element
                         }
                     }
                 }
+
+                DrawPlayhead(manager, pos, totalWidth, height);
             }
         }
 
         base.Draw();
+    }
+
+    /// <summary>The audition marker: everything ahead of it washed out, and a
+    /// hairline at the point itself. Drawn after the tiles so it sits over
+    /// them, and outside the data check's inner loop because it is one pair of
+    /// rectangles however many tiles there are.</summary>
+    private void DrawPlayhead(Managers.DrawManager manager, Vector2 pos, int totalWidth, int height)
+    {
+        if (PlayheadFraction < 0f)
+        {
+            return;
+        }
+
+        int at = (int)(totalWidth * MathHelper.Clamp(PlayheadFraction, 0f, 1f));
+
+        if (UnplayedScrim.A > 0 && at < totalWidth)
+        {
+            manager.DrawFilledRectangle(
+                new Rectangle((int)pos.X + at, (int)pos.Y, totalWidth - at, height), UnplayedScrim);
+        }
+
+        if (PlayheadColor.A > 0 && at < totalWidth)
+        {
+            manager.DrawFilledRectangle(
+                new Rectangle((int)pos.X + at, (int)pos.Y, 1, height), PlayheadColor);
+        }
     }
 
     private static void DrawGeometry(
