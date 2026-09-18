@@ -144,7 +144,12 @@ namespace GustUI.Managers
             '\u2026',  // ellipsis
             '\u2039', '\u203A',  // single angle quotes, used for breadcrumbs
             '\u00AB', '\u00BB',  // double angle quotes
-            '\u2192',  // rightwards arrow
+            '\u2190', '\u2192',  // arrows, both of them: a DAW's trigger
+                                 // lane says "reads 1 bar back" and
+                                 // "reads 1 bar ahead", and half a pair
+                                 // renders as a distance with no
+                                 // direction, which is worse than
+                                 // neither.
 
             // NOT here, and deliberately: the geometric triangles
             // (U+25B4/BE/B8/C2) and the warning sign (U+26A0). Segoe UI
