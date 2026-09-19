@@ -71,6 +71,22 @@ public class WaveformElement : Element
     public float LastTileFraction { get; set; } = 1f;
 
     /// <summary>
+    /// Where in <see cref="Data"/> the FIRST tile starts, 0..1 (0 = its
+    /// beginning, the unchanged default). The whole span —
+    /// <see cref="TileCount"/> − 1 + <see cref="LastTileFraction"/> tiles —
+    /// is then laid out from that point: the first tile shows the trailing
+    /// part of the data from here, every later one starts from the top, and
+    /// the last one ends wherever the span runs out.
+    ///
+    /// For a clip whose content does not begin at the start of its tile: one
+    /// whose content has been slipped, or whose front has been trimmed
+    /// (ezmuze-studio, 2026-09-19). Without it the picture always begins at
+    /// the top of the source while the sound begins part-way in, so the
+    /// waveform and what plays disagree by exactly the slip.
+    /// </summary>
+    public float FirstTileStartFraction { get; set; }
+
+    /// <summary>
     /// Optional decay-tail "ghost" waveform (ezmuze-studio pattern
     /// render-cache rearchitecture, item 5): drawn at reduced opacity
     /// (<see cref="GhostTint"/>) immediately after each INTERNAL tile
@@ -145,6 +161,15 @@ public class WaveformElement : Element
 
                 int tiles = Math.Max(1, TileCount);
                 float lastFraction = MathHelper.Clamp(LastTileFraction, 0f, 1f);
+                float startFraction = MathHelper.Clamp(FirstTileStartFraction, 0f, 0.9999f);
+                if (startFraction > 0f)
+                {
+                    DrawWindowed(manager, data, pos, totalWidth, height,
+                        Math.Max(0.0001f, tiles - 1 + lastFraction), startFraction);
+                    DrawPlayhead(manager, pos, totalWidth, height);
+                    base.Draw();
+                    return;
+                }
 
                 // Tile widths are proportional to the SPAN, not the count: a
                 // 3.25-tile block gives three full tiles and a quarter-width
@@ -217,6 +242,86 @@ public class WaveformElement : Element
         }
 
         base.Draw();
+    }
+
+    /// <summary>
+    /// The span laid out from <paramref name="start"/> into the data (see
+    /// <see cref="FirstTileStartFraction"/>): a list of source windows, each
+    /// drawn in a slot as wide as the window is long, so one full tile is the
+    /// same width everywhere. Kept apart from the unshifted loop above so that
+    /// path — every clip with no slip, which is nearly all of them — is
+    /// untouched.
+    /// </summary>
+    private void DrawWindowed(Managers.DrawManager manager, WaveformData data, Vector2 pos,
+        int totalWidth, int height, float span, float start)
+    {
+        float tileWidth = totalWidth / span;
+        int level = data.SelectLevel(Math.Max(1, (int)tileWidth));
+        int ghostLevel = GhostData != null ? GhostData.SelectLevel(Math.Max(1, GhostWidthPx)) : 0;
+
+        float at = start;
+        float remaining = span;
+        int drawnWidth = 0;
+        while (remaining > 0.00001f && drawnWidth < totalWidth)
+        {
+            float take = Math.Min(1f - at, remaining);
+            remaining -= take;
+            bool last = remaining <= 0.00001f;
+            int thisWidth = last ? totalWidth - drawnWidth : Math.Min(totalWidth - drawnWidth, (int)Math.Round(take * tileWidth));
+            var rect = new Rectangle((int)pos.X + drawnWidth, (int)pos.Y, thisWidth, height);
+            drawnWidth += thisWidth;
+
+            if (thisWidth > 0)
+            {
+                float end = at + take;
+                if (RenderMode == WaveformRenderMode.Geometry)
+                {
+                    (VertexPositionColor[] v, short[] i, int p) = data.BuildGeometry(level, rect, Tint, end, at);
+                    manager.DrawTriangles(v, i, p);
+                }
+                else if (RenderMode == WaveformRenderMode.Columns)
+                {
+                    DrawColumnsWindow(manager, data.LevelData(level), rect, Tint, at, end);
+                }
+                else
+                {
+                    (GeometryVertex[] v, short[] i, int p) = data.GetGeometryVertices(level, rect.Width, rect.Height, end, at);
+                    manager.DrawCachedTriangles(v, i, p, new Vector2(rect.X, rect.Y), Tint);
+                }
+            }
+
+            // A tail rings into the next pass wherever a pass ends inside the
+            // element, exactly as between whole tiles.
+            if (GhostData != null && !last && at + take >= 0.99999f)
+            {
+                int ghostWidth = Math.Min(GhostWidthPx, totalWidth - drawnWidth);
+                if (ghostWidth > 0)
+                {
+                    var ghostRect = new Rectangle((int)pos.X + drawnWidth, (int)pos.Y, ghostWidth, height);
+                    (GeometryVertex[] v, short[] i, int p) = GhostData.GetGeometryVertices(ghostLevel, ghostRect.Width, ghostRect.Height);
+                    manager.DrawCachedTriangles(v, i, p, new Vector2(ghostRect.X, ghostRect.Y), GhostTint);
+                }
+            }
+
+            at = 0f;
+        }
+    }
+
+    private static void DrawColumnsWindow(
+        Managers.DrawManager manager, float[] minMax, Rectangle rect, Color tint, float from, float to)
+    {
+        int total = minMax.Length / 2;
+        int first = Math.Clamp((int)Math.Floor(total * from), 0, total - 1);
+        int columns = Math.Clamp((int)Math.Round(total * to), first + 1, total) - first;
+        for (int x = 0; x < rect.Width; x++)
+        {
+            int c = first + (int)((long)x * columns / rect.Width);
+            float top = (1f - MathHelper.Clamp(minMax[c * 2 + 1], -1f, 1f)) * 0.5f * rect.Height;
+            float bottom = (1f - MathHelper.Clamp(minMax[c * 2], -1f, 1f)) * 0.5f * rect.Height;
+            int y0 = (int)top;
+            int y1 = Math.Max(y0 + 1, (int)Math.Ceiling(bottom));
+            manager.DrawFilledRectangle(new Rectangle(rect.X + x, rect.Y + y0, 1, Math.Min(y1, rect.Height) - y0), tint);
+        }
     }
 
     /// <summary>The audition marker: everything ahead of it washed out, and a

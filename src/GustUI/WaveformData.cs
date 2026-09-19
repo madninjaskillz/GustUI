@@ -201,13 +201,23 @@ namespace GustUI
         /// "tile face" concept — draw the block's own fill separately).
         /// </summary>
         public (VertexPositionColor[] Vertices, short[] Indices, int PrimitiveCount) BuildGeometry(
-            int level, Rectangle rect, Color tint, float sourceFraction = 1f)
+            int level, Rectangle rect, Color tint, float sourceFraction = 1f, float sourceStart = 0f)
         {
             float[] minMax = levels[level];
             int columns = minMax.Length / 2;
             if (columns < 1 || rect.Width <= 0 || rect.Height <= 0)
             {
                 return (Array.Empty<VertexPositionColor>(), Array.Empty<short>(), 0);
+            }
+
+            // A window that starts part-way in (sourceStart > 0): the columns
+            // from there to sourceFraction, spread across the whole rect —
+            // the TRAILING end of a tile, which is what a clip whose content
+            // is slipped (or front-trimmed) shows first.
+            int first = 0;
+            if (sourceStart > 0f)
+            {
+                first = Math.Clamp((int)Math.Floor(columns * sourceStart), 0, columns - 1);
             }
 
             // A PARTIAL draw: only the leading sourceFraction of the data,
@@ -218,7 +228,7 @@ namespace GustUI
             // the pattern four times as fast". At least one column survives,
             // so a vanishingly thin sliver still reads as a waveform rather
             // than disappearing.
-            columns = Math.Clamp((int)Math.Round(columns * sourceFraction), 1, columns);
+            columns = Math.Clamp((int)Math.Round(columns * sourceFraction), first + 1, columns) - first;
 
             // short indices (DrawManager.DrawTriangles) cap this at 32767
             // vertices — a block would need >16383 columns to hit that,
@@ -231,8 +241,8 @@ namespace GustUI
 
             for (int c = 0; c < columns; c++)
             {
-                float maxV = Prominent(minMax[c * 2 + 1]);
-                float minV = Prominent(minMax[c * 2]);
+                float maxV = Prominent(minMax[(first + c) * 2 + 1]);
+                float minV = Prominent(minMax[(first + c) * 2]);
 
                 float top = rect.Y + (1f - maxV) * 0.5f * rect.Height;
                 float bottom = rect.Y + (1f - minV) * 0.5f * rect.Height;
@@ -329,9 +339,11 @@ namespace GustUI
 
             public int LastUsed;
 
-            public bool Matches(int level, int width, int height, float fraction)
+            public float Start;
+
+            public bool Matches(int level, int width, int height, float fraction, float start)
                 => Vertices != null && Level == level && Width == width && Height == height
-                    && Fraction.Equals(fraction);
+                    && Fraction.Equals(fraction) && Start.Equals(start);
         }
 
         /// <summary>
@@ -361,11 +373,11 @@ namespace GustUI
         /// the input this method's own cache key already is.
         /// </summary>
         public (GeometryVertex[] Vertices, short[] Indices, int PrimitiveCount) GetGeometryVertices(
-            int level, int width, int height, float sourceFraction = 1f)
+            int level, int width, int height, float sourceFraction = 1f, float sourceStart = 0f)
         {
             foreach (GeometrySlot hit in geometrySlots)
             {
-                if (hit.Matches(level, width, height, sourceFraction))
+                if (hit.Matches(level, width, height, sourceFraction, sourceStart))
                 {
                     hit.LastUsed = ++geometryClock;
                     return (hit.Vertices, hit.Indices, hit.PrimitiveCount);
@@ -378,7 +390,7 @@ namespace GustUI
             using var miss = Managers.Telemetry.Scope("Draw.Waveform.Triangulate");
 
             (VertexPositionColor[] raw, short[] indices, int primitiveCount) =
-                BuildGeometry(level, new Rectangle(0, 0, width, height), Color.White, sourceFraction);
+                BuildGeometry(level, new Rectangle(0, 0, width, height), Color.White, sourceFraction, sourceStart);
             var verts = new GeometryVertex[raw.Length];
             for (int i = 0; i < raw.Length; i++)
             {
@@ -425,6 +437,7 @@ namespace GustUI
             slot.Width = width;
             slot.Height = height;
             slot.Fraction = sourceFraction;
+            slot.Start = sourceStart;
 
             return (slot.Vertices, slot.Indices, slot.PrimitiveCount);
         }
