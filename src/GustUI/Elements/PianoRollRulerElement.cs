@@ -38,9 +38,16 @@ namespace GustUI.Elements
         /// same way the roll dims the void past the end.</summary>
         public double BeatsVisible = 16;
 
-        /// <summary>Left inset matching the roll's keyboard gutter, so bar 1
+        /// <summary>Left inset matching the roll's keyboard gutter, so the first bar
         /// is over the same pixel in both.</summary>
         public float KeyboardWidth;
+
+        /// <summary>The number the first bar is labelled with. 0 (the default)
+        /// counts bars from zero, so the labels a zoomed-out ruler keeps —
+        /// every 2nd, 4th or 8th bar — read 0, 4, 8 rather than 1, 5, 9. Set
+        /// 1 for the conventional musician's count. Labels only: every
+        /// position this element takes or reports is still a 0-based beat.</summary>
+        public int FirstBarNumber = 0;
 
         /// <summary>Where the transport is, in beats; negative to hide.</summary>
         public double PlayheadBeats = -1;
@@ -122,7 +129,7 @@ namespace GustUI.Elements
                     manager.DrawFilledRectangle(new Rectangle(x, y0 + 2, 1, height - 3), TickColor);
                     if (bar % labelEvery == 0)
                     {
-                        string label = (bar + 1).ToString();
+                        string label = (bar + FirstBarNumber).ToString();
                         manager.DrawSdfString(font, label, new Vector2(x + 3, y0 + 1), labelSize, LabelColor);
                     }
                 }
