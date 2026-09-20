@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using GustUI.Attributes;
@@ -70,6 +70,40 @@ namespace GustUI.Elements
         /// </summary>
         public ControlSkin Skin { get; set; } = ControlSkin.Flat;
 
+        /// <summary>
+        /// Whether this switch responds at all. Disabled draws the grey wash
+        /// and swallows press, drag and release, so the value cannot move --
+        /// and changes the POINTER to the refusal sign, the same rule and the
+        /// same reason as <see cref="BasicButtonElement.Enabled"/>: a hand
+        /// over something that will not respond is a lie.
+        ///
+        /// Setting <see cref="Value"/> from code still works while disabled.
+        /// This governs the GESTURE, not the state -- a caller that has
+        /// decided the switch must read off says so by assigning Value.
+        /// </summary>
+        public bool Enabled
+        {
+            get => enabled;
+            set
+            {
+                enabled = value;
+                SyncCursor();
+            }
+        }
+
+        private bool enabled = true;
+
+        private static readonly Color DisabledWash = new Color(128, 128, 128, 140);
+
+        private void SyncCursor()
+        {
+            if (HasTrait<CursorTrait>())
+            {
+                ElementTrait<CursorTrait>().Set(new TVText(
+                    enabled ? Managers.StandardCursors.PointingHand : Managers.StandardCursors.Forbidden));
+            }
+        }
+
         public Action<bool> OnValueChanged;
 
         /// <summary>Raised once per completed gesture with the final value —
@@ -130,6 +164,11 @@ namespace GustUI.Elements
 
             ElementTrait<OnMousePress>().Set(new TVEvent<ClickEventArgs>(args =>
             {
+                if (!enabled)
+                {
+                    return;
+                }
+
                 pressActive = true;
                 pressX = args.MouseState.X;
                 pressY = args.MouseState.Y;
@@ -143,7 +182,7 @@ namespace GustUI.Elements
 
             ElementTrait<OnMouseButtonHeldDown>().Set(new TVEvent<ClickEventArgs>(args =>
             {
-                if (!pressActive)
+                if (!pressActive || !enabled)
                 {
                     return;
                 }
@@ -159,6 +198,12 @@ namespace GustUI.Elements
 
             ElementTrait<OnMouseRelease>().Set(new TVEvent<ClickEventArgs>(_ =>
             {
+                if (!enabled)
+                {
+                    pressActive = false;
+                    return;
+                }
+
                 if (pressActive)
                 {
                     bool dragged = maxDelta > ClickThresholdPixels;
@@ -312,6 +357,16 @@ namespace GustUI.Elements
                         manager.DrawFilledCapsule(dest, trackColor);
                         manager.DrawFilledCircle(thumbCenter, thumbRadius, ThumbColor);
                         break;
+                }
+
+                // Disabled = desaturate toward grey (design-guide.md section 6:
+                // "a disabled control loses its color entirely"). A wash over
+                // the finished switch rather than a per-skin colour change, so
+                // all eight skins get it without eight edits -- the same
+                // approach, and the same colour, as BasicButtonElement.
+                if (!enabled)
+                {
+                    manager.DrawFilledCapsule(dest, DisabledWash);
                 }
             }
 
