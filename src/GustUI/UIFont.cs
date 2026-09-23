@@ -1059,7 +1059,26 @@ namespace GustUI
             //     and a lock is a shape everybody already reads without a
             //     label. Added for ezmuze studio's locked pack channels.
             Lock = 59182,
-            Unlock = 59269
+            Unlock = 59269,
+
+            // ---- added 2026-09-23 (ezmuze studio #269) ----
+            //
+            // For a settings category list. Each was baked ALONE in its own
+            // process on the DEFAULT 1 MB stack — the browser build's inline
+            // bake, the worst case — and survived.
+            //
+            // NOT here, and do not add it: E790 "Color" (the palette), the
+            // obvious choice for an appearance setting. It stack-overflows
+            // stbtt_GetGlyphSDF exactly like World/Emoji2 do, and so does
+            // E2B1. The probe is what caught it; looking at the glyph could
+            // not have.
+
+            // E771 - a monitor with a paint brush: how things look.
+            Personalize = 59249,
+
+            // ECA5 - blocks in rows, which is what a sequencer's clips on
+            // their lanes look like from a distance.
+            Tiles = 60581
         }
     }
 }
