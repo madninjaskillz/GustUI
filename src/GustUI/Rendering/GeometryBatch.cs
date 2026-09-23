@@ -489,10 +489,8 @@ namespace GustUI.Rendering
 
             // Segment-relative — see CloseSegment's doc for why.
             int vBase = acc.VertexCount - acc.CurrentSegmentVertexStart;
-            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destRect.Left, destRect.Top), colorTopLeft, new Vector2(u0, v0), clipRect);
-            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Top), colorTopRight, new Vector2(u1, v0), clipRect);
-            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destRect.Right, destRect.Bottom), colorBottomRight, new Vector2(u1, v1), clipRect);
-            acc.Vertices[acc.VertexCount++] = new GeometryVertex(new Vector2(destRect.Left, destRect.Bottom), colorBottomLeft, new Vector2(u0, v1), clipRect);
+            WriteQuadGradient(acc.Vertices, acc.VertexCount, destRect, colorTopLeft, colorTopRight, colorBottomRight, colorBottomLeft, u0, v0, u1, v1, clipRect);
+            acc.VertexCount += 4;
 
             AppendQuadIndices(acc, vBase);
         }
@@ -518,6 +516,26 @@ namespace GustUI.Rendering
 
             UVRect(texture, srcRect, out float u0, out float v0, out float u1, out float v1);
 
+            // Segment-relative — see CloseSegment's doc for why.
+            int vBase = acc.VertexCount - acc.CurrentSegmentVertexStart;
+            WriteRotatedQuad(acc.Vertices, acc.VertexCount, destRect, color, angle, origin, u0, v0, u1, v1, clipRect);
+            acc.VertexCount += 4;
+
+            AppendQuadIndices(acc, vBase);
+        }
+
+        /// <summary>
+        /// The four corners <see cref="AppendRotatedQuad"/> appends, written
+        /// into any array at <paramref name="at"/> — the ONE place that maths
+        /// lives, so geometry built ahead of time for
+        /// <see cref="AppendCachedTriangles"/> (GlowCurveElement's cached
+        /// strokes) lands on exactly the positions the immediate path would
+        /// have drawn, bit for bit. No Fade, no zero-size check: callers
+        /// decide both.
+        /// </summary>
+        public static void WriteRotatedQuad(GeometryVertex[] into, int at, Rectangle destRect, Color color, float angle, Vector2 origin,
+            float u0, float v0, float u1, float v1, Vector4 clipRect)
+        {
             float cos = (float)Math.Cos(angle);
             float sin = (float)Math.Sin(angle);
             Vector2 pos = new Vector2(destRect.X, destRect.Y);
@@ -529,14 +547,35 @@ namespace GustUI.Rendering
                 return new Vector2(pos.X + (dx * cos) - (dy * sin), pos.Y + (dx * sin) + (dy * cos));
             }
 
-            // Segment-relative — see CloseSegment's doc for why.
-            int vBase = acc.VertexCount - acc.CurrentSegmentVertexStart;
-            acc.Vertices[acc.VertexCount++] = new GeometryVertex(Corner(0, 0), color, new Vector2(u0, v0), clipRect);
-            acc.Vertices[acc.VertexCount++] = new GeometryVertex(Corner(destRect.Width, 0), color, new Vector2(u1, v0), clipRect);
-            acc.Vertices[acc.VertexCount++] = new GeometryVertex(Corner(destRect.Width, destRect.Height), color, new Vector2(u1, v1), clipRect);
-            acc.Vertices[acc.VertexCount++] = new GeometryVertex(Corner(0, destRect.Height), color, new Vector2(u0, v1), clipRect);
+            into[at] = new GeometryVertex(Corner(0, 0), color, new Vector2(u0, v0), clipRect);
+            into[at + 1] = new GeometryVertex(Corner(destRect.Width, 0), color, new Vector2(u1, v0), clipRect);
+            into[at + 2] = new GeometryVertex(Corner(destRect.Width, destRect.Height), color, new Vector2(u1, v1), clipRect);
+            into[at + 3] = new GeometryVertex(Corner(0, destRect.Height), color, new Vector2(u0, v1), clipRect);
+        }
 
-            AppendQuadIndices(acc, vBase);
+        /// <summary>Same as <see cref="WriteRotatedQuad"/>, for
+        /// <see cref="AppendQuadGradient"/>'s axis-aligned per-corner-colour
+        /// quad.</summary>
+        public static void WriteQuadGradient(GeometryVertex[] into, int at, Rectangle destRect,
+            Color colorTopLeft, Color colorTopRight, Color colorBottomRight, Color colorBottomLeft,
+            float u0, float v0, float u1, float v1, Vector4 clipRect)
+        {
+            into[at] = new GeometryVertex(new Vector2(destRect.Left, destRect.Top), colorTopLeft, new Vector2(u0, v0), clipRect);
+            into[at + 1] = new GeometryVertex(new Vector2(destRect.Right, destRect.Top), colorTopRight, new Vector2(u1, v0), clipRect);
+            into[at + 2] = new GeometryVertex(new Vector2(destRect.Right, destRect.Bottom), colorBottomRight, new Vector2(u1, v1), clipRect);
+            into[at + 3] = new GeometryVertex(new Vector2(destRect.Left, destRect.Bottom), colorBottomLeft, new Vector2(u0, v1), clipRect);
+        }
+
+        /// <summary>The six indices of one quad written by the helpers above,
+        /// relative to its first vertex <paramref name="vBase"/>.</summary>
+        public static void WriteQuadIndices(short[] into, int at, int vBase)
+        {
+            into[at] = (short)(vBase + 0);
+            into[at + 1] = (short)(vBase + 1);
+            into[at + 2] = (short)(vBase + 2);
+            into[at + 3] = (short)(vBase + 0);
+            into[at + 4] = (short)(vBase + 2);
+            into[at + 5] = (short)(vBase + 3);
         }
 
         /// <summary>

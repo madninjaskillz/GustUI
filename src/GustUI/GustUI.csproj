@@ -10,6 +10,9 @@
     <PackageReference Include="StbTrueTypeSharp" Version="1.26.12" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="GustUI.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <Folder Include="_Embedded\" />
   </ItemGroup>
 </Project>

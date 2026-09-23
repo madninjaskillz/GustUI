@@ -670,12 +670,23 @@ namespace GustUI.Extensions
         /// <summary>DrawLine with a pixel thickness (rotated filled rect).</summary>
         public static void DrawThickLine(this DrawManager manager, Vector2 start, Vector2 end, Color color, int thickness)
         {
-            Vector2 edge = end - start;
-            float angle = (float)Math.Atan2(edge.Y, edge.X);
-            var rect = new Rectangle((int)start.X, (int)start.Y, (int)edge.Length() + 1, thickness);
+            ThickLineQuad(start, end, thickness, out Rectangle rect, out float angle);
 
             AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
             manager.GeometryBatch.AppendRotatedQuad(white.Texture, rect, white.Pixels, color, angle, new Vector2(0, thickness / 2f), manager.GetClipRectForGeometry(), manager.CurrentBlend);
+        }
+
+        /// <summary>
+        /// The rotated rect <see cref="DrawThickLine"/> draws a segment as —
+        /// shared with anything that builds the same stroke ahead of time
+        /// (GlowCurveElement's cached geometry), so the two cannot drift. Pivot
+        /// is <c>(0, thickness / 2)</c>, as DrawThickLine passes.
+        /// </summary>
+        public static void ThickLineQuad(Vector2 start, Vector2 end, int thickness, out Rectangle rect, out float angle)
+        {
+            Vector2 edge = end - start;
+            angle = (float)Math.Atan2(edge.Y, edge.X);
+            rect = new Rectangle((int)start.X, (int)start.Y, (int)edge.Length() + 1, thickness);
         }
 
         /// <summary>
