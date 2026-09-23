@@ -25,6 +25,39 @@ namespace GustUI.Extensions
     /// </summary>
     public static class ShapeDrawExtensions
     {
+        // PER-THREAD SCRATCH for the geometry these primitives build.
+        //
+        // Every call used to allocate its own vertex, index, point and normal
+        // arrays — four per knob disc, four per rounded panel, per frame. A
+        // Bifrost panel draws ~80 knobs and ~370 rounded boxes, which was close
+        // to a megabyte of garbage a frame and a gen-0 collection every few
+        // frames (measured 2026-09-23). GeometryBatch copies what it is given
+        // into its own accumulator, so the arrays only have to live for one
+        // call and can be reused by the next.
+        //
+        // One of each KIND is enough because no primitive holds a buffer across
+        // a call to another primitive that uses the same one: points/normals
+        // are built and then handed to AppendFeatheredFill, which only uses the
+        // vertex and index buffers. ThreadStatic because nothing guarantees
+        // every draw happens on one thread (offscreen renders, tests).
+        [ThreadStatic] private static GeometryVertex[] scratchVerts;
+        [ThreadStatic] private static VertexPositionColor[] scratchColorVerts;
+        [ThreadStatic] private static short[] scratchIndices;
+        [ThreadStatic] private static Vector2[] scratchPoints;
+        [ThreadStatic] private static Vector2[] scratchNormals;
+
+        private static T[] Scratch<T>(ref T[] buffer, int length)
+        {
+            if (buffer == null || buffer.Length < length)
+            {
+                buffer = new T[Math.Max(length, Math.Max(64, (buffer?.Length ?? 0) * 2))];
+            }
+
+            return buffer;
+        }
+
+        private static readonly float[] RoundedCornerStartAngles = { 180f, 270f, 0f, 90f };
+
         public static void DrawLine(this DrawManager manager, Vector2 start, Vector2 end, Color color)
         {
             Vector2 edge = end - start;
@@ -106,8 +139,8 @@ namespace GustUI.Extensions
             }
 
             int segments = ArcSegments(radius, manager.RenderScale);
-            var points = new Vector2[segments];
-            var normals = new Vector2[segments];
+            Vector2[] points = Scratch(ref scratchPoints, segments);
+            Vector2[] normals = Scratch(ref scratchNormals, segments);
             for (int i = 0; i < segments; i++)
             {
                 float a = i / (float)segments * MathHelper.TwoPi;
@@ -116,7 +149,7 @@ namespace GustUI.Extensions
                 points[i] = center + dir * radius;
             }
 
-            AppendFeatheredFill(manager, points, normals, center, color);
+            AppendFeatheredFill(manager, points, normals, segments, center, color);
         }
 
         /// <summary>
@@ -147,8 +180,8 @@ namespace GustUI.Extensions
             // between any two non-adjacent-angle boundary points.
             int capSegments = ArcSegments(radius, manager.RenderScale);
             int total = (capSegments + 1) * 2;
-            var points = new Vector2[total];
-            var normals = new Vector2[total];
+            Vector2[] points = Scratch(ref scratchPoints, total);
+            Vector2[] normals = Scratch(ref scratchNormals, total);
 
             int vi = 0;
             for (int i = 0; i <= capSegments; i++)
@@ -170,7 +203,7 @@ namespace GustUI.Extensions
             }
 
             Vector2 centroid = new Vector2(rect.Left + rect.Width / 2f, rect.Top + rect.Height / 2f);
-            AppendFeatheredFill(manager, points, normals, centroid, color);
+            AppendFeatheredFill(manager, points, normals, total, centroid, color);
         }
 
         /// <summary>
@@ -202,8 +235,8 @@ namespace GustUI.Extensions
             float heading = (float)Math.Atan2(along.Y, along.X);
             int capSegments = ArcSegments(radius, manager.RenderScale);
             int total = (capSegments + 1) * 2;
-            var points = new Vector2[total];
-            var normals = new Vector2[total];
+            Vector2[] points = Scratch(ref scratchPoints, total);
+            Vector2[] normals = Scratch(ref scratchNormals, total);
 
             // End cap sweeps -90..+90 degrees about the heading, start cap
             // +90..+270 — one continuous walk round the outline, as
@@ -223,7 +256,7 @@ namespace GustUI.Extensions
                 }
             }
 
-            AppendFeatheredFill(manager, points, normals, (start + end) / 2f, color);
+            AppendFeatheredFill(manager, points, normals, total, (start + end) / 2f, color);
         }
 
         /// <summary>
@@ -292,7 +325,7 @@ namespace GustUI.Extensions
             Vector4 clip = manager.GetClipRectForGeometry();
             Color transparent = color * 0f;
 
-            var verts = new GeometryVertex[segments * 4];
+            GeometryVertex[] verts = Scratch(ref scratchVerts, segments * 4);
             for (int i = 0; i < segments; i++)
             {
                 float a = i / (float)segments * MathHelper.TwoPi;
@@ -303,7 +336,7 @@ namespace GustUI.Extensions
                 verts[segments * 3 + i] = new GeometryVertex(center + dir * r3, transparent, uv, clip);
             }
 
-            var idx = new short[segments * 18];
+            short[] idx = Scratch(ref scratchIndices, segments * 18);
             int ii = 0;
             for (int i = 0; i < segments; i++)
             {
@@ -313,7 +346,7 @@ namespace GustUI.Extensions
                 AppendBandQuad(idx, ref ii, i, ni, segments * 2, segments * 3);
             }
 
-            manager.GeometryBatch.AppendTriangles(white.Texture, verts, idx, ii / 3, clip, manager.CurrentBlend);
+            manager.GeometryBatch.AppendTriangles(white.Texture, verts, segments * 4, idx, ii / 3, clip, manager.CurrentBlend);
         }
 
         /// <summary>
@@ -364,7 +397,7 @@ namespace GustUI.Extensions
             Color transparent = color * 0f;
 
             int ring = segments + 1;
-            var verts = new GeometryVertex[ring * 4];
+            GeometryVertex[] verts = Scratch(ref scratchVerts, ring * 4);
             for (int i = 0; i <= segments; i++)
             {
                 float a = startAngle + sweepAngle * (i / (float)segments);
@@ -375,7 +408,7 @@ namespace GustUI.Extensions
                 verts[ring * 3 + i] = new GeometryVertex(center + dir * r3, transparent, uv, clip);
             }
 
-            var idx = new short[segments * 18];
+            short[] idx = Scratch(ref scratchIndices, segments * 18);
             int ii = 0;
             for (int i = 0; i < segments; i++)
             {
@@ -384,7 +417,7 @@ namespace GustUI.Extensions
                 AppendBandQuad(idx, ref ii, i, i + 1, ring * 2, ring * 3);
             }
 
-            manager.GeometryBatch.AppendTriangles(white.Texture, verts, idx, ii / 3, clip, manager.CurrentBlend);
+            manager.GeometryBatch.AppendTriangles(white.Texture, verts, ring * 4, idx, ii / 3, clip, manager.CurrentBlend);
         }
 
         /// <summary>
@@ -465,7 +498,7 @@ namespace GustUI.Extensions
                 return Color.Lerp(from, to, MathHelper.Clamp(t, 0f, 1f));
             }
 
-            var verts = new GeometryVertex[n * 4];
+            GeometryVertex[] verts = Scratch(ref scratchVerts, n * 4);
             for (int i = 0; i < n; i++)
             {
                 // How deep the region is at this column, measured along the
@@ -517,7 +550,7 @@ namespace GustUI.Extensions
                 verts[n * 3 + i] = new GeometryVertex(outerLower, At(outerLower) * 0f, uv, clip);
             }
 
-            var idx = new short[(n - 1) * 18];
+            short[] idx = Scratch(ref scratchIndices, (n - 1) * 18);
             int ii = 0;
             for (int i = 0; i < n - 1; i++)
             {
@@ -526,7 +559,7 @@ namespace GustUI.Extensions
                 AppendBandQuad(idx, ref ii, i, i + 1, n * 2, n * 3);
             }
 
-            manager.GeometryBatch.AppendTriangles(white.Texture, verts, idx, ii / 3, clip, manager.CurrentBlend);
+            manager.GeometryBatch.AppendTriangles(white.Texture, verts, n * 4, idx, ii / 3, clip, manager.CurrentBlend);
         }
 
         /// <summary>Two triangles spanning one segment of a band between an
@@ -566,9 +599,8 @@ namespace GustUI.Extensions
         /// shader needed: GeometryBatch.fx already premultiplies color×alpha
         /// per vertex).
         /// </summary>
-        private static void AppendFeatheredFill(DrawManager manager, Vector2[] points, Vector2[] normals, Vector2 centroid, Color color)
+        private static void AppendFeatheredFill(DrawManager manager, Vector2[] points, Vector2[] normals, int n, Vector2 centroid, Color color)
         {
-            int n = points.Length;
             if (n < 3)
             {
                 return;
@@ -583,7 +615,7 @@ namespace GustUI.Extensions
             Vector4 clip = manager.GetClipRectForGeometry();
             Color transparent = color * 0f;
 
-            var verts = new GeometryVertex[1 + n * 2];
+            GeometryVertex[] verts = Scratch(ref scratchVerts, 1 + n * 2);
             verts[0] = new GeometryVertex(centroid, color, uv, clip);
             for (int i = 0; i < n; i++)
             {
@@ -593,7 +625,7 @@ namespace GustUI.Extensions
                 verts[1 + n + i] = new GeometryVertex(outer, transparent, uv, clip);
             }
 
-            var idx = new short[n * 9];
+            short[] idx = Scratch(ref scratchIndices, n * 9);
             int ii = 0;
             for (int i = 0; i < n; i++)
             {
@@ -609,7 +641,7 @@ namespace GustUI.Extensions
                 idx[ii++] = (short)a; idx[ii++] = (short)ob; idx[ii++] = (short)b;
             }
 
-            manager.GeometryBatch.AppendTriangles(white.Texture, verts, idx, ii / 3, clip, manager.CurrentBlend);
+            manager.GeometryBatch.AppendTriangles(white.Texture, verts, 1 + n * 2, idx, ii / 3, clip, manager.CurrentBlend);
         }
 
         /// <summary>Linear 2-color gradient fill via per-vertex color on the
@@ -856,7 +888,7 @@ namespace GustUI.Extensions
             }
 
             int segments = ArcSegments(fanRadius, manager.RenderScale);
-            var vertices = new VertexPositionColor[segments + 2];
+            VertexPositionColor[] vertices = Scratch(ref scratchColorVerts, segments + 2);
             vertices[0] = new VertexPositionColor(new Vector3(center, 0f), inner);
 
             for (int i = 0; i <= segments; i++)
@@ -870,7 +902,7 @@ namespace GustUI.Extensions
                     outer);
             }
 
-            var indices = new short[segments * 3];
+            short[] indices = Scratch(ref scratchIndices, segments * 3);
             for (int i = 0; i < segments; i++)
             {
                 indices[i * 3] = 0;
@@ -878,7 +910,7 @@ namespace GustUI.Extensions
                 indices[i * 3 + 2] = (short)(i + 2);
             }
 
-            manager.DrawTriangles(vertices, indices, segments);
+            manager.DrawTriangles(vertices, segments + 2, indices, segments);
         }
 
         /// <summary>
@@ -953,9 +985,9 @@ namespace GustUI.Extensions
             // binds below about a 27px radius, so nothing larger changes, and
             // the extra triangles on something this small are free.
             int segmentsPerCorner = Math.Max(6, ArcSegments(r, manager.RenderScale) / 4);
-            (Vector2[] points, Vector2[] normals) = BuildRoundedRectOutline(rectangle, r, segmentsPerCorner);
+            int count = BuildRoundedRectOutline(rectangle, r, segmentsPerCorner, out Vector2[] points, out Vector2[] normals);
             var centroid = new Vector2(rectangle.Left + rectangle.Width / 2f, rectangle.Top + rectangle.Height / 2f);
-            AppendFeatheredFill(manager, points, normals, centroid, color);
+            AppendFeatheredFill(manager, points, normals, count, centroid, color);
         }
 
         /// <summary>
@@ -968,9 +1000,10 @@ namespace GustUI.Extensions
         /// consecutive corners' tangent points line up into the straight
         /// edges between them.
         /// </summary>
-        private static (Vector2[] points, Vector2[] normals) BuildRoundedRectOutline(Rectangle rect, float radius, int segmentsPerCorner)
+        private static int BuildRoundedRectOutline(Rectangle rect, float radius, int segmentsPerCorner,
+            out Vector2[] points, out Vector2[] normals)
         {
-            Span<float> startAngle = stackalloc float[] { 180f, 270f, 0f, 90f };
+            float[] startAngle = RoundedCornerStartAngles;
             Span<Vector2> centers = stackalloc Vector2[]
             {
                 new Vector2(rect.Left + radius, rect.Top + radius),
@@ -980,8 +1013,8 @@ namespace GustUI.Extensions
             };
 
             int perCorner = segmentsPerCorner + 1;
-            var points = new Vector2[perCorner * 4];
-            var normals = new Vector2[perCorner * 4];
+            points = Scratch(ref scratchPoints, perCorner * 4);
+            normals = Scratch(ref scratchNormals, perCorner * 4);
             int vi = 0;
             for (int c = 0; c < 4; c++)
             {
@@ -995,7 +1028,7 @@ namespace GustUI.Extensions
                 }
             }
 
-            return (points, normals);
+            return perCorner * 4;
         }
 
         /// <summary>Rounded-rect OUTLINE, drawn as a rounded fill with a

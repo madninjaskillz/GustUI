@@ -742,6 +742,12 @@ namespace GustUI.Managers
         // block's column count never remotely approaches 65535 (16-bit's
         // ceiling), so this costs nothing.
         public void DrawTriangles(VertexPositionColor[] vertices, short[] indices, int primitiveCount)
+            => DrawTriangles(vertices, vertices?.Length ?? 0, indices, primitiveCount);
+
+        /// <summary>Over only the first <paramref name="vertexCount"/> entries
+        /// of <paramref name="vertices"/>, for a caller drawing out of a reused
+        /// scratch buffer longer than this shape.</summary>
+        public void DrawTriangles(VertexPositionColor[] vertices, int vertexCount, short[] indices, int primitiveCount)
         {
             if (primitiveCount <= 0)
             {
@@ -758,7 +764,7 @@ namespace GustUI.Managers
                 (white.Pixels.Y + 0.5f) / white.Texture.Height);
 
             GeometryBatch.AppendTriangles(
-                white.Texture, vertices, indices, primitiveCount, uv, GetClipRectForGeometry(), CurrentBlend);
+                white.Texture, vertices, vertexCount, indices, primitiveCount, uv, GetClipRectForGeometry(), CurrentBlend);
         }
 
         // A single "big triangle" covering the whole clip space (-1,-1) to

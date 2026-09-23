@@ -636,13 +636,24 @@ namespace GustUI.Rendering
         /// geometry don't track clip state themselves.
         /// </summary>
         public void AppendTriangles(Texture2D texture, GeometryVertex[] verts, short[] idx, int primitiveCount, Vector4 clipRect, BlendState blend)
+            => AppendTriangles(texture, verts, verts?.Length ?? 0, idx, primitiveCount, clipRect, blend);
+
+        /// <summary>
+        /// <see cref="AppendTriangles(Texture2D, GeometryVertex[], short[], int, Vector4, BlendState)"/>
+        /// over only the first <paramref name="vertexCount"/> entries of
+        /// <paramref name="verts"/> — for a caller building into a reused
+        /// scratch buffer that is longer than this shape (ShapeDrawExtensions'
+        /// per-thread buffers), so drawing a knob or a rounded panel no longer
+        /// allocates two arrays a call.
+        /// </summary>
+        public void AppendTriangles(Texture2D texture, GeometryVertex[] verts, int vertexCount, short[] idx, int primitiveCount, Vector4 clipRect, BlendState blend)
         {
-            if (primitiveCount <= 0 || verts == null || verts.Length == 0)
+            if (primitiveCount <= 0 || verts == null || vertexCount <= 0)
             {
                 return;
             }
 
-            int addVertices = verts.Length;
+            int addVertices = Math.Min(vertexCount, verts.Length);
             int addIndices = primitiveCount * 3;
 
             Accumulator acc = stream;
@@ -688,13 +699,19 @@ namespace GustUI.Rendering
         /// texel.
         /// </summary>
         public void AppendTriangles(Texture2D texture, VertexPositionColor[] verts, short[] idx, int primitiveCount, Vector2 uv, Vector4 clipRect, BlendState blend)
+            => AppendTriangles(texture, verts, verts?.Length ?? 0, idx, primitiveCount, uv, clipRect, blend);
+
+        /// <summary>The <see cref="VertexPositionColor"/> form over the first
+        /// <paramref name="vertexCount"/> entries only — see the
+        /// <see cref="GeometryVertex"/> overload.</summary>
+        public void AppendTriangles(Texture2D texture, VertexPositionColor[] verts, int vertexCount, short[] idx, int primitiveCount, Vector2 uv, Vector4 clipRect, BlendState blend)
         {
-            if (primitiveCount <= 0 || verts == null || verts.Length == 0)
+            if (primitiveCount <= 0 || verts == null || vertexCount <= 0)
             {
                 return;
             }
 
-            int addVertices = verts.Length;
+            int addVertices = Math.Min(vertexCount, verts.Length);
             int addIndices = primitiveCount * 3;
 
             Accumulator acc = stream;

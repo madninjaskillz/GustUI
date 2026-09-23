@@ -149,9 +149,16 @@ namespace GustUI.Elements
 
             float baselineY = Math.Clamp(Baseline ?? size.Y, 0f, size.Y);
 
+            // One cursor walked left to right with the columns, not a search
+            // from the start per column: the columns only ever move right and
+            // the points are non-decreasing in X, so every column resumes
+            // where the last one stopped. A search per column was
+            // width x points — a 400px wavetable frame of 192 points is 38,000
+            // steps a frame, and Bifrost draws three of them plus envelopes.
+            int cursor = 1;
             for (int x = 0; x < width; x++)
             {
-                float y = Math.Clamp(SampleY(Points, x), 0f, baselineY);
+                float y = Math.Clamp(SampleY(Points, x, ref cursor), 0f, baselineY);
                 int y0 = (int)y;
                 int fillHeight = (int)baselineY - y0;
                 if (fillHeight <= 0)
@@ -188,16 +195,22 @@ namespace GustUI.Elements
 
         /// <summary>Linear-interpolated curve Y at element-relative X (points
         /// assumed non-decreasing in X); clamps to the nearest endpoint
-        /// outside the curve's own X range.</summary>
-        private static float SampleY(List<Vector2> points, float x)
+        /// outside the curve's own X range.
+        ///
+        /// <paramref name="cursor"/> is where the previous, smaller-X call
+        /// found its segment (start it at 1). Answers are identical to a search
+        /// from the start — the segment before the cursor ends left of any X a
+        /// later call can ask for.</summary>
+        private static float SampleY(List<Vector2> points, float x, ref int cursor)
         {
             if (x <= points[0].X)
             {
                 return points[0].Y;
             }
 
-            for (int i = 1; i < points.Count; i++)
+            for (int i = Math.Max(1, cursor); i < points.Count; i++)
             {
+                cursor = i;
                 if (x <= points[i].X)
                 {
                     Vector2 a = points[i - 1];

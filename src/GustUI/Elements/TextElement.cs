@@ -109,6 +109,17 @@ namespace GustUI.Elements
                 return wrapCacheResult;
             }
 
+            return WrapUncached(fontValue, text, wrapWidth);
+        }
+
+        // Its own method so the lambda below captures THIS frame's locals, not
+        // getText's: a captured local's closure object is allocated on entry
+        // to the scope that declares it, so while this code lived in getText
+        // every label paid for one on every draw, cache hit or not.
+        private string WrapUncached(TVFont fontValue, string text, float wrapWidth)
+        {
+            string fontName = fontValue.Family;
+            float fontSize = fontValue.Size;
             Func<string, Vector2> measure = MakeMeasure(fontValue);
 
             if (!WordWrap)
