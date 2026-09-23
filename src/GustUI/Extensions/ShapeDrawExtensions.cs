@@ -174,6 +174,88 @@ namespace GustUI.Extensions
         }
 
         /// <summary>
+        /// A stroke between two FLOAT points with round caps, as real
+        /// feathered geometry — the same capsule <see cref="DrawFilledCapsule"/>
+        /// draws, but at any angle and at sub-pixel positions.
+        ///
+        /// <see cref="DrawThickLine"/> truncates its start to whole pixels and
+        /// squares its ends, which is fine for a wire and wrong for anything
+        /// that moves or turns: a stroke rotating a little every frame steps
+        /// from pixel to pixel instead of turning.
+        /// </summary>
+        public static void DrawRoundCapLine(this DrawManager manager, Vector2 start, Vector2 end, Color color, float thickness)
+        {
+            float radius = thickness / 2f;
+            if (radius <= 0.01f)
+            {
+                return;
+            }
+
+            Vector2 along = end - start;
+            float length = along.Length();
+            if (length <= 0.0001f)
+            {
+                manager.DrawFilledCircle(start, radius, color);
+                return;
+            }
+
+            float heading = (float)Math.Atan2(along.Y, along.X);
+            int capSegments = ArcSegments(radius, manager.RenderScale);
+            int total = (capSegments + 1) * 2;
+            var points = new Vector2[total];
+            var normals = new Vector2[total];
+
+            // End cap sweeps -90..+90 degrees about the heading, start cap
+            // +90..+270 — one continuous walk round the outline, as
+            // DrawFilledCapsule does with its caps fixed to the X axis.
+            int vi = 0;
+            for (int cap = 0; cap < 2; cap++)
+            {
+                Vector2 centre = cap == 0 ? end : start;
+                float from = heading + (cap == 0 ? -MathHelper.PiOver2 : MathHelper.PiOver2);
+                for (int i = 0; i <= capSegments; i++)
+                {
+                    float a = from + i * (MathHelper.Pi / capSegments);
+                    var dir = new Vector2((float)Math.Cos(a), (float)Math.Sin(a));
+                    normals[vi] = dir;
+                    points[vi] = centre + dir * radius;
+                    vi++;
+                }
+            }
+
+            AppendFeatheredFill(manager, points, normals, (start + end) / 2f, color);
+        }
+
+        /// <summary>
+        /// A stroked chevron centred on <paramref name="centre"/>, pointing
+        /// along <paramref name="angle"/> (radians; 0 points right, like "&gt;",
+        /// and Pi points left, like "&lt;"). <paramref name="size"/> is its
+        /// height at angle 0; it is half as deep as it is tall.
+        ///
+        /// Geometry rather than a glyph so it can turn: a symbol-font chevron
+        /// has two directions, and a rotated glyph quad pivots on the glyph's
+        /// box rather than on the shape. See <see cref="Elements.ChevronElement"/>.
+        /// </summary>
+        public static void DrawChevron(this DrawManager manager, Vector2 centre, float size, float angle, Color color, float thickness = 2f)
+        {
+            if (size <= 0.01f)
+            {
+                return;
+            }
+
+            float cos = (float)Math.Cos(angle);
+            float sin = (float)Math.Sin(angle);
+            Vector2 Turn(float x, float y) => centre + new Vector2(x * cos - y * sin, x * sin + y * cos);
+
+            // Half as deep as tall, with the stroke's own width taken off so
+            // the INK, not the centreline, fills the box.
+            float half = Math.Max(0.5f, (size - thickness) / 2f);
+            Vector2 tip = Turn(half / 2f, 0f);
+            manager.DrawRoundCapLine(Turn(-half / 2f, -half), tip, color, thickness);
+            manager.DrawRoundCapLine(Turn(-half / 2f, half), tip, color, thickness);
+        }
+
+        /// <summary>
         /// Filled annulus (ring band between two radii) — KnobElement's rim
         /// ring, same real-geometry treatment as <see cref="DrawFilledCircle"/>:
         /// four concentric vertex rings (feather-in, inner solid edge, outer

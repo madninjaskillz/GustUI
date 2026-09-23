@@ -53,6 +53,18 @@ public class TooltipElement : Element
         Chain(target.AddTrait<OnExitTrait>(), _ => Hide());
     }
 
+    /// <summary>
+    /// As <see cref="Attach(Element, string)"/>, but the text is asked for each
+    /// time the pointer arrives — for a toggle whose tooltip names what the
+    /// NEXT click will do ("Show routings" / "Hide routings"), which a string
+    /// fixed at attach time would get wrong after the first click.
+    /// </summary>
+    public static void Attach(Element target, Func<string> text)
+    {
+        Chain(target.AddTrait<OnEnterTrait>(), args => Show(text(), args.GlobalMousePosition.AsXna));
+        Chain(target.AddTrait<OnExitTrait>(), _ => Hide());
+    }
+
     /// <summary>Appends <paramref name="handler"/> to a trait's existing
     /// action, preserving it. Order is existing-then-ours: whatever the
     /// element already did on hover is still the primary behaviour.</summary>
