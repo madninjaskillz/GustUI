@@ -443,6 +443,45 @@ namespace GustUI.Elements
             entry.RehostCallback?.Invoke(this);
         }
 
+        /// <summary>
+        /// Tells every tab this window ADOPTED that its content is closing with
+        /// the window, exactly as closing that one tab by its X does
+        /// (<c>RehostCallback(null)</c>), and pops its hook scope.
+        ///
+        /// Without this, closing a window that other views had been merged
+        /// into killed their content and told nobody: the views stayed alive
+        /// behind it with their shortcuts registered, and anything they had
+        /// floated on the root window -- a Save preset prompt, found by
+        /// ezmuze #284 -- stayed on screen over whatever came next.
+        ///
+        /// The window's OWN view is not told: it is the one closing the window
+        /// (through its <see cref="OnCloseRequested"/> or its own Close), and
+        /// its own scope is popped by <see cref="Close"/>. A tab that shares
+        /// the window's callback is that view.
+        /// </summary>
+        private void ReleaseAdoptedTabs()
+        {
+            if (tabs.Count == 0)
+            {
+                return;
+            }
+
+            foreach (Tab entry in new List<Tab>(tabs))
+            {
+                if (entry.RehostCallback != null && entry.RehostCallback == OnContentRehosted)
+                {
+                    continue;
+                }
+
+                if (entry.HookScope != 0 && !(hasHookScope && entry.HookScope == hookScopeToken))
+                {
+                    Resources.StaticResources?.InputManager?.PopHookScope(entry.HookScope);
+                }
+
+                entry.RehostCallback?.Invoke(null);
+            }
+        }
+
         private List<Tab> DetachAllTabs()
         {
             var moving = new List<Tab>(tabs);
@@ -2711,6 +2750,8 @@ namespace GustUI.Elements
             {
                 return;
             }
+
+            ReleaseAdoptedTabs();
 
             // No-op if never registered — a plain, non-filling modal. Kept
             // unconditional (rather than gated on FillsAvailableSpace's own
