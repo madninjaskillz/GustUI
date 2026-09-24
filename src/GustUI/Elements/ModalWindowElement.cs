@@ -347,6 +347,12 @@ namespace GustUI.Elements
                 Content = body,
                 RehostCallback = source.OnContentRehosted,
 
+                // So does what its X means (#286). A source that had tabs and
+                // is down to one carries it on that tab.
+                CloseOverride = source.tabs.Count == 1
+                    ? source.tabs[0].CloseOverride
+                    : source.OnOwnTabCloseRequested,
+
                 // The scope TRAVELS with the view. Killing the source shell
                 // below would otherwise pop it, and the merged view's
                 // shortcuts would stop working — silently, since a hook whose
@@ -413,6 +419,7 @@ namespace GustUI.Elements
                 Title = Title,
                 Content = content,
                 RehostCallback = OnContentRehosted,
+                CloseOverride = OnOwnTabCloseRequested,
                 AuthoredHeight = authoredContentHeight,
                 HookScope = hasHookScope ? hookScopeToken : 0,
 
@@ -487,6 +494,11 @@ namespace GustUI.Elements
             var moving = new List<Tab>(tabs);
             foreach (Tab entry in moving)
             {
+                // Its view goes on being told where it is, and keeps its
+                // shortcuts (#286).
+                entry.RehostCallback = RehostOf(entry);
+                HandOverOwnScope(entry);
+
                 entry.Button?.Kill();
                 entry.Button = null;
                 entry.Content?.Parent?.Children?.Remove(entry.Content);
@@ -1182,6 +1194,7 @@ namespace GustUI.Elements
             int bottomInset = BottomInset;
             Tab moved = DetachTab(index);
             ReleaseToolbarItems(moved);
+            HandOverOwnScope(moved);
 
             var modal = new ModalWindowElement(moved.Title, moved.Content,
                 position: new TVVector(mouse.X - (size.X / 2f), mouse.Y - (ModalTitleBarElement.BarHeight / 2f)),
@@ -1192,14 +1205,34 @@ namespace GustUI.Elements
                 BottomInset = bottomInset,
             };
 
-            Action<ModalWindowElement> rehost = moved.RehostCallback;
-            modal.OnCloseRequested = () =>
+            Action<ModalWindowElement> rehost = RehostOf(moved);
+            if (moved.CloseOverride != null)
             {
-                rehost?.Invoke(null);
-                modal.Kill();
-            };
+                // A view that asks before it goes (#286) keeps asking in its
+                // own window: the X is its close, not a bare kill.
+                modal.OnCloseRequested = moved.CloseOverride;
+                modal.OnOwnTabCloseRequested = moved.CloseOverride;
+            }
+            else
+            {
+                modal.OnCloseRequested = () =>
+                {
+                    rehost?.Invoke(null);
+                    modal.Kill();
+                };
+            }
 
             modal.OnContentRehosted = rehost;
+
+            // The view's shortcuts live in the scope it brought. The new
+            // window pushed none of its own, so its tab carries this one:
+            // raised while it is on screen, popped when it closes.
+            if (moved.HookScope != 0 && modal.tabs.Count > 0)
+            {
+                modal.tabs[0].HookScope = moved.HookScope;
+                Resources.StaticResources?.InputManager?.RaiseHookScope(moved.HookScope);
+            }
+
             modal.WearChromeOf(moved);
             rehost?.Invoke(modal);
             Resources.StaticResources.RootWindow.AddChild(modal, "tab-popped-" + Guid.NewGuid());
@@ -1212,6 +1245,15 @@ namespace GustUI.Elements
             {
                 Tab entry = closeTabRequested;
                 closeTabRequested = null;
+
+                // A view that asks before it goes closes itself; its tab
+                // stays until it does (see OnOwnTabCloseRequested).
+                if (entry.CloseOverride != null && tabs.Contains(entry))
+                {
+                    entry.CloseOverride();
+                    return;
+                }
+
                 RemoveTab(tabs.IndexOf(entry), killContent: true);
                 return;
             }
@@ -1334,9 +1376,126 @@ namespace GustUI.Elements
         /// built one), so no null-guard needed here.</summary>
         public System.Action OnCloseRequested
         {
-            get => titleBarElement.OnCloseRequested;
-            set => titleBarElement.OnCloseRequested = value;
+            get => ownerCloseRequested;
+            set => ownerCloseRequested = value;
         }
+
+        private System.Action ownerCloseRequested;
+
+        /// <summary>
+        /// What the X on this window's OWN view's tab does, when that view
+        /// must not simply be removed from under itself (ezmuze #286).
+        ///
+        /// A tab's X removes the tab at once and tells its view afterwards
+        /// (<c>OnContentRehosted(null)</c>), which is right for a panel and
+        /// wrong for a view that has to be ASKED -- one with unsaved work, or
+        /// one whose closing means more than its tab going. The sequencer is
+        /// both: its tab X used to remove it silently, with no unsaved-changes
+        /// prompt, and leave the view alive behind the window with its
+        /// shortcuts listed and its title-bar close still wired to it.
+        ///
+        /// When set, that X calls this INSTEAD and leaves the tab in place;
+        /// the view closes itself through its own path (which may ask first,
+        /// and may decline). It travels with the view's tab through merges and
+        /// pop-outs, so the X means the same thing wherever the view ends up.
+        /// </summary>
+        public System.Action OnOwnTabCloseRequested
+        {
+            get => ownTabCloseRequested;
+            set
+            {
+                ownTabCloseRequested = value;
+
+                // A window is born with its own view as tab 0, so the tab
+                // exists before any caller can set this: stamp it now.
+                foreach (Tab entry in tabs)
+                {
+                    if (ReferenceEquals(entry.Content, ownBody))
+                    {
+                        entry.CloseOverride = value;
+                    }
+                }
+            }
+        }
+
+        private System.Action ownTabCloseRequested;
+
+        /// <summary>
+        /// The title bar's X. Normally the window's own
+        /// <see cref="OnCloseRequested"/> (or a plain Kill when there is none).
+        ///
+        /// NOT when the window is down to ONE tab and that tab is somebody
+        /// else's view: its own view has left (closed, or popped out into a
+        /// window of its own) and the X now belongs to the view on screen.
+        /// Routing it to the departed owner closed the wrong thing -- after the
+        /// sequencer was popped out of its window, the X on the module panel
+        /// left behind closed the SONG and left the panel where it was (ezmuze
+        /// #286). Deferred to the next Update like a tab's own X.
+        /// </summary>
+        private void RequestCloseFromTitleBar()
+        {
+            if (tabs.Count == 1 && !IsOwnTab(tabs[0]))
+            {
+                closeTabRequested = tabs[0];
+                return;
+            }
+
+            if (ownerCloseRequested != null)
+            {
+                ownerCloseRequested();
+            }
+            else
+            {
+                Kill();
+            }
+        }
+
+        /// <summary>
+        /// Who to tell when <paramref name="entry"/>'s content MOVES to another
+        /// window.
+        ///
+        /// The tab a window is born with records no callback: the window's
+        /// <see cref="OnContentRehosted"/> is set after construction and that
+        /// is where the view's own callback lives. Popping that tab out read
+        /// the empty field, so the view never learned it had moved -- the
+        /// sequencer went on believing it was in the window it had left, and
+        /// closing the song then closed THAT window (the module panel left in
+        /// it) and left the sequencer's own on screen over the welcome screen
+        /// (ezmuze #286).
+        /// </summary>
+        private Action<ModalWindowElement> RehostOf(Tab entry)
+            => entry.RehostCallback
+               ?? (ReferenceEquals(entry.Content, ownBody) ? OnContentRehosted : null);
+
+        /// <summary>
+        /// Gives the window's own hook scope to its own view's tab as that tab
+        /// leaves, and stops this window popping it later.
+        ///
+        /// The tab a window is born with records no scope (its view's hooks
+        /// are in the window's), so a popped-out or merged-away own view left
+        /// its shortcuts behind in a window that popped them the moment it
+        /// closed: the sequencer, popped out of the window it built and that
+        /// window then closed, answered no key at all -- not even F1 (#286).
+        /// </summary>
+        private void HandOverOwnScope(Tab entry)
+        {
+            if (entry.HookScope != 0 || !ReferenceEquals(entry.Content, ownBody)
+                || !hasHookScope || hookScopeClosed)
+            {
+                return;
+            }
+
+            entry.HookScope = hookScopeToken;
+            hookScopeClosed = true;
+        }
+
+        /// <summary>Whether <paramref name="entry"/> is this window's own view
+        /// rather than one it adopted — the same test
+        /// <see cref="ReleaseAdoptedTabs"/> makes, plus the body it was built
+        /// with.</summary>
+        private bool IsOwnTab(Tab entry)
+            => ReferenceEquals(entry.Content, ownBody)
+               || (entry.RehostCallback != null && entry.RehostCallback == OnContentRehosted);
 
         /// <summary>Height of the chrome row(s) directly below the title
         /// bar. With a toolbar, <see cref="chromeRow"/> owns this entirely —
@@ -1843,6 +2002,11 @@ namespace GustUI.Elements
             /// is closed — see <see cref="OnContentRehosted"/>.</summary>
             internal Action<ModalWindowElement> RehostCallback;
 
+            /// <summary>What this tab's X does instead of removing it — the
+            /// view's <see cref="OnOwnTabCloseRequested"/>, carried with the
+            /// tab. Null for the ordinary remove-and-tell.</summary>
+            internal Action CloseOverride;
+
             /// <summary>The keyboard-hook scope this tab's view registered its
             /// shortcuts in: raised when the tab is activated, popped when it
             /// closes. 0 for a view with no scope of its own.
@@ -1961,6 +2125,7 @@ namespace GustUI.Elements
                 new TVVector(size != null ? size.X : 400, 40));
 
             AddChildElement(titleBarElement);
+            titleBarElement.OnCloseRequested = RequestCloseFromTitleBar;
             content = this.AddChildElement<TextElement>();
 
             content.Set<PositionTrait>(new TVVector(10, 50));
@@ -2035,6 +2200,10 @@ namespace GustUI.Elements
                 interactiveTitleBar);
 
             AddChildElement(titleBarElement);
+
+            // Always through here, so a window whose own view has left can
+            // hand its X to the view that is left in it (#286).
+            titleBarElement.OnCloseRequested = RequestCloseFromTitleBar;
 
             if (hasHookScope)
             {
