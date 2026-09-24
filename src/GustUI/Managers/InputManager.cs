@@ -742,6 +742,12 @@ namespace GustUI.Managers
                 break;
             }
 
+            // Re-read: the dialog that just took the key may have moved focus.
+            // Closing a dialog commonly clears it, and a gate still saying
+            // "typing" then handed the key to a field that was no longer
+            // there — a null dereference on the next line that touches it.
+            typing = CurrentlyFocused != null && CurrentlyFocused.CanBeInputFocused;
+
             if (typing)
             {
                 bool shift = keyboardState.IsKeyDown(Keys.LeftShift) || keyboardState.IsKeyDown(Keys.RightShift);
@@ -771,6 +777,15 @@ namespace GustUI.Managers
 
                     if (!previousKeyboardState.IsKeyDown(key))
                     {
+                        // A key handled earlier this frame can end the typing
+                        // (Enter submits, and the submit closes the dialog and
+                        // clears focus); the rest of the frame's keys have no
+                        // field to go to.
+                        if (CurrentlyFocused == null)
+                        {
+                            break;
+                        }
+
                         CurrentlyFocused.HandleKeyInput(key, shift, control);
 
                         if (CanAutoRepeat(key))
@@ -782,7 +797,7 @@ namespace GustUI.Managers
                     }
                 }
 
-                if (!repeatKeyStillDown)
+                if (!repeatKeyStillDown || CurrentlyFocused == null)
                 {
                     repeatKey = Keys.None;
                 }
