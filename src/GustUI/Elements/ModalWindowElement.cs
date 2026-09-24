@@ -2168,6 +2168,19 @@ namespace GustUI.Elements
                 return false;
             }
 
+            // A field that handles Escape ITSELF keeps it. Opt-in, through
+            // TextFieldElement.OnCancel: a field that sets one is saying
+            // "Escape backs out of ME", like an address bar turned into a box
+            // for typing a path. Without this the dialog took the key first
+            // and the field got it as well, so one press cancelled the edit
+            // AND closed the dialog around it.
+            if (key == Keys.Escape && typing
+                && Resources.StaticResources?.InputManager?.CurrentlyFocused is InputElements.TextFieldElement field
+                && field.OnCancel != null)
+            {
+                return false;
+            }
+
             // Frontmost WINS, and only it: a stack of dialogs must peel one at
             // a time rather than all at once.
             ModalWindowElement front = null;

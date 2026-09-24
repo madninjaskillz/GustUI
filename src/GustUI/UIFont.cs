@@ -1080,5 +1080,28 @@ namespace GustUI
             // their lanes look like from a distance.
             Tiles = 60581
         }
+
+        /// <summary>
+        /// Glyphs drawn from the FLUENT icon font (Theme.AltSymbolFont,
+        /// SegoeIcons.ttf) rather than segmdl2.ttf.
+        ///
+        /// Deliberately NOT members of <see cref="Symbol"/>: that enum is what
+        /// segmdl2.ttf bakes, and these are here because segmdl2's version of
+        /// the same codepoint is the wrong picture. SegoeIcons.ttf bakes only
+        /// an allowlist (FontManager.IconRangesFor), and every entry below is
+        /// on it. Each one was baked ALONE in its own process on the default
+        /// 1 MB stack first; SegoeIcons has its own stack-overflow crashers
+        /// (E713 Settings is one), so do the same before adding any more.
+        /// </summary>
+        public static class Fluent
+        {
+            /// <summary>E8B7 - the horizontal folder. segmdl2's Folder (E188)
+            /// is the Windows 10 folder seen edge-on, and at list-row size it
+            /// reads as a page: a file dialog's folders looked like its files
+            /// (ezmuze studio #277).</summary>
+            public const int Folder = 0xE8B7;
+
+            public static string Icon(int codepoint) => Char.ConvertFromUtf32(codepoint);
+        }
     }
 }

@@ -83,7 +83,8 @@ namespace GustUI.Managers
         /// second ~2200-codepoint space for two icons, SegoeIcons.ttf gets
         /// only the exact two codepoints the app ever actually asks it to
         /// render (Theme.Icons.CloseIcon/MaximizeIcon) — individually
-        /// confirmed safe. Any font not listed here gets none (BasicLatin
+        /// confirmed safe — plus <see cref="UIFont.Fluent"/>'s glyphs, each
+        /// probed the same way. Any font not listed here gets none (BasicLatin
         /// only) — the original all-icons-excluded fix's fallback.</summary>
         private static IEnumerable<CharacterRange> IconRangesFor(string path)
         {
@@ -101,6 +102,7 @@ namespace GustUI.Managers
                 {
                     new CharacterRange((char)UIFont.Symbol.Cancel),
                     new CharacterRange((char)UIFont.Symbol.FullScreen),
+                    new CharacterRange((char)UIFont.Fluent.Folder),
                 };
             }
 

@@ -129,6 +129,13 @@ namespace GustUI.Elements.InputElements
         /// focus.</summary>
         public Action<string> OnCancel;
 
+        /// <summary>Raised when the field loses keyboard focus, for whatever
+        /// reason: a click elsewhere, Tab, Escape, or the host clearing focus.
+        /// For a field that is only a field while it is being edited (a path
+        /// bar that turns back into a breadcrumb) this is where "clicked away"
+        /// becomes "cancelled".</summary>
+        public Action<string> OnBlur;
+
         public int MaxLength { get; set; } = 60;
 
         /// <summary>
@@ -1596,6 +1603,8 @@ namespace GustUI.Elements.InputElements
             // the reader far less than one showing its beginning.
             caret = anchor = 0;
             scroll = 0f;
+
+            OnBlur?.Invoke(text);
         }
     }
 }
