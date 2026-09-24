@@ -357,7 +357,16 @@ namespace GustUI.Elements
                 // below would otherwise pop it, and the merged view's
                 // shortcuts would stop working — silently, since a hook whose
                 // scope has left the stack never fires again.
-                HookScope = source.hasHookScope ? source.hookScopeToken : 0,
+                //
+                // A window a tab was POPPED OUT into pushed no scope of its
+                // own: the view's scope rides on its one tab. Reading only the
+                // window's token dropped it, so merging a popped-out piano
+                // roll back into the sequencer left its scope on the stack,
+                // raised and never popped -- after the piano roll closed, the
+                // sequencer answered no key at all (ezmuze #290).
+                HookScope = source.tabs.Count == 1 && source.tabs[0].HookScope != 0
+                    ? source.tabs[0].HookScope
+                    : source.hasHookScope ? source.hookScopeToken : 0,
 
                 // And its name, so a window it later owns is named after it.
                 ViewName = (source.tabs.Count == 1 ? source.NameOf(source.tabs[0]) : null) ?? source.ElementName,
@@ -675,10 +684,11 @@ namespace GustUI.Elements
         /// tabs by merging, and the items of a tab that was never on screen
         /// here would otherwise sit in the toolbar from the moment it arrived.
         ///
-        /// The menu is only ever REPLACED, never emptied -- a tab with no menu
-        /// of its own leaves the previous one up rather than removing the bar
-        /// and moving everything below it. Every view that can be a tab sets
-        /// one, so this is a fallback rather than a case anybody sees.
+        /// The menu follows the incoming tab exactly, and a tab with no menu of
+        /// its own takes the bar down (ezmuze #289). It used to leave the
+        /// previous one up, on the belief that every view that can be a tab
+        /// sets one; the pattern explorer and the Stack do not, so a closed
+        /// piano roll's Pattern menu stayed over the explorer, still working.
         /// </summary>
         private void SwapChromeTo(Tab incoming)
         {
@@ -1636,9 +1646,20 @@ namespace GustUI.Elements
         /// MAX of the two) or wrapped below it (two rows, menu bar height +
         /// toolbar height — see EnsureToolbar). Menu-only (no toolbar) keeps
         /// the simple one-row case.</summary>
-        private int ChromeRowHeight => chromeRow != null
-            ? (int)chromeRow.GetSize().Y
-            : (menuBar != null ? MenuBarElement.BarHeight : 0);
+        private int ChromeRowHeight => ChromeRowEmpty
+            ? 0
+            : chromeRow != null
+                ? (int)chromeRow.GetSize().Y
+                : (menuBar != null ? MenuBarElement.BarHeight : 0);
+
+        /// <summary>No menu and nothing on the toolbar: the tab on screen has
+        /// no chrome of its own (the pattern explorer, the Stack), so the row
+        /// takes no room at all, the same as a window that never had one
+        /// (ezmuze #289). The toolbar outlives the tab that built it -- the
+        /// sequencer's, say -- and without this a menu-less tab beside it sat
+        /// under an empty strip where the gone menu had been.</summary>
+        private bool ChromeRowEmpty
+            => menuBar == null && (toolbar == null || toolbar.Children.Items.Count == 0);
 
         /// <summary>Y (modal-relative) where hosted content starts: below
         /// the title bar (always present — see titleBarElement's own doc
@@ -1736,11 +1757,22 @@ namespace GustUI.Elements
 
         /// <summary>Puts a menu on screen without filing it anywhere — the
         /// half of SetMenu a tab switch wants, since the incoming tab's menu is
-        /// already recorded.</summary>
+        /// already recorded.
+        ///
+        /// NO MENU TAKES THE BAR DOWN (ezmuze #289). A tab switch to a view
+        /// with no menu of its own used to leave the previous one up, which
+        /// meant a CLOSED view's menu -- the piano roll's Pattern, over the
+        /// pattern explorer left behind it -- stayed on the bar, clickable,
+        /// and its shortcuts stayed live through the menu-shortcut dispatch,
+        /// all acting on a view that had gone. A window with no menu has no
+        /// bar at all (ContentTop drops by the bar's height and the content
+        /// follows it on the next layout), so that is what a menu-less tab
+        /// gets too.</summary>
         private void ApplyMenu(List<MenuItemModel> sections)
         {
             if (sections == null || sections.Count == 0)
             {
+                RemoveMenuBar();
                 return;
             }
 
@@ -1750,10 +1782,57 @@ namespace GustUI.Elements
                 menuBar = new MenuBarElement(this, sections);
                 menuBar.Set<PositionTrait>(new TVVector(0, ModalTitleBarElement.BarHeight));
                 AddChildElement(menuBar);
+                EnsureMenuSpacer();
             }
             else
             {
                 menuBar.SetItems(sections);
+            }
+        }
+
+        /// <summary>Takes the menu bar off this window, and the space the
+        /// toolbar row reserved for it, closing any dropdown it had open.</summary>
+        private void RemoveMenuBar()
+        {
+            if (menuBar == null)
+            {
+                return;
+            }
+
+            // Its dropdown is a root-window popup, not a child of the bar, so
+            // killing the bar alone would leave a menu of the gone view open.
+            menuBar.SetItems(new List<MenuItemModel>());
+            menuBar.Kill();
+            menuBar = null;
+
+            if (menuSpacer != null)
+            {
+                chromeRow?.Children?.Remove(menuSpacer);
+                menuSpacer.Kill();
+                menuSpacer = null;
+            }
+        }
+
+        /// <summary>The toolbar row's placeholder for the menu bar, for a bar
+        /// that went up AFTER the toolbar did -- a menu-less tab built the
+        /// toolbar, and a tab with a menu came back. EnsureToolbar only makes
+        /// one when the bar already exists, so without this the toolbar kept
+        /// its x=0 slot and drew over the menu. The spacer must come FIRST in
+        /// the row, so the toolbar's slot is taken out and put back after it.</summary>
+        private void EnsureMenuSpacer()
+        {
+            if (chromeRow == null || menuSpacer != null || menuBar == null)
+            {
+                return;
+            }
+
+            menuSpacer = new FilledRectangleElement(0, 0, (int)menuBar.ContentWidth, MenuBarElement.BarHeight,
+                new TVFillSolidColor(Color.Transparent));
+            chromeRow.Children?.Remove(toolbarSlot);
+            chromeRow.AddChild(menuSpacer, "menu-spacer");
+            if (toolbarSlot != null)
+            {
+                chromeRow.AddChild(toolbarSlot, "toolbar-slot");
             }
         }
 
@@ -3235,6 +3314,11 @@ namespace GustUI.Elements
             // landed this pass — one frame behind chromeRow's own layout,
             // same tolerance every other width-tracking bar in this file
             // already has, imperceptible at any real frame rate.
+            if (toolbar != null)
+            {
+                toolbar.Visible = !ChromeRowEmpty;
+            }
+
             if (chromeRow != null)
             {
                 chromeRow.WrapWidth = this.GetSize().X;
