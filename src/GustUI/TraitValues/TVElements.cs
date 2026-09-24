@@ -49,6 +49,20 @@ public class TVElements : TraitValue
         sortedCache = null;
         Version++;
     }
+    /// <summary>Changes the name <paramref name="item"/> is held under, in
+    /// place — same position, no add/remove. For an element whose name
+    /// follows what it is showing (a window whose own view has left it), so
+    /// <see cref="Get"/> and <see cref="Remove(string)"/> agree with its
+    /// ElementName afterwards.</summary>
+    public void Rename(Element item, string name)
+    {
+        int index = namedItems.FindIndex(x => x.Item1 == item);
+        if (index >= 0)
+        {
+            namedItems[index] = new(item, name);
+        }
+    }
+
     public List<Element> Items => sortedCache ??= namedItems.Select(x => x.Item1).OrderBy(x => x.Depth).ToList();
     public Element Get(string name)
     {

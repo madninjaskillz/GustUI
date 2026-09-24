@@ -358,6 +358,9 @@ namespace GustUI.Elements
                 // shortcuts would stop working — silently, since a hook whose
                 // scope has left the stack never fires again.
                 HookScope = source.hasHookScope ? source.hookScopeToken : 0,
+
+                // And its name, so a window it later owns is named after it.
+                ViewName = (source.tabs.Count == 1 ? source.NameOf(source.tabs[0]) : null) ?? source.ElementName,
             };
 
             // Its menu and toolbar come too, or the merged view arrives with
@@ -384,8 +387,13 @@ namespace GustUI.Elements
         ///
         /// <paramref name="onRehost"/> is told where the content ends up if it
         /// is later torn off, and told null when the tab is closed.
+        ///
+        /// <paramref name="viewName"/> is the element name the view would have
+        /// given a window of its own: a window it is later popped out into, or
+        /// one it is left owning, is called that rather than something generic
+        /// or, worse, the name of a view that is no longer in it (ezmuze #288).
         /// </summary>
-        public void AddTab(string tabTitle, Element body, Action<ModalWindowElement> onRehost = null, int hookScope = 0)
+        public void AddTab(string tabTitle, Element body, Action<ModalWindowElement> onRehost = null, int hookScope = 0, string viewName = null)
         {
             if (body == null)
             {
@@ -393,7 +401,14 @@ namespace GustUI.Elements
             }
 
             body.Parent?.Children?.Remove(body);
-            Adopt(new Tab { Title = tabTitle, Content = body, RehostCallback = onRehost, HookScope = hookScope });
+            Adopt(new Tab
+            {
+                Title = tabTitle,
+                Content = body,
+                RehostCallback = onRehost,
+                HookScope = hookScope,
+                ViewName = viewName,
+            });
         }
 
         /// <summary>
@@ -448,6 +463,7 @@ namespace GustUI.Elements
             BuildTabButton(entry);
             ActivateTab(tabs.Count - 1);
             entry.RehostCallback?.Invoke(this);
+            SyncName();
         }
 
         /// <summary>
@@ -498,6 +514,7 @@ namespace GustUI.Elements
                 // shortcuts (#286).
                 entry.RehostCallback = RehostOf(entry);
                 HandOverOwnScope(entry);
+                entry.ViewName = NameOf(entry);
 
                 entry.Button?.Kill();
                 entry.Button = null;
@@ -782,12 +799,23 @@ namespace GustUI.Elements
                 // Its view is going, so its shortcuts go with it — otherwise
                 // the scope stays on the stack and a later raise could hand
                 // the keyboard to a dead view.
+                //
+                // The window's OWN view keeps its shortcuts in the window's
+                // scope rather than the tab's, so it hands that over first:
+                // closing it by its tab X while other tabs kept the window
+                // open left its hooks live and listed under F1 (ezmuze #287).
+                HandOverOwnScope(entry);
                 if (entry.HookScope != 0)
                 {
                     Resources.StaticResources?.InputManager?.PopHookScope(entry.HookScope);
                 }
 
-                entry.RehostCallback?.Invoke(null);
+                // RehostOf, not the tab's own field: the tab a window is born
+                // with records no callback (its view's lives on the window),
+                // so a view closed by its own tab's X was never told and went
+                // on running -- its listeners, its shortcuts, anything it had
+                // floated -- behind a window it was no longer in (#287).
+                RehostOf(entry)?.Invoke(null);
                 if (ReferenceEquals(content, entry.Content))
                 {
                     content = null;
@@ -817,6 +845,7 @@ namespace GustUI.Elements
             int next = Math.Clamp(index >= tabs.Count ? tabs.Count - 1 : index, 0, tabs.Count - 1);
             content = null;
             ActivateTab(next);
+            SyncName();
         }
 
         /// <summary>
@@ -1192,7 +1221,11 @@ namespace GustUI.Elements
             MouseState mouse = Resources.StaticResources.InputManager.CurrentMouseState;
             TVVector size = ElementTrait<SizeTrait>().Value();
             int bottomInset = BottomInset;
-            Tab moved = DetachTab(index);
+
+            // Named after the view it will hold, read before the tab leaves
+            // (#288): a sequencer popped out of its window used to leave that
+            // window called sequencer-modal and arrive as tab-popped-<guid>.
+            string poppedName = NameOf(entry) ?? "tab-popped-" + Guid.NewGuid();            Tab moved = DetachTab(index);
             ReleaseToolbarItems(moved);
             HandOverOwnScope(moved);
 
@@ -1235,12 +1268,39 @@ namespace GustUI.Elements
 
             modal.WearChromeOf(moved);
             rehost?.Invoke(modal);
-            Resources.StaticResources.RootWindow.AddChild(modal, "tab-popped-" + Guid.NewGuid());
+            Resources.StaticResources.RootWindow.AddChild(modal, poppedName);
         }
 
         /// <summary>Per-frame tab upkeep, called from Update.</summary>
         private void UpdateTabs()
         {
+            if (closeAllTabsRequested)
+            {
+                closeAllTabsRequested = false;
+
+                // A view that asks before it goes (a CloseOverride) is asked,
+                // and keeps its tab -- and so the window -- if it declines;
+                // everything else is removed and told, as by its own X.
+                foreach (Tab entry in new List<Tab>(tabs))
+                {
+                    if (!tabs.Contains(entry))
+                    {
+                        continue;
+                    }
+
+                    if (entry.CloseOverride != null)
+                    {
+                        entry.CloseOverride();
+                    }
+                    else
+                    {
+                        RemoveTab(tabs.IndexOf(entry), killContent: true);
+                    }
+                }
+
+                return;
+            }
+
             if (closeTabRequested != null)
             {
                 Tab entry = closeTabRequested;
@@ -1440,6 +1500,15 @@ namespace GustUI.Elements
                 return;
             }
 
+            // Its own view gone and SEVERAL others left in it (ezmuze #287):
+            // the departed owner's close has nothing left to close here, so
+            // the X closes what is here, each tab the way its own X would.
+            if (tabs.Count > 1 && !tabs.Exists(IsOwnTab))
+            {
+                closeAllTabsRequested = true;
+                return;
+            }
+
             if (ownerCloseRequested != null)
             {
                 ownerCloseRequested();
@@ -1496,6 +1565,69 @@ namespace GustUI.Elements
         private bool IsOwnTab(Tab entry)
             => ReferenceEquals(entry.Content, ownBody)
                || (entry.RehostCallback != null && entry.RehostCallback == OnContentRehosted);
+
+        // ---- the window's name follows its owner (ezmuze #288) ----
+
+        /// <summary>This window's name while its own view was in it, kept
+        /// once <see cref="SyncName"/> first runs, so the own view can still
+        /// be named after the window has been renamed for somebody else.</summary>
+        private string ownViewName;
+
+        /// <summary>A name for when the owner never gave one, made once so the
+        /// window does not change name every time a tab comes or goes.</summary>
+        private string unnamedName;
+
+        /// <summary>The element name <paramref name="entry"/>'s view goes by:
+        /// what it brought with it, or for this window's own view the window's
+        /// own name. Null when nobody said.</summary>
+        private string NameOf(Tab entry)
+        {
+            if (entry == null)
+            {
+                return null;
+            }
+
+            if (entry.ViewName != null)
+            {
+                return entry.ViewName;
+            }
+
+            return ReferenceEquals(entry.Content, ownBody) ? ownViewName ?? ElementName : null;
+        }
+
+        /// <summary>
+        /// Names this window after the view that owns it: its own view while
+        /// that is in it, otherwise the view in its first tab -- the one its
+        /// title-bar X belongs to when it is the only one left.
+        ///
+        /// A window's name is how the control API, scripts and anything else
+        /// outside finds it, and it used to be fixed at construction. After the
+        /// sequencer was popped out of its window, or merged away, the window
+        /// left behind holding a piano roll was still sequencer-modal and the
+        /// sequencer's new one was tab-popped-&lt;guid&gt;: a lookup for the
+        /// sequencer's window found the wrong one.
+        /// </summary>
+        private void SyncName()
+        {
+            if (tabs.Count == 0 || Parent == null)
+            {
+                return;
+            }
+
+            // Nothing has renamed this window before the first call, so its
+            // name right now is its own view's.
+            ownViewName ??= ElementName;
+
+            Tab owner = tabs.Find(t => ReferenceEquals(t.Content, ownBody)) ?? tabs[0];
+            string name = NameOf(owner) ?? (unnamedName ??= "tab-popped-" + Guid.NewGuid());
+            if (name == ElementName)
+            {
+                return;
+            }
+
+            Parent.Children?.Rename(this, name);
+            ElementName = name;
+        }
 
         /// <summary>Height of the chrome row(s) directly below the title
         /// bar. With a toolbar, <see cref="chromeRow"/> owns this entirely —
@@ -2018,6 +2150,14 @@ namespace GustUI.Elements
             /// at once.</summary>
             internal int HookScope;
 
+            /// <summary>The element name of the window this tab's view was
+            /// built in ("pianoroll-modal", "sequencer-modal"), carried so a
+            /// window this view later owns can be named after it -- see
+            /// <see cref="SyncName"/>. Null for a view that never said, and
+            /// for a window's own tab while it is still in that window (the
+            /// window's own name is the view's name then).</summary>
+            internal string ViewName;
+
             /// <summary>The menu this tab's view set, and the toolbar items it
             /// contributed, so <see cref="ActivateTab"/> can put the right
             /// chrome up with the right content.
@@ -2062,6 +2202,7 @@ namespace GustUI.Elements
             = new List<(Element, string)>();
         private FilledRectangleElement tabStrip;
         private Tab closeTabRequested;
+        private bool closeAllTabsRequested;
         private Tab popOutRequested;
 
 

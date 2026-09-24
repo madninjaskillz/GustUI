@@ -35,6 +35,11 @@ namespace GustUI.Managers
         /// whose hooks fire. 0 = base (no modal scope pushed).</summary>
         public int ActiveHookScope => hookScopeStack.Count > 0 ? hookScopeStack[hookScopeStack.Count - 1] : 0;
 
+        /// <summary>Every pushed scope, bottom first, the active one last. For
+        /// diagnostics: whether a view's scope is still on the stack is what
+        /// says whether its shortcuts can ever fire again.</summary>
+        public IReadOnlyList<int> HookScopes => hookScopeStack;
+
         /// <summary>Pushes a new hook scope (see field notes) and returns its
         /// token for <see cref="PopHookScope"/>.</summary>
         public int PushHookScope()
