@@ -82,6 +82,44 @@ namespace GustUI.Managers
             hookScopeStack.Add(token);
         }
 
+        /// <summary>
+        /// <see cref="RaiseHookScope"/> for a window the user just clicked:
+        /// raises <paramref name="token"/> unless whatever holds the keyboard
+        /// now must not be displaced by a click (ezmuze #293).
+        ///
+        /// Windows that sit side by side hand the keyboard to whichever was
+        /// clicked last. A modal DIALOG does not take part in that: clicking
+        /// the window behind a Save prompt must not wake that window's
+        /// shortcuts underneath the prompt. <paramref name="mayDisplace"/>
+        /// answers, for the active scope, "is this another side-by-side view"
+        /// -- anything it does not recognise keeps the keyboard. The base
+        /// scope (0) can always be displaced.
+        ///
+        /// Returns whether <paramref name="token"/> is the active scope
+        /// afterwards.
+        /// </summary>
+        public bool ClaimHookScope(int token, Func<int, bool> mayDisplace)
+        {
+            if (token == 0 || !hookScopeStack.Contains(token))
+            {
+                return false;
+            }
+
+            int active = ActiveHookScope;
+            if (active == token)
+            {
+                return true;
+            }
+
+            if (active != 0 && (mayDisplace == null || !mayDisplace(active)))
+            {
+                return false;
+            }
+
+            RaiseHookScope(token);
+            return true;
+        }
+
         public bool HaveInteracted { get; private set; }
         private MouseState previousMouseState;
         private KeyboardState previousKeyboardState;

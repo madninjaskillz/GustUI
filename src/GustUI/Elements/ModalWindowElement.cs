@@ -225,6 +225,106 @@ namespace GustUI.Elements
 
         public bool Tabable { get; set; }
 
+        /// <summary>
+        /// Opt-in for a window that is a VIEW rather than a dialog but is not
+        /// <see cref="Tabable"/> (ezmuze #293: a piano roll floating above the
+        /// module panel that opened it). Tabable windows take part anyway.
+        /// See <see cref="ClaimKeyboard"/>.
+        /// </summary>
+        public bool KeyboardFollowsFront { get; set; }
+
+        /// <summary>Whether clicking this window hands it the keyboard.</summary>
+        private bool TakesKeyboardOnFront => Tabable || KeyboardFollowsFront;
+
+        /// <summary>
+        /// The window the user clicked owns the keyboard (ezmuze #293).
+        ///
+        /// Scopes were a creation-order stack, so the last view OPENED kept
+        /// the keyboard for as long as it lived, whichever window you had
+        /// clicked since: click back into the sequencer beside a floating
+        /// panel and its Delete, S and copy/paste stayed dead. Now a click
+        /// raises this window's active tab's scope, which is the same scope
+        /// its menu speaks for -- the keyboard, the menu bar and the title
+        /// bar's "active" shading all mean the same window.
+        ///
+        /// Only views take part (<see cref="TakesKeyboardOnFront"/>), and
+        /// only from another view: when the active scope is a dialog's, or
+        /// anything else no view window owns, the click leaves it alone.
+        /// </summary>
+        private void ClaimKeyboard()
+        {
+            if (!TakesKeyboardOnFront || Parent == null)
+            {
+                return;
+            }
+
+            Resources.StaticResources?.InputManager?.ClaimHookScope(MenuHookScope, IsViewScope);
+        }
+
+        /// <summary>Whether no other window is drawn over this one at
+        /// <paramref name="point"/>. Draw order is the parent's child order
+        /// (depth, then insertion), so any window after this one that
+        /// contains the point is on top of it there.</summary>
+        private bool IsTopmostWindowAt(Vector2 point)
+        {
+            if (Parent == null)
+            {
+                return true;
+            }
+
+            bool after = false;
+            foreach (Element sibling in Parent.Children.Items)
+            {
+                if (ReferenceEquals(sibling, this))
+                {
+                    after = true;
+                    continue;
+                }
+
+                if (after && sibling is ModalWindowElement window && window.Visible && window.IsMouseOver(point))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>Whether <paramref name="scope"/> belongs to a view window
+        /// -- a window that takes part in <see cref="ClaimKeyboard"/>, or one
+        /// of its tabs -- rather than to a dialog.</summary>
+        private static bool IsViewScope(int scope)
+        {
+            Element root = Resources.StaticResources?.RootWindow;
+            if (root == null || scope == 0)
+            {
+                return false;
+            }
+
+            foreach (Element child in root.Children.Items)
+            {
+                if (child is not ModalWindowElement window || !window.TakesKeyboardOnFront)
+                {
+                    continue;
+                }
+
+                if (window.hasHookScope && !window.hookScopeClosed && window.hookScopeToken == scope)
+                {
+                    return true;
+                }
+
+                foreach (Tab tab in window.tabs)
+                {
+                    if (tab.HookScope == scope)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
         /// <summary>Opt-in (2026-08-21): lets <see cref="Element.MoveToFront"/>
         /// place this floating window ABOVE the full-screen modal tier
         /// (<see cref="ModalDepth"/>), instead of the
@@ -3288,6 +3388,10 @@ namespace GustUI.Elements
             justSpawned = true;
         }
         private bool justSpawned = false;
+
+        /// <summary>A window that has just spawned claims the keyboard one
+        /// update later (see its use in Update, #293).</summary>
+        private bool spawnClaimPending;
         private int maximizeAttemptCount = 0;
 
         /// <summary>Edge-detection state for the click-anywhere-brings-to-
@@ -3355,7 +3459,22 @@ namespace GustUI.Elements
                 && previousLeftButtonForFocus == ButtonState.Released
                 && IsMouseOver())
             {
+                // The keyboard goes to the window the press actually LANDED
+                // on (#293), decided before this window raises itself. This
+                // poll is bounds-only, so a press on a panel floating over the
+                // sequencer reaches the sequencer's poll too, and which of the
+                // two raises itself last depends on update order -- which,
+                // once both windows sit at the same clamped depth, is only
+                // insertion order. Whatever that does to MoveToFront, the
+                // keys must not go to a window the press did not land on.
+                bool topmost = IsTopmostWindowAt(new Vector2(focusMouseState.X, focusMouseState.Y));
+
                 MoveToFront();
+
+                if (topmost)
+                {
+                    ClaimKeyboard();
+                }
             }
 
             previousLeftButtonForFocus = focusMouseState.LeftButton;
@@ -3557,9 +3676,27 @@ namespace GustUI.Elements
                 }
             }
 
+            if (spawnClaimPending)
+            {
+                spawnClaimPending = false;
+                ClaimKeyboard();
+            }
+
             if (justSpawned)
             {
                 this.MoveToFront();
+
+                // Arriving in front is being brought to front, so a new view
+                // takes the keyboard too (#293) -- but on its NEXT update,
+                // not this one. A window opened BY a press (a double-click
+                // on a channel header opens a module panel) is built in the
+                // middle of that press, and the window that was pressed sees
+                // the same press edge later in this very frame and claims
+                // the keyboard for itself. It is the topmost window where the
+                // press landed, so it is right to; the new window simply has
+                // to claim after it, or it comes up in front with the keys
+                // still behind it.
+                spawnClaimPending = true;
                 justSpawned = false;
             }
 
