@@ -285,6 +285,84 @@ namespace GustUI.Managers
                 Key = keys;
                 Modifiers = modifiers.ToList();
             }
+
+            /// <summary>
+            /// Whether <paramref name="state"/> holds EXACTLY this shortcut's
+            /// modifiers: every one it lists is down, and every one it does not
+            /// list is up. The key's edge (just pressed or held) is the
+            /// caller's business; this only answers "is the chord right".
+            ///
+            /// Exact, not inclusive, since #280. Inclusive matching let a bare
+            /// S hook fire on Ctrl+S (the sequencer split its clips instead of
+            /// saving) and let Ctrl+X and Ctrl+Shift+X both fire on one press.
+            /// A view that wants the Shift variant registers it as a hook of
+            /// its own.
+            ///
+            /// Left and right keys are the same modifier. A shortcut whose own
+            /// key IS a modifier key (a hook on LeftShift) does not count that
+            /// modifier as extra: pressing the key necessarily holds it.
+            /// </summary>
+            public bool IsHeldIn(KeyboardState state)
+            {
+                foreach (KeyboardModifiers modifier in AllModifiers)
+                {
+                    if (IsModifierKey(Key, modifier))
+                    {
+                        continue;
+                    }
+
+                    bool wanted = Modifiers != null && Modifiers.Contains(modifier);
+                    if (wanted != IsModifierHeld(state, modifier))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        }
+
+        private static readonly KeyboardModifiers[] AllModifiers =
+        {
+            KeyboardModifiers.shift, KeyboardModifiers.ctrl, KeyboardModifiers.alt,
+        };
+
+        /// <summary>Whether either the left or the right key of
+        /// <paramref name="modifier"/> is down.</summary>
+        public static bool IsModifierHeld(KeyboardState state, KeyboardModifiers modifier)
+        {
+            switch (modifier)
+            {
+                case KeyboardModifiers.shift:
+                    return state.IsKeyDown(Keys.LeftShift) || state.IsKeyDown(Keys.RightShift);
+                case KeyboardModifiers.ctrl:
+                    return state.IsKeyDown(Keys.LeftControl) || state.IsKeyDown(Keys.RightControl);
+                case KeyboardModifiers.alt:
+                    return state.IsKeyDown(Keys.LeftAlt) || state.IsKeyDown(Keys.RightAlt);
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>Whether any of Shift, Ctrl or Alt (either side) is down.</summary>
+        public static bool AnyModifierHeld(KeyboardState state)
+            => IsModifierHeld(state, KeyboardModifiers.shift)
+               || IsModifierHeld(state, KeyboardModifiers.ctrl)
+               || IsModifierHeld(state, KeyboardModifiers.alt);
+
+        private static bool IsModifierKey(Keys key, KeyboardModifiers modifier)
+        {
+            switch (modifier)
+            {
+                case KeyboardModifiers.shift:
+                    return key == Keys.LeftShift || key == Keys.RightShift;
+                case KeyboardModifiers.ctrl:
+                    return key == Keys.LeftControl || key == Keys.RightControl;
+                case KeyboardModifiers.alt:
+                    return key == Keys.LeftAlt || key == Keys.RightAlt;
+                default:
+                    return false;
+            }
         }
 
         public class KeyboardHook
@@ -322,6 +400,9 @@ namespace GustUI.Managers
             Pressed
         }
 
+        /// <summary>The LEFT key of a modifier. Shortcut matching does not
+        /// use this (either side counts, see <see cref="IsModifierHeld"/>);
+        /// kept for anything that needs one key to name.</summary>
         public Keys FromModifier(KeyboardModifiers modifier)
         {
             switch (modifier)
@@ -636,12 +717,21 @@ namespace GustUI.Managers
             //    in one scope ALL fire: the sequencer binds Escape too, so
             //    without this a single press would close the dialog and clear
             //    the selection behind it.
+            //
+            // Bare keys only (#280): Ctrl+Enter or Shift+Escape is some other
+            // shortcut, not "confirm" or "cancel", by the same exact-modifier
+            // rule the hooks follow.
             Keys consumed = Keys.None;
             foreach (Keys dialogKey in DialogKeys)
             {
                 if (!keyboardState.IsKeyDown(dialogKey) || previousKeyboardState.IsKeyDown(dialogKey))
                 {
                     continue;
+                }
+
+                if (AnyModifierHeld(keyboardState))
+                {
+                    break;
                 }
 
                 if (Elements.ModalWindowElement.HandleDialogKey(dialogKey, typing))
@@ -712,6 +802,7 @@ namespace GustUI.Managers
             }
 
             int activeScope = ActiveHookScope;
+            List<Keys> firedKeys = null;
             for (int i = 0; !typing && i < Hooks.Count; i++)
             {
                 KeyboardHook hook = Hooks[i];
@@ -730,22 +821,32 @@ namespace GustUI.Managers
                     continue;
                 }
 
-                bool modifiersDown = true;
-                if (hook.Shortcut.Modifiers != null)
+                if (hook.Shortcut.IsHeldIn(keyboardState))
                 {
-                    for (int m = 0; m < hook.Shortcut.Modifiers.Count; m++)
-                    {
-                        if (!keyboardState.IsKeyDown(FromModifier(hook.Shortcut.Modifiers[m])))
-                        {
-                            modifiersDown = false;
-                            break;
-                        }
-                    }
-                }
-
-                if (modifiersDown)
-                {
+                    (firedKeys ??= new List<Keys>()).Add(hook.Shortcut.Key);
                     hook.TriggerAction();
+                }
+            }
+
+            // ---- menu-bar shortcuts (#280) ----
+            //
+            // A menu item's Shortcut used to be a label and nothing more: the
+            // sequencer's File > Save said Ctrl+S and no key ever reached it.
+            // Now a newly pressed key that no hook took is offered to the menu
+            // bar of the window whose scope is active. A hook WINS: several
+            // views register a hook for the same chord their menu shows (Undo,
+            // the clipboard keys), and one press must not do the thing twice.
+            if (!typing)
+            {
+                foreach (Keys key in keyboardState.GetPressedKeys())
+                {
+                    if (previousKeyboardState.IsKeyDown(key) || key == consumed
+                        || (firedKeys != null && firedKeys.Contains(key)))
+                    {
+                        continue;
+                    }
+
+                    Elements.ModalWindowElement.HandleMenuShortcut(key, keyboardState, activeScope);
                 }
             }
 

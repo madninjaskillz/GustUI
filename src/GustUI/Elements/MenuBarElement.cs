@@ -81,6 +81,46 @@ namespace GustUI.Elements
             BuildItems();
         }
 
+        /// <summary>The sections currently on the bar.</summary>
+        internal IReadOnlyList<MenuItemModel> Sections => menuSections;
+
+        /// <summary>
+        /// The first enabled item, depth first, whose Shortcut is
+        /// <paramref name="key"/> held with exactly its modifiers in
+        /// <paramref name="state"/> and which has an Action to run; null when
+        /// none is. Items with only SubItems are searched, never run. A
+        /// disabled item hides its children too, as it does on screen.
+        /// </summary>
+        public static MenuItemModel FindShortcut(IEnumerable<MenuItemModel> items, Microsoft.Xna.Framework.Input.Keys key, Microsoft.Xna.Framework.Input.KeyboardState state)
+        {
+            if (items == null)
+            {
+                return null;
+            }
+
+            foreach (MenuItemModel item in items)
+            {
+                if (item == null || !item.Enabled)
+                {
+                    continue;
+                }
+
+                if (item.Action != null && item.Shortcut != null
+                    && item.Shortcut.Key == key && item.Shortcut.IsHeldIn(state))
+                {
+                    return item;
+                }
+
+                MenuItemModel inner = FindShortcut(item.SubItems, key, state);
+                if (inner != null)
+                {
+                    return inner;
+                }
+            }
+
+            return null;
+        }
+
         private static int MeasureItemWidth(string text)
         {
             float textWidth = Resources.StaticResources.FontManager.MeasureSdfText(Resources.StaticResources.Theme.MenuFont, text).X;

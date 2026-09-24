@@ -1557,6 +1557,10 @@ namespace GustUI.Elements
         // scope for exactly this reason.
         private readonly bool hasHookScope;
         private readonly int hookScopeToken;
+
+        /// <summary>The body this window was constructed with — the content
+        /// whose hooks live in <see cref="hookScopeToken"/>.</summary>
+        private readonly Element ownBody;
         private bool hookScopeClosed;
 
         /// <summary>Pops this modal's keyboard-hook scope (if constructed
@@ -2017,6 +2021,7 @@ namespace GustUI.Elements
             }
 
             this.content = body;
+            ownBody = body;
             tabs.Add(new Tab { Title = title, Content = body });
 
             // Before AddChild and before the first RefreshScrollMode below —
@@ -2236,6 +2241,135 @@ namespace GustUI.Elements
 
             BasicButtonElement confirm = FindConfirmButton();
             return confirm != null && Press(confirm);
+        }
+
+        /// <summary>
+        /// Offers a newly pressed key to the menu bar of the window that owns
+        /// the active hook scope (#280), and runs the item whose Shortcut it
+        /// is. Called by InputManager only for a key no hook took, so a view
+        /// that binds the same chord as its menu shows keeps a single action.
+        ///
+        /// The window is the one whose ACTIVE TAB's scope is live (a tabbed
+        /// window swaps its menu with its tab), frontmost if several qualify.
+        /// Returns true when an item ran.
+        /// </summary>
+        internal static bool HandleMenuShortcut(Keys key, KeyboardState state, int activeScope)
+        {
+            ModalWindowElement front = null;
+            MenuItemModel item = null;
+            long best = long.MinValue;
+
+            for (int i = 0; i < LiveDialogs.Count; i++)
+            {
+                ModalWindowElement window = LiveDialogs[i];
+                if (window.menuBar == null || window.Parent == null
+                    || window.MenuHookScope != activeScope || window.FrontSequence <= best)
+                {
+                    continue;
+                }
+
+                MenuItemModel match = MenuBarElement.FindShortcut(window.menuBar.Sections, key, state);
+                if (match != null)
+                {
+                    best = window.FrontSequence;
+                    front = window;
+                    item = match;
+                }
+            }
+
+            if (front == null)
+            {
+                return false;
+            }
+
+            // Real click args, as Press builds them for a dialog button: a
+            // handler is entitled to read args.Element.
+            item.Action(front.menuBar.GetClickArgs(Mouse.GetState()));
+            return true;
+        }
+
+        /// <summary>
+        /// The menu-bar shortcuts that <see cref="HandleMenuShortcut"/> would
+        /// run right now for <paramref name="activeScope"/>: every enabled item
+        /// with both a Shortcut and an Action on the frontmost qualifying
+        /// window's bar, each with the top-level section it sits under
+        /// ("File"). For a help screen; empty when no window qualifies.
+        /// </summary>
+        public static List<(string Section, MenuItemModel Item)> MenuShortcuts(int activeScope)
+        {
+            var found = new List<(string Section, MenuItemModel Item)>();
+            ModalWindowElement front = null;
+            for (int i = 0; i < LiveDialogs.Count; i++)
+            {
+                ModalWindowElement window = LiveDialogs[i];
+                if (window.menuBar != null && window.Parent != null && window.MenuHookScope == activeScope
+                    && (front == null || window.FrontSequence > front.FrontSequence))
+                {
+                    front = window;
+                }
+            }
+
+            if (front == null)
+            {
+                return found;
+            }
+
+            void Walk(string section, IEnumerable<MenuItemModel> items)
+            {
+                if (items == null)
+                {
+                    return;
+                }
+
+                foreach (MenuItemModel item in items)
+                {
+                    if (item == null || !item.Enabled)
+                    {
+                        continue;
+                    }
+
+                    if (item.Shortcut != null && item.Action != null)
+                    {
+                        found.Add((section, item));
+                    }
+
+                    Walk(section, item.SubItems);
+                }
+            }
+
+            foreach (MenuItemModel top in front.menuBar.Sections)
+            {
+                if (top != null && top.Enabled)
+                {
+                    Walk(top.Text, top.SubItems);
+                }
+            }
+
+            return found;
+        }
+
+        /// <summary>The hook scope this window's menu speaks for: the active
+        /// tab's when it has tabs, else its own (0 when it pushed none).</summary>
+        private int MenuHookScope
+        {
+            get
+            {
+                if (tabs.Count > 0 && activeIndex >= 0 && activeIndex < tabs.Count)
+                {
+                    // The tab the constructor makes for the window's own body
+                    // records no scope (0), though the body's hooks live in
+                    // the window's: read that as the window's own.
+                    Tab tab = tabs[activeIndex];
+                    if (tab.HookScope == 0 && ReferenceEquals(tab.Content, ownBody))
+                    {
+                        return hasHookScope && !hookScopeClosed ? hookScopeToken : 0;
+                    }
+
+                    return tab.HookScope;
+                }
+
+                return hasHookScope && !hookScopeClosed ? hookScopeToken : 0;
+            }
         }
 
         /// <summary>
