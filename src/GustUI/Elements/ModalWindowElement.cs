@@ -354,36 +354,137 @@ namespace GustUI.Elements
         public int? DepthCeiling { get; set; }
 
         /// <summary>
-        /// The app's backdrop window (ezmuze #301): the one window that stays
-        /// behind every other window even when it is clicked. ezmuze studio's
-        /// sequencer is the only one. Every other window -- floating, docked,
-        /// tabbed, maximised, a dialog, Preferences -- shares one stack, in
-        /// which the window most recently clicked or opened is on top.
+        /// Where a window is pinned in the stack (2026-09-25). Every window --
+        /// floating, docked, tabbed, maximised, a dialog, the sequencer --
+        /// shares one stack in which the window most recently clicked or opened
+        /// is on top (ezmuze #301). A pin splits that stack into three groups,
+        /// bottom to top: <see cref="Back"/>, <see cref="Normal"/>,
+        /// <see cref="Front"/>. Within a group the rule is still click order.
         /// </summary>
-        public bool IsBackdrop { get; set; }
+        public enum WindowPin
+        {
+            /// <summary>Stacks by click and open order with everything else.</summary>
+            Normal,
 
-        private protected override int MoveToFrontCeiling => StackCeiling(IsBackdrop, DepthCeiling);
+            /// <summary>Always on top: above every normal window, however
+            /// recently that was clicked.</summary>
+            Front,
 
-        private protected override int MoveToFrontFloor => StackFloor(IsBackdrop);
+            /// <summary>Always behind: below every normal window, however
+            /// recently this one was clicked.</summary>
+            Back,
+        }
 
-        /// <summary>The depth of the backdrop window: one below every other window.</summary>
-        public const int BackdropWindowDepth = ModalDepth - 2;
+        private WindowPin pin;
 
-        /// <summary>The depth every other window is raised to, just below the
-        /// modal tier. They all share it, so which of them is on top is decided
-        /// by which was brought forward last (<see cref="Element.FrontSequence"/>).</summary>
-        public const int WindowDepth = ModalDepth - 1;
+        /// <summary>This window's pin, set from the title bar's pin button
+        /// (or a tabbed window's active tab). It belongs to the WINDOW, not to
+        /// a tab: a window merged into this one takes this pin, and a tab
+        /// popped out starts <see cref="WindowPin.Normal"/>. Lasts for the
+        /// session. Changing it restacks at once.</summary>
+        public WindowPin Pin
+        {
+            get => pin;
+            set
+            {
+                if (pin == value)
+                {
+                    return;
+                }
+
+                pin = value;
+                ReapplyFrontDepth();
+            }
+        }
+
+        private protected override int MoveToFrontCeiling => StackCeiling(Pin, DepthCeiling);
+
+        private protected override int MoveToFrontFloor => StackFloor(Pin);
+
+        /// <summary>The depth a back-pinned window is raised to.</summary>
+        public const int BackPinnedWindowDepth = ModalDepth - 3;
+
+        /// <summary>The depth every unpinned window is raised to. They all share
+        /// it, so which of them is on top is decided by which was brought
+        /// forward last (<see cref="Element.FrontSequence"/>).</summary>
+        public const int WindowDepth = ModalDepth - 2;
+
+        /// <summary>The depth a front-pinned window is raised to: just below
+        /// the modal tier, and so still below every popup, menu, toast,
+        /// preview and tooltip.</summary>
+        public const int FrontPinnedWindowDepth = ModalDepth - 1;
 
         /// <summary>The highest depth a window may be raised to: an explicit
-        /// <see cref="DepthCeiling"/> first, then the backdrop's or the
-        /// shared window depth.</summary>
-        internal static int StackCeiling(bool backdrop, int? explicitCeiling)
-            => explicitCeiling ?? StackFloor(backdrop);
+        /// <see cref="DepthCeiling"/> first, then its pin group's depth.</summary>
+        internal static int StackCeiling(WindowPin pin, int? explicitCeiling)
+            => explicitCeiling ?? StackFloor(pin);
 
-        /// <summary>The lowest depth a window is raised to.</summary>
-        internal static int StackFloor(bool backdrop) => backdrop ? BackdropWindowDepth : WindowDepth;
+        /// <summary>The lowest depth a window is raised to: its pin group's.</summary>
+        internal static int StackFloor(WindowPin pin) => pin switch
+        {
+            WindowPin.Front => FrontPinnedWindowDepth,
+            WindowPin.Back => BackPinnedWindowDepth,
+            _ => WindowDepth,
+        };
 
-        private bool? lastBackdrop;
+        /// <summary>What the pin button's tooltip and the pin menu call a state.</summary>
+        public static string PinLabel(WindowPin pin) => pin switch
+        {
+            WindowPin.Front => "Pinned to front (always on top)",
+            WindowPin.Back => "Pinned to back (always behind)",
+            _ => "Not pinned",
+        };
+
+        /// <summary>
+        /// Opens the pin menu under <paramref name="anchor"/>: Normal, Pin to
+        /// front, Pin to back, the current one ticked. A root-window popup,
+        /// like every dropdown, so it draws above every window.
+        /// </summary>
+        internal void ShowPinMenu(Element anchor)
+        {
+            foreach (var open in Resources.StaticResources.RootWindow.Children.Items.Where(c => c is FruitPopupMenu).ToList())
+            {
+                open.Kill();
+            }
+
+            MenuItemModel Option(string text, WindowPin value) => new MenuItemModel
+            {
+                Text = text,
+                Icon = Pin == value ? UIFont.Symbol.Accept.Icon() : null,
+                Action = _ => Pin = value,
+            };
+
+            var items = new List<MenuItemModel>
+            {
+                Option("Normal", WindowPin.Normal),
+                Option("Pin to front (always on top)", WindowPin.Front),
+                Option("Pin to back (always behind)", WindowPin.Back),
+            };
+
+            var popup = new FruitPopupMenu(items, 280, anchor);
+            TVVector at = anchor.GetActualPosition();
+            TVVector size = anchor.GetSize();
+            popup.Set<PositionTrait>(new TVVector(at.X, at.Y + size.Y));
+            Resources.StaticResources.RootWindow.AddChild(popup, "pin-menu");
+        }
+
+        /// <summary>Whether this window shows a pin at all: not while docked,
+        /// since a docked window overlaps nothing and has nothing to stack
+        /// against.</summary>
+        internal bool ShowsPin => DockedSide == DockSide.None;
+
+        /// <summary>
+        /// The pin glyph's colour and its small up/down mark, shared by the
+        /// title bar and the tab strip: the idle glyph colour when normal, the
+        /// accent when pinned, with an up arrow for front and a down arrow for
+        /// back.
+        /// </summary>
+        internal static (Color Colour, string Mark) PinLook(WindowPin pin, Color idle) => pin switch
+        {
+            WindowPin.Front => (Resources.StaticResources.Theme.AccentSelection, UIFont.Symbol.Up.Icon()),
+            WindowPin.Back => (Resources.StaticResources.Theme.AccentSelection, UIFont.Symbol.Down.Icon()),
+            _ => (idle, string.Empty),
+        };
 
         /// <summary>Opt-in hook (2026-08-17, tear-off/dissolve fix): an app-
         /// level owner that constructs and reuses ONE long-lived
@@ -1024,9 +1125,9 @@ namespace GustUI.Elements
 
         /// <summary>
         /// A tab's width for a caption this wide: padding, the caption, and room
-        /// for the three glyph slots (close, pop-out, maximise). Every tab keeps
-        /// the maximise slot, though only the active one shows it, so a tab does
-        /// not change width when it is activated.
+        /// for the four glyph slots (close, pop-out, maximise, pin). Every tab
+        /// keeps the maximise and pin slots, though only the active one shows
+        /// them, so a tab does not change width when it is activated.
         /// </summary>
         /// <remarks>Rounded up with a pixel to spare: the label gets back
         /// <c>width - TabGlyphsWidth</c>, and a float round trip a hair short
@@ -1034,7 +1135,7 @@ namespace GustUI.Elements
         internal static float TabWidthFor(float captionWidth) => MathF.Ceiling(captionWidth) + 1f + TabGlyphsWidth;
 
         /// <summary>Everything on a tab but its caption.</summary>
-        private const float TabGlyphsWidth = TabPaddingX + ((TabCloseSize + 4) * 3) + 6 + 4;
+        private const float TabGlyphsWidth = TabPaddingX + ((TabCloseSize + 4) * 4) + 6 + 4;
 
         /// <summary>
         /// Fits tabs of these natural widths into <paramref name="available"/>
@@ -1268,6 +1369,20 @@ namespace GustUI.Elements
                         ? Resources.StaticResources.Theme.Icons.MinimizeIcon
                         : Resources.StaticResources.Theme.Icons.MaximizeIcon));
 
+                // So does the pin: the window's place in the stack, on the
+                // active tab, hidden while docked like the title bar's.
+                slot -= TabCloseSize + 4;
+                bool pinHere = isActive && ShowsPin;
+                var pinLook = PinLook(Pin, Resources.StaticResources.Theme.BodyText);
+                entry.PinGlyph.Set<PositionTrait>(new TVVector(slot, slotY));
+                entry.PinGlyph.Set<SizeTrait>(new TVVector(TabCloseSize, TabCloseSize));
+                entry.PinGlyph.Set<TextTrait>(new TVText(pinHere ? UIFont.Symbol.Pin.Icon() : string.Empty));
+                entry.PinGlyph.Set<ForegroundColorTrait>(new TVColor(pinLook.Colour));
+                entry.PinMark.Set<PositionTrait>(new TVVector(slot + TabCloseSize - 3,
+                    Pin == WindowPin.Back ? slotY + TabCloseSize - 5 : slotY - 3));
+                entry.PinMark.Set<TextTrait>(new TVText(pinHere ? pinLook.Mark : string.Empty));
+                entry.PinMark.Set<ForegroundColorTrait>(new TVColor(pinLook.Colour));
+
                 x += shared + TabGap;
             }
         }
@@ -1338,12 +1453,28 @@ namespace GustUI.Elements
 
             entry.PopOut = TabGlyph(button, "popout",
                 new TVText(UIFont.Symbol.NewWindow.Icon()),
-                "Move this tab into its own window",
+                () => "Move this tab into its own window",
                 () => popOutRequested = entry);
+
+            entry.PinGlyph = TabGlyph(button, "pin",
+                new TVText(string.Empty),
+                () => PinLabel(Pin) + " - click to change",
+                () => ShowPinMenu(entry.PinGlyph));
+
+            entry.PinMark = new TextElement { WordWrap = false };
+            entry.PinMark.Set<SizeTrait>(new TVVector(8, 8));
+            entry.PinMark.Set<FontTrait>(new TVFont
+            {
+                Family = Resources.StaticResources.Theme.SymbolFont.Family,
+                Size = 8,
+                Border = 0,
+            });
+            entry.PinMark.Set<TextTrait>(new TVText(string.Empty));
+            button.AddChild(entry.PinMark, "pin-mark");
 
             entry.Maximise = TabGlyph(button, "maximise",
                 new TVText(Resources.StaticResources.Theme.Icons.MaximizeIcon),
-                "Maximise this window",
+                () => "Maximise this window",
                 () =>
                 {
                     if (DockedSide == DockSide.None)
@@ -1376,7 +1507,7 @@ namespace GustUI.Elements
         }
 
         /// <summary>One of a tab's own little glyph buttons.</summary>
-        private TextElement TabGlyph(Element parent, string name, TVText glyph, string tooltip, Action onClick)
+        private TextElement TabGlyph(Element parent, string name, TVText glyph, Func<string> tooltip, Action onClick)
         {
             var element = new TextElement { WordWrap = false };
             element.Set<SizeTrait>(new TVVector(TabCloseSize, TabCloseSize));
@@ -1442,7 +1573,7 @@ namespace GustUI.Elements
 
             Vector2 mouse = args.GlobalMousePosition.AsXna;
             if (OverElement(entry.CloseX, mouse) || OverElement(entry.PopOut, mouse)
-                || OverElement(entry.Maximise, mouse))
+                || OverElement(entry.Maximise, mouse) || OverElement(entry.PinGlyph, mouse))
             {
                 return;
             }
@@ -1686,6 +1817,96 @@ namespace GustUI.Elements
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Every open window as menu rows, by title (ezmuze #301, the Window
+        /// list under View). A tabbed window contributes one row per tab.
+        /// Choosing a row brings that window to the top, as a click on it
+        /// would -- activates it, hands it the keyboard -- and selects the tab
+        /// when the row is one. The active window (its active tab, if tabbed)
+        /// is ticked; a pinned window says so after its title.
+        ///
+        /// Built each time the menu opens, so it is never stale. A window with
+        /// no title and no tabs, or one already closing, is left out.
+        /// </summary>
+        public static List<MenuItemModel> OpenWindowItems()
+        {
+            var rows = new List<MenuItemModel>();
+            Element root = Resources.StaticResources?.RootWindow;
+            if (root?.Children == null)
+            {
+                return rows;
+            }
+
+            var windows = root.Children.Items.OfType<ModalWindowElement>()
+                .Where(w => w.Visible && !w.closing)
+                .ToList();
+
+            ModalWindowElement active = windows
+                .OrderByDescending(w => w.FrontSequence)
+                .FirstOrDefault();
+
+            var entries = new List<(string Title, ModalWindowElement Window, Element Tab)>();
+            foreach (ModalWindowElement window in windows)
+            {
+                if (window.tabs.Count >= 2)
+                {
+                    foreach (Tab tab in window.tabs)
+                    {
+                        if (!string.IsNullOrWhiteSpace(tab.Title) && tab.Content != null)
+                        {
+                            entries.Add((tab.Title, window, tab.Content));
+                        }
+                    }
+                }
+                else if (!string.IsNullOrWhiteSpace(window.Title))
+                {
+                    entries.Add((window.Title, window, null));
+                }
+            }
+
+            foreach (var entry in entries.OrderBy(e => e.Title, StringComparer.CurrentCultureIgnoreCase))
+            {
+                bool isActive = ReferenceEquals(entry.Window, active)
+                    && (entry.Tab == null || entry.Window.activeIndex < 0 || entry.Window.activeIndex >= entry.Window.tabs.Count
+                        || ReferenceEquals(entry.Window.tabs[entry.Window.activeIndex].Content, entry.Tab));
+
+                string suffix = entry.Window.Pin switch
+                {
+                    WindowPin.Front => "   (pinned to front)",
+                    WindowPin.Back => "   (pinned to back)",
+                    _ => string.Empty,
+                };
+
+                var target = entry;
+                rows.Add(new MenuItemModel
+                {
+                    Text = entry.Title + suffix,
+                    Icon = isActive ? UIFont.Symbol.Accept.Icon() : null,
+                    Action = _ => target.Window.BringToTop(target.Tab),
+                });
+            }
+
+            return rows;
+        }
+
+        /// <summary>What choosing a window from the Window list does: selects
+        /// <paramref name="tab"/> if given, brings the window to the top and
+        /// hands it the keyboard -- the same as clicking it.</summary>
+        public void BringToTop(Element tab = null)
+        {
+            if (Parent == null)
+            {
+                return;
+            }
+
+            if (tab == null || !ShowTab(tab))
+            {
+                MoveToFront();
+            }
+
+            ClaimKeyboard();
         }
 
         /// <summary>What the title bar's X does. Null (default) = the base
@@ -2524,6 +2745,12 @@ namespace GustUI.Elements
             internal FilledRectangleElement CloseX;
             internal TextElement PopOut;
             internal TextElement Maximise;
+
+            /// <summary>The window's pin, shown on the active tab only.</summary>
+            internal TextElement PinGlyph;
+
+            /// <summary>The pin's small up / down mark.</summary>
+            internal TextElement PinMark;
             internal float Width;
 
             /// <summary>The caption <see cref="CaptionWidth"/> was measured
@@ -3653,18 +3880,6 @@ namespace GustUI.Elements
 
             previousLeftButtonForFocus = focusMouseState.LeftButton;
 
-            // A window that becomes (or stops being) the backdrop restacks at
-            // once rather than at its next click (#301).
-            bool backdrop = IsBackdrop;
-            if (backdrop != lastBackdrop)
-            {
-                bool first = lastBackdrop == null;
-                lastBackdrop = backdrop;
-                if (!first && !justSpawned)
-                {
-                    ReapplyFrontDepth();
-                }
-            }
 
             if (pendingMergeTarget != null)
             {
@@ -3866,6 +4081,15 @@ namespace GustUI.Elements
             if (spawnClaimPending)
             {
                 spawnClaimPending = false;
+
+                // Raised AGAIN, a frame after arriving, for the same reason the
+                // keyboard is claimed here (#301). A window opened BY a press
+                // (a double-click on a channel header opens a module panel)
+                // arrives mid-press, and the window that was pressed raises
+                // itself for that same press edge later in the frame -- which,
+                // now that the sequencer comes to the top like any window,
+                // buried the panel it had just opened.
+                MoveToFront();
                 ClaimKeyboard();
             }
 

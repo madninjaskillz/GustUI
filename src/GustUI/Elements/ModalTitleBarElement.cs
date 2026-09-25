@@ -148,7 +148,25 @@ namespace GustUI.Elements
         /// covers the bar and carries those actions itself.</summary>
         internal bool ChromeHidden { get; set; }
 
-        internal float RightChromeWidth => (closable ? BarHeight : 0) + (hasMaximimizeButton ? BarHeight : 0);
+        /// <summary>Width of the close and maximise squares at the right.</summary>
+        private float CloseAndSizeWidth => (closable ? BarHeight : 0) + (hasMaximimizeButton ? BarHeight : 0);
+
+        /// <summary>Everything at the right of the bar: close, maximise and,
+        /// while it shows, the pin.</summary>
+        internal float RightChromeWidth => CloseAndSizeWidth + (PinShowing ? BarHeight : 0);
+
+        /// <summary>The pin button (2026-09-25): a window's place in the stack
+        /// -- normal, pinned to front, pinned to back. Every interactive
+        /// window's bar has one; it hides while the window is docked (a docked
+        /// window overlaps nothing) and while tabs cover the bar (the active
+        /// tab carries the pin then).</summary>
+        private BasicButtonElement pinButton;
+
+        /// <summary>The pin's small up / down mark, for pinned to front / back.</summary>
+        private TextElement pinMark;
+
+        private bool PinShowing => pinButton != null && !ChromeHidden
+            && Parent is ModalWindowElement pinHost && pinHost.ShowsPin;
 
         public ModalTitleBarElement()
         {
@@ -202,6 +220,12 @@ namespace GustUI.Elements
             }
 
             hasMaximimizeButton = interactive && Parent is ModalWindowElement modalWindowElement && !modalWindowElement.FitModalToContent;
+
+            if (interactive && Parent is ModalWindowElement)
+            {
+                pinButton = AddChildElement<BasicButtonElement>("pin button");
+                Sync(pinButton);
+            }
 
             if (hasMaximimizeButton)
             {
@@ -277,7 +301,7 @@ namespace GustUI.Elements
                 sizeButton.Set<FontTrait>(ButtonGlyphFont(Resources.StaticResources.Theme.SymbolFont));
                 sizeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
                 sizeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
-                sizeButton.Set<PositionTrait>(new TVVector(size.X - RightChromeWidth, 0));
+                sizeButton.Set<PositionTrait>(new TVVector(size.X - CloseAndSizeWidth, 0));
                 sizeButton.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) =>
                 {
                     // Docked geometry is owned entirely by DockTo/LayoutDocked
@@ -305,6 +329,11 @@ namespace GustUI.Elements
                     sizeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
                     sizeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
                 }));
+            }
+
+            if (pinButton != null)
+            {
+                BuildPinButton(size);
             }
 
             dragBarElement.Set<SizeTrait>(new TVVector(System.Math.Max(0f, size.X - RightChromeWidth - LeftReserved), size.Y));
@@ -382,13 +411,80 @@ namespace GustUI.Elements
             if (hasMaximimizeButton)
             {
                 sizeButton.Visible = !ChromeHidden;
-                sizeButton.Set<PositionTrait>(new TVVector(size.X - RightChromeWidth, 0));
+                sizeButton.Set<PositionTrait>(new TVVector(size.X - CloseAndSizeWidth, 0));
                 sizeButton.Set<SizeTrait>(new TVVector(BarHeight, BarHeight));
                 sizeButton.Set<TextTrait>(((ModalWindowElement)Parent).isFullScreen ? Resources.StaticResources.Theme.Icons.MinimizeIcon.ToTextTrait() : Resources.StaticResources.Theme.Icons.MaximizeIcon.ToTextTrait());
             }
 
+            if (pinButton != null)
+            {
+                bool showing = PinShowing;
+                pinButton.Visible = showing;
+                pinMark.Visible = showing;
+                float pinX = size.X - RightChromeWidth;
+                pinButton.Set<PositionTrait>(new TVVector(pinX, 0));
+                pinButton.Set<SizeTrait>(new TVVector(BarHeight, BarHeight));
+                var look = ModalWindowElement.PinLook(((ModalWindowElement)Parent).Pin, CloseIdleForeground);
+                if (!pinHovered)
+                {
+                    pinButton.Set<ForegroundColorTrait>(new TVColor(look.Colour));
+                }
+
+                pinMark.Set<TextTrait>(new TVText(look.Mark));
+                pinMark.Set<ForegroundColorTrait>(new TVColor(look.Colour));
+                // In the square's corner, clear of the glyph: top for front,
+                // bottom for back.
+                bool back = ((ModalWindowElement)Parent).Pin == ModalWindowElement.WindowPin.Back;
+                pinMark.Set<PositionTrait>(new TVVector(pinX + BarHeight - PinMarkSize - 1, back ? BarHeight - PinMarkSize - 1 : 1));
+            }
+
             dragBarElement.Set<SizeTrait>(new TVVector(System.Math.Max(0f, size.X - RightChromeWidth - LeftReserved), BarHeight));
             dragBarElement.Set<PositionTrait>(new TVVector(LeftReserved, 0));
+        }
+
+        private const int PinMarkSize = 9;
+
+        private bool pinHovered;
+
+        /// <summary>The pin square, drawn like the maximise button beside it:
+        /// the same glyph font, idle colour and hover fill. A click opens the
+        /// pin menu under it.</summary>
+        private void BuildPinButton(TVVector size)
+        {
+            var host = (ModalWindowElement)Parent;
+            pinButton.Set<SizeTrait>(new TVVector(size.Y, size.Y));
+            pinButton.Set<FontTrait>(ButtonGlyphFont(Resources.StaticResources.Theme.SymbolFont));
+            pinButton.Set<TextTrait>(new TVText(UIFont.Symbol.Pin.Icon()));
+            pinButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
+            pinButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
+            pinButton.Set<PositionTrait>(new TVVector(size.X - RightChromeWidth, 0));
+            pinButton.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>(_ => host.ShowPinMenu(pinButton)));
+            pinButton.Set<OnEnterTrait>(new TVEvent<ClickEventArgs>(_ =>
+            {
+                pinHovered = true;
+                pinButton.Set<BackgroundFillTrait>(new TVFillSolidColor(SizeHoverFill));
+                pinButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
+            }));
+            pinButton.Set<OnExitTrait>(new TVEvent<ClickEventArgs>(_ =>
+            {
+                pinHovered = false;
+                pinButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
+            }));
+            TooltipElement.Attach(pinButton, () => ModalWindowElement.PinLabel(host.Pin) + " - click to change");
+
+            pinMark = new TextElement { WordWrap = false };
+            pinMark.Set<SizeTrait>(new TVVector(PinMarkSize, PinMarkSize));
+            pinMark.Set<FontTrait>(new TVFont
+            {
+                Family = Resources.StaticResources.Theme.SymbolFont.Family,
+                Size = PinMarkSize,
+                Border = 0,
+            });
+            pinMark.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment { Alignment = HorizontalAlignment.Center });
+            pinMark.Set<VerticalAlignmentTrait>(new TVVerticalAlignment { Alignment = VerticalAlignment.Center });
+            pinMark.Set<TextTrait>(new TVText(string.Empty));
+            pinMark.Depth = 10;
+            AddChild(pinMark, "pin-mark");
         }
 
 

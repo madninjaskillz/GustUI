@@ -1,15 +1,16 @@
 using GustUI.Elements;
 using GustUI.Traits;
 using GustUI.TraitValues;
+using Pin = GustUI.Elements.ModalWindowElement.WindowPin;
 
 namespace GustUI.Tests
 {
     /// <summary>
     /// Every window shares one stack (ezmuze #301): the window clicked or
-    /// opened last is on top, whatever kind of window it is. Windows all clamp
-    /// to one depth, so the tie is broken by which was brought forward last.
-    /// The one exception is the app's backdrop (the sequencer), which stays
-    /// behind every other window however often it is clicked.
+    /// opened last is on top, whatever kind of window it is, the sequencer
+    /// included. Windows clamp to one depth per pin group, so within a group
+    /// the tie is broken by which was brought forward last. A pin splits the
+    /// stack into back-pinned &lt; normal &lt; front-pinned.
     /// </summary>
     public class WindowStackingTests
     {
@@ -24,21 +25,21 @@ namespace GustUI.Tests
             return parent;
         }
 
-        private static Element Child(Element parent, string name, int depth)
+        private static Element Child(Element parent, string name, Pin pin = Pin.Normal)
         {
-            var child = new Element { Depth = depth };
+            var child = new Element { Depth = Raise(pin) };
             parent.AddChild(child, name);
             return child;
         }
 
-        private static int Raise(bool backdrop = false, int? pool = AppPoolMax, int? ceiling = null)
-            => Element.FrontDepth(pool, ModalWindowElement.StackFloor(backdrop),
-                ModalWindowElement.StackCeiling(backdrop, ceiling));
+        private static int Raise(Pin pin = Pin.Normal, int? pool = AppPoolMax, int? ceiling = null)
+            => Element.FrontDepth(pool, ModalWindowElement.StackFloor(pin),
+                ModalWindowElement.StackCeiling(pin, ceiling));
 
         /// <summary>Brings a window forward the way a click does.</summary>
-        private static void Click(Element window, bool backdrop = false)
+        private static void Click(Element window, Pin pin = Pin.Normal)
         {
-            window.Depth = Raise(backdrop);
+            window.Depth = Raise(pin);
             window.MarkBroughtForward();
         }
 
@@ -46,8 +47,8 @@ namespace GustUI.Tests
         public void TheWindowBroughtForwardLastDrawsOnTopOfItsTie()
         {
             Element root = Parent();
-            Element first = Child(root, "first", Raise());
-            Element second = Child(root, "second", Raise());
+            Element first = Child(root, "first");
+            Element second = Child(root, "second");
 
             // Insertion order alone: the later one is on top.
             Assert.Same(second, root.Children.Items[^1]);
@@ -61,70 +62,104 @@ namespace GustUI.Tests
         }
 
         [Fact]
-        public void EveryWindowLandsOnTheSameDepthWhateverThePool()
+        public void EachPinGroupLandsOnItsOwnDepthWhateverThePool()
         {
-            foreach (int? pool in new int?[] { null, 0, 1, 50000, 59998, 59999, 1000000 })
+            foreach (int? pool in new int?[] { null, 0, 1, 50000, 59997, 59999, 1000000 })
             {
-                Assert.Equal(ModalWindowElement.WindowDepth, Raise(pool: pool));
-                Assert.Equal(ModalWindowElement.BackdropWindowDepth, Raise(backdrop: true, pool: pool));
+                Assert.Equal(ModalWindowElement.BackPinnedWindowDepth, Raise(Pin.Back, pool));
+                Assert.Equal(ModalWindowElement.WindowDepth, Raise(Pin.Normal, pool));
+                Assert.Equal(ModalWindowElement.FrontPinnedWindowDepth, Raise(Pin.Front, pool));
             }
+
+            Assert.True(Raise(Pin.Back) < Raise(Pin.Normal));
+            Assert.True(Raise(Pin.Normal) < Raise(Pin.Front));
+            Assert.True(Raise(Pin.Front) < ModalWindowElement.ModalDepth);
+        }
+
+        [Fact]
+        public void TheSequencerClickedComesAboveAFloatingPanel()
+        {
+            // The user's rule: treat the sequencer like everything else.
+            Element root = Parent();
+            Element sequencer = Child(root, "sequencer");
+            Element panel = Child(root, "panel");
+
+            Click(sequencer);
+
+            Assert.Same(sequencer, root.Children.Items[^1]);
         }
 
         [Fact]
         public void APanelClickedBehindADialogComesAboveIt()
         {
-            // The user's rule: if I click it, it's on top. A dialog is a
-            // window like any other.
             Element root = Parent();
-            Element panel = Child(root, "panel", Raise());
-            Element fileBrowser = Child(root, "file-browser", Raise());
-            Assert.Same(fileBrowser, root.Children.Items[^1]);
+            Element panel = Child(root, "panel");
+            Element fileBrowser = Child(root, "file-browser");
 
             Click(panel);
             Assert.Same(panel, root.Children.Items[^1]);
 
-            // And reopening (re-activating) the dialog brings it back.
             Click(fileBrowser);
             Assert.Same(fileBrowser, root.Children.Items[^1]);
         }
 
         [Fact]
-        public void TheBackdropClickedLastIsStillDrawnBehindEveryWindow()
+        public void AFrontPinnedPanelStaysAboveTheSequencerWhenItIsClicked()
         {
             Element root = Parent();
-            Element sequencer = Child(root, "sequencer", Raise(backdrop: true));
-            Element panel = Child(root, "panel", Raise());
-            Element maximised = Child(root, "piano-roll", Raise());
+            Element panel = Child(root, "panel", Pin.Front);
+            Element sequencer = Child(root, "sequencer");
 
-            Click(sequencer, backdrop: true);
+            Click(sequencer);
 
-            Assert.Same(sequencer, root.Children.Items[0]);
-            Assert.True(Raise(backdrop: true) < Raise());
+            Assert.Same(panel, root.Children.Items[^1]);
         }
 
         [Fact]
-        public void AMaximisedWindowClickedComesToTheTop()
+        public void ABackPinnedWindowClickedStaysBelowANormalOne()
         {
             Element root = Parent();
-            Element maximised = Child(root, "piano-roll", Raise());
-            Element panel = Child(root, "panel", Raise());
+            Element normal = Child(root, "normal");
+            Element pinnedBack = Child(root, "pinned-back", Pin.Back);
 
-            Click(maximised);
+            Click(pinnedBack, Pin.Back);
 
-            Assert.Same(maximised, root.Children.Items[^1]);
+            Assert.Same(normal, root.Children.Items[^1]);
+            Assert.Same(pinnedBack, root.Children.Items[0]);
         }
 
         [Fact]
-        public void PopupsAndTooltipsStayAboveEveryWindow()
+        public void UnpinningRestoresClickOrder()
+        {
+            Element root = Parent();
+            Element pinned = Child(root, "pinned", Pin.Front);
+            Element other = Child(root, "other");
+            Click(other);
+            Assert.Same(pinned, root.Children.Items[^1]);
+
+            // Unpinned: the window keeps its place in the order until clicked...
+            pinned.Depth = Raise(Pin.Normal);
+            Click(other);
+            Assert.Same(other, root.Children.Items[^1]);
+
+            // ...and a click raises it like any other.
+            Click(pinned);
+            Assert.Same(pinned, root.Children.Items[^1]);
+        }
+
+        [Fact]
+        public void PopupsAndTooltipsStayAboveEveryWindowEvenFrontPinned()
         {
             const int popupDepth = 500000;
             const int tooltipDepth = 1000000;
             Element root = Parent();
-            Element popup = Child(root, "popup", popupDepth);
-            Element tooltip = Child(root, "tooltip", tooltipDepth);
-            Element panel = Child(root, "panel", Raise());
+            Element popup = new Element { Depth = popupDepth };
+            root.AddChild(popup, "popup");
+            Element tooltip = new Element { Depth = tooltipDepth };
+            root.AddChild(tooltip, "tooltip");
+            Element panel = Child(root, "panel", Pin.Front);
 
-            Click(panel);
+            Click(panel, Pin.Front);
 
             Assert.Same(tooltip, root.Children.Items[^1]);
             Assert.Same(popup, root.Children.Items[^2]);

@@ -127,6 +127,63 @@ namespace GustUI.Elements
             return Math.Max(MinItemWidth, ItemPaddingX * 2 + (int)Math.Ceiling(textWidth));
         }
 
+        /// <summary>
+        /// The section that lists every open window (ezmuze #301). "View",
+        /// because the sequencer's View menu already held the window toggles
+        /// (Toggle stack, explorer, clip editor): the list joins them there as
+        /// a section rather than being a second menu about windows. A bar with
+        /// no View of its own (a module panel's File / Presets) gets a View
+        /// holding just the list, so it is in the same place on every window.
+        /// </summary>
+        public const string WindowListSectionName = "View";
+
+        /// <summary>Only a window's own bar lists windows.</summary>
+        private bool HostsWindowList => host is ModalWindowElement;
+
+        private MenuItemModel syntheticWindowSection;
+
+        private static bool IsWindowListSection(MenuItemModel section)
+            => string.Equals(section?.Text, WindowListSectionName, StringComparison.Ordinal);
+
+        /// <summary>The bar's sections, plus a View for the window list when
+        /// the view did not supply one -- placed before a trailing Help, where
+        /// View sits on the sequencer's bar.</summary>
+        private List<MenuItemModel> SectionsWithWindowList()
+        {
+            var sections = new List<MenuItemModel>(menuSections ?? new List<MenuItemModel>());
+            if (!HostsWindowList || sections.Count == 0 || sections.Any(IsWindowListSection))
+            {
+                return sections;
+            }
+
+            syntheticWindowSection ??= new MenuItemModel { Text = WindowListSectionName, SubItems = new List<MenuItemModel>() };
+            int at = sections.Count > 0 && string.Equals(sections[^1].Text, "Help", StringComparison.Ordinal)
+                ? sections.Count - 1
+                : sections.Count;
+            sections.Insert(at, syntheticWindowSection);
+            return sections;
+        }
+
+        /// <summary><paramref name="own"/> followed by one separator and the
+        /// open windows, built now so the list is never stale.</summary>
+        private static List<MenuItemModel> WithWindowList(List<MenuItemModel> own)
+        {
+            var items = new List<MenuItemModel>(own ?? new List<MenuItemModel>());
+            List<MenuItemModel> windows = ModalWindowElement.OpenWindowItems();
+            if (windows.Count == 0)
+            {
+                return items;
+            }
+
+            if (items.Count > 0 && !string.IsNullOrEmpty(items[^1].Text))
+            {
+                items.Add(new MenuItemModel { Text = "", Icon = null });
+            }
+
+            items.AddRange(windows);
+            return items;
+        }
+
         private void BuildItems()
         {
             foreach (MenuBarItem stale in itemElements)
@@ -137,7 +194,7 @@ namespace GustUI.Elements
             itemElements.Clear();
 
             float x = 0;
-            foreach (MenuItemModel section in menuSections)
+            foreach (MenuItemModel section in SectionsWithWindowList())
             {
                 int itemWidth = MeasureItemWidth(section.Text);
                 MenuItemModel captured = section;
@@ -163,7 +220,13 @@ namespace GustUI.Elements
         /// matching FruitMenuElement's own whole-bar-hover behavior.</summary>
         private void OpenDropdown(MenuItemModel section, ClickEventArgs args)
         {
-            if (section.SubItems == null || section.SubItems.Count == 0)
+            List<MenuItemModel> items = section.SubItems;
+            if (HostsWindowList && IsWindowListSection(section))
+            {
+                items = WithWindowList(section.SubItems);
+            }
+
+            if (items == null || items.Count == 0)
             {
                 return;
             }
@@ -173,7 +236,7 @@ namespace GustUI.Elements
                 open.Kill();
             }
 
-            FruitPopupMenu popup = new FruitPopupMenu(section.SubItems, 300, this);
+            FruitPopupMenu popup = new FruitPopupMenu(items, 300, this);
             TVVector ps = args.Element.GetActualPosition();
             TVVector sz = args.Element.GetSize();
             popup.Set<PositionTrait>(new TVVector(ps.X, ps.Y + sz.Y));
