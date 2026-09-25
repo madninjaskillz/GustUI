@@ -355,8 +355,82 @@ namespace GustUI.Elements
         public int? DepthCeiling { get; set; }
 
         private protected override int MoveToFrontCeiling
-            => DepthCeiling
-               ?? (FloatAboveModalTier ? ModalDepth + 9999 : base.MoveToFrontCeiling);
+            => BandCeiling(Band, FloatAboveModalTier, DepthCeiling);
+
+        private protected override int MoveToFrontFloor => BandFloor(Band);
+
+        /// <summary>
+        /// Where a window stacks within the modal tier (ezmuze #301), bottom to
+        /// top. Within a band, the window clicked last is on top.
+        /// </summary>
+        public enum StackingBand
+        {
+            /// <summary>Fills the available space: the sequencer, a piano roll
+            /// opened maximised, a maximised view. Always behind the rest,
+            /// however often it is clicked.</summary>
+            Background,
+
+            /// <summary>A floating or docked view (<see cref="Tabable"/> or
+            /// <see cref="KeyboardFollowsFront"/>, or anything docked): the
+            /// panels you move between.</summary>
+            View,
+
+            /// <summary>Any other window: a dialog. Above every view, so
+            /// clicking the panel behind a file browser cannot bury it.</summary>
+            Dialog,
+        }
+
+        /// <summary>The depth of <see cref="StackingBand.Background"/>. This held
+        /// before only by insertion order: every window clamped to one ceiling,
+        /// and the sequencer happened to be added first.</summary>
+        public const int BackgroundWindowDepth = ModalDepth - 3;
+
+        /// <summary>The depth of <see cref="StackingBand.View"/>.</summary>
+        public const int ViewWindowDepth = ModalDepth - 2;
+
+        /// <summary>The depth of <see cref="StackingBand.Dialog"/>: the old
+        /// single ceiling, just below the modal tier.</summary>
+        public const int DialogWindowDepth = ModalDepth - 1;
+
+        /// <summary>The highest depth a window may be raised to: an explicit
+        /// <see cref="DepthCeiling"/> first, then the band above the modal tier
+        /// for <see cref="FloatAboveModalTier"/>, then its own band.</summary>
+        internal static int BandCeiling(StackingBand band, bool floatAboveModalTier, int? explicitCeiling)
+            => explicitCeiling
+               ?? (floatAboveModalTier ? ModalDepth + 9999 : BandDepth(band));
+
+        /// <summary>The lowest depth a window is raised to: its band.</summary>
+        internal static int BandFloor(StackingBand band) => BandDepth(band);
+
+        private static int BandDepth(StackingBand band) => band switch
+        {
+            StackingBand.Background => BackgroundWindowDepth,
+            StackingBand.View => ViewWindowDepth,
+            _ => DialogWindowDepth,
+        };
+
+        /// <summary>
+        /// This window's <see cref="StackingBand"/>. A window with its own
+        /// <see cref="DepthCeiling"/> or <see cref="FloatAboveModalTier"/> has
+        /// asked to float and is never in the background, and a maximised
+        /// dialog stays a dialog.
+        /// </summary>
+        public StackingBand Band
+        {
+            get
+            {
+                bool floats = DepthCeiling != null || FloatAboveModalTier;
+                bool docked = DockedSide != DockSide.None;
+                if (!floats && !docked && (FillsAvailableSpace || (isFullScreen && TakesKeyboardOnFront)))
+                {
+                    return StackingBand.Background;
+                }
+
+                return TakesKeyboardOnFront || docked ? StackingBand.View : StackingBand.Dialog;
+            }
+        }
+
+        private StackingBand? lastBand;
 
         /// <summary>Opt-in hook (2026-08-17, tear-off/dissolve fix): an app-
         /// level owner that constructs and reuses ONE long-lived
@@ -969,15 +1043,100 @@ namespace GustUI.Elements
         /// </summary>
         private static Color TabStripFill => Resources.StaticResources.Theme.SurfaceBackdrop;
 
-        private static Color TabInactiveFill => Resources.StaticResources.Theme.SurfaceHeader;
+        /// <summary>
+        /// An inactive tab: dimmed, a step down from the header fill toward the
+        /// trough, so it still reads as a tab but plainly recedes (#341).
+        /// </summary>
+        private static Color TabInactiveFill
+            => Color.Lerp(Resources.StaticResources.Theme.SurfaceHeader, Resources.StaticResources.Theme.SurfaceBackdrop, 0.35f);
 
+        /// <summary>
+        /// The active tab: the title bar's accent wash, but stronger (#341).
+        /// At the title bar's own 18%/5% it could not be told from the tabs
+        /// beside it.
+        /// </summary>
         private static Color TabActiveTop
-            => Color.Lerp(Resources.StaticResources.Theme.SurfaceRaised, Resources.StaticResources.Theme.AccentSelection, 0.18f);
+            => Color.Lerp(Resources.StaticResources.Theme.SurfaceRaised, Resources.StaticResources.Theme.AccentSelection, 0.34f);
 
         private static Color TabActiveBottom
-            => Color.Lerp(Resources.StaticResources.Theme.SurfaceHeader, Resources.StaticResources.Theme.AccentSelection, 0.05f);
+            => Color.Lerp(Resources.StaticResources.Theme.SurfaceHeader, Resources.StaticResources.Theme.AccentSelection, 0.16f);
 
         private static Color TabAccent => Resources.StaticResources.Theme.AccentSelection;
+
+        private static Color TabCaptionActive => Resources.StaticResources.Theme.BodyText;
+
+        /// <summary>An inactive tab's caption: body text, muted toward the fill it sits on.</summary>
+        private static Color TabCaptionInactive
+            => Color.Lerp(Resources.StaticResources.Theme.BodyText, Resources.StaticResources.Theme.SurfaceHeader, 0.45f);
+
+        /// <summary>
+        /// A tab's width for a caption this wide: padding, the caption, and room
+        /// for the three glyph slots (close, pop-out, maximise). Every tab keeps
+        /// the maximise slot, though only the active one shows it, so a tab does
+        /// not change width when it is activated.
+        /// </summary>
+        /// <remarks>Rounded up with a pixel to spare: the label gets back
+        /// <c>width - TabGlyphsWidth</c>, and a float round trip a hair short
+        /// of the measured caption ellipsised a title that fitted.</remarks>
+        internal static float TabWidthFor(float captionWidth) => MathF.Ceiling(captionWidth) + 1f + TabGlyphsWidth;
+
+        /// <summary>Everything on a tab but its caption.</summary>
+        private const float TabGlyphsWidth = TabPaddingX + ((TabCloseSize + 4) * 3) + 6 + 4;
+
+        /// <summary>
+        /// Fits tabs of these natural widths into <paramref name="available"/>
+        /// (#341). Each is clamped to [<paramref name="min"/>, <paramref name="max"/>];
+        /// if they then do not fit, the widest shrink first to one shared cap,
+        /// so a short title keeps its size while a long one ellipsises, and no
+        /// tab goes below <paramref name="min"/> (the row may then overflow,
+        /// as the equal shares always could).
+        /// </summary>
+        internal static float[] FitTabWidths(IReadOnlyList<float> natural, float available, float gap, float min, float max)
+        {
+            int n = natural.Count;
+            var widths = new float[n];
+            if (n == 0)
+            {
+                return widths;
+            }
+
+            float total = gap * (n - 1);
+            for (int i = 0; i < n; i++)
+            {
+                widths[i] = Math.Clamp(natural[i], min, Math.Max(min, max));
+                total += widths[i];
+            }
+
+            if (total <= available)
+            {
+                return widths;
+            }
+
+            // Water-fill: the cap c where sum(min(w, c)) is what is left.
+            float room = available - (gap * (n - 1));
+            var sorted = widths.OrderBy(w => w).ToArray();
+            float cap = min;
+            float below = 0f;
+            for (int k = 0; k < n; k++)
+            {
+                float candidate = (room - below) / (n - k);
+                if (candidate <= sorted[k])
+                {
+                    cap = candidate;
+                    break;
+                }
+
+                below += sorted[k];
+            }
+
+            cap = Math.Max(min, cap);
+            for (int i = 0; i < n; i++)
+            {
+                widths[i] = Math.Min(widths[i], cap);
+            }
+
+            return widths;
+        }
 
         /// <summary>
         /// Builds, shows or hides the strip, and lays the tabs across it.
@@ -1032,6 +1191,14 @@ namespace GustUI.Elements
                     }
                 }));
 
+                // The release too (#296). The press captures the pointer to
+                // whatever was pressed, and a captured release goes to that
+                // element ALONE -- the title bar underneath never hears it.
+                // With no handler here the drag ended without committing, so
+                // a merge or dock armed from the empty part of the strip was
+                // thrown away the next frame.
+                tabStrip.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>(HandleTitleBarRelease));
+
                 AddChildElement(tabStrip);
 
                 foreach (Tab pending in tabs)
@@ -1042,13 +1209,12 @@ namespace GustUI.Elements
 
             TVVector size = ElementTrait<SizeTrait>().Value();
 
-            // The strip stops short of this window own close/maximise. Those
-            // are chrome, not a tab, and the gap beside them is what a tabbed
-            // window gets dragged by once the tabs have eaten the rest.
-            // The FULL width. A tabbed window has no separate title bar and no
-            // chrome of its own: every tab carries its own close and pop-out,
-            // the active one carries maximise, and dragging any of them moves
-            // the window. So there is nothing left for a bar to hold.
+            // The strip spans the FULL width. A tabbed window has no separate
+            // title bar and no chrome of its own: every tab carries its own
+            // close and pop-out, the active one carries maximise, and dragging
+            // any of them moves the window. The tabs themselves are sized to
+            // their captions (#341); the trough after them is still the title
+            // bar, and dragging it moves, docks and merges the window.
             float stripWidth = Math.Max(MinTabWidth, size.X);
             if (titleBarElement != null)
             {
@@ -1066,7 +1232,25 @@ namespace GustUI.Elements
             bool active = IsFrontmostWindow(this);
             tabStrip.Set<BackgroundFillTrait>(new TVFillSolidColor(active ? TabStripFill : Dim(TabStripFill)));
 
-            float shared = Math.Max(MinTabWidth, (stripWidth - (TabGap * (tabs.Count - 1))) / tabs.Count);
+            // Each tab is as wide as its caption and its glyphs (#341), up to
+            // MaxTabWidth; when they do not all fit, the widest give way first,
+            // down to MinTabWidth. The strip past the last tab stays trough,
+            // and is dragged like any title bar.
+            TVFont captionFont = Resources.StaticResources.Theme.UiFontSmall;
+            var natural = new float[tabs.Count];
+            for (int i = 0; i < tabs.Count; i++)
+            {
+                Tab entry = tabs[i];
+                if (!string.Equals(entry.MeasuredTitle, entry.Title, StringComparison.Ordinal))
+                {
+                    entry.MeasuredTitle = entry.Title;
+                    entry.CaptionWidth = TextElement.Measure(entry.Title ?? string.Empty, captionFont).X;
+                }
+
+                natural[i] = TabWidthFor(entry.CaptionWidth);
+            }
+
+            float[] widths = FitTabWidths(natural, stripWidth - TabTrailingGap, TabGap, MinTabWidth, MaxTabWidth);
 
             float x = 0f;
             for (int i = 0; i < tabs.Count; i++)
@@ -1077,6 +1261,7 @@ namespace GustUI.Elements
                     BuildTabButton(entry);
                 }
 
+                float shared = widths[i];
                 entry.Width = shared;
 
                 // Always ABOVE the strip, which is an opaque fill: this line
@@ -1094,14 +1279,17 @@ namespace GustUI.Elements
                         Direction.Vertically)
                     : new TVFillSolidColor(active ? TabInactiveFill : Dim(TabInactiveFill)));
 
-                entry.Underline.Set<PositionTrait>(new TVVector(0, ModalTitleBarElement.BarHeight - 2));
-                entry.Underline.Set<SizeTrait>(new TVVector(isActive ? shared : 0f, 2));
+                // Full width and 3px: the one mark that says "this is the tab
+                // you are looking at" has to survive a glance (#341).
+                entry.Underline.Set<PositionTrait>(new TVVector(0, ModalTitleBarElement.BarHeight - TabUnderlineHeight));
+                entry.Underline.Set<SizeTrait>(new TVVector(isActive ? shared : 0f, TabUnderlineHeight));
                 entry.Underline.Set<BackgroundFillTrait>(new TVFillSolidColor(active ? TabAccent : Dim(TabAccent)));
 
-                float labelWidth = Math.Max(10f, shared - TabPaddingX - ((TabCloseSize + 4) * 3) - 6);
+                entry.Label.Set<ForegroundColorTrait>(new TVColor(isActive ? TabCaptionActive : TabCaptionInactive));
+
+                float labelWidth = Math.Max(10f, shared - TabGlyphsWidth);
                 entry.Label.Set<SizeTrait>(new TVVector(labelWidth, ModalTitleBarElement.BarHeight));
-                entry.Label.Set<TextTrait>(new TVText(TextElement.Ellipsise(
-                    entry.Title, labelWidth, Resources.StaticResources.Theme.UiFontSmall)));
+                entry.Label.Set<TextTrait>(new TVText(TextElement.Ellipsise(entry.Title, labelWidth, captionFont)));
 
                 float slotY = (ModalTitleBarElement.BarHeight - TabCloseSize) / 2f;
                 float slot = shared - TabCloseSize - 6;
@@ -1212,6 +1400,17 @@ namespace GustUI.Elements
                 });
 
             button.Set<OnMousePress>(new TVEvent<ClickEventArgs>(args => BeginTabDrag(entry, args)));
+
+            // Dragging a tab IS dragging the title bar, so its release commits
+            // what the drag armed (#296): merging into the window it was
+            // dropped on, or docking at the edge it was held at. The drag
+            // captures the pointer to this button, so nothing else receives
+            // the release -- without this the merge target was discarded and
+            // the window was left wherever it was dropped, usually behind the
+            // window it was meant to join. A release after a press on the
+            // close or pop-out glyph (which starts no drag) arms nothing, so
+            // it only ends a drag that never began.
+            button.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>(HandleTitleBarRelease));
 
             entry.Button = button;
 
@@ -2373,6 +2572,12 @@ namespace GustUI.Elements
             internal TextElement PopOut;
             internal TextElement Maximise;
             internal float Width;
+
+            /// <summary>The caption <see cref="CaptionWidth"/> was measured
+            /// for, so the strip measures a title once rather than per frame.</summary>
+            internal string MeasuredTitle;
+
+            internal float CaptionWidth;
         }
 
         private readonly List<Tab> tabs = new List<Tab>();
@@ -2395,6 +2600,11 @@ namespace GustUI.Elements
         private const int TabCloseSize = 16;
         private const int TabGap = 4;
         private const int MinTabWidth = 80;
+
+        /// <summary>The widest a tab grows for a long caption (#341).</summary>
+        private const int MaxTabWidth = 240;
+
+        private const int TabUnderlineHeight = 3;
 
         /// <summary>Grab area kept clear beside the window buttons, so a tabbed
         /// window can still be moved and docked.</summary>
@@ -3473,17 +3683,36 @@ namespace GustUI.Elements
                 // once both windows sit at the same clamped depth, is only
                 // insertion order. Whatever that does to MoveToFront, the
                 // keys must not go to a window the press did not land on.
+                //
+                // The same goes for being RAISED (#301): only the window the
+                // press landed on comes forward. A window underneath that
+                // raised itself as well would take the active shading, or
+                // jump over the window that was actually clicked, depending
+                // on nothing but the order the two update in.
                 bool topmost = IsTopmostWindowAt(new Vector2(focusMouseState.X, focusMouseState.Y));
-
-                MoveToFront();
 
                 if (topmost)
                 {
+                    MoveToFront();
                     ClaimKeyboard();
                 }
             }
 
             previousLeftButtonForFocus = focusMouseState.LeftButton;
+
+            // A window that starts or stops filling the space (dragged out of
+            // it, maximised, restored) changes depth band, and its stacking
+            // follows at once rather than at its next click (#301).
+            StackingBand band = Band;
+            if (band != lastBand)
+            {
+                bool first = lastBand == null;
+                lastBand = band;
+                if (!first && !justSpawned)
+                {
+                    ReapplyFrontDepth();
+                }
+            }
 
             if (pendingMergeTarget != null)
             {

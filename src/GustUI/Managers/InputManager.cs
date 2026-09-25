@@ -235,7 +235,14 @@ namespace GustUI.Managers
         /// <summary>While set, held/release mouse events route here regardless of hover.</summary>
         public Element CapturedPointerElement { get; private set; }
 
-        public void CapturePointer(Element element) => CapturedPointerElement = element;
+        /// <summary>Starts a drag: held/release go to <paramref name="element"/>
+        /// until the button is up. Also hides the hover tooltip (ezmuze #297) —
+        /// a drag carries the pointer away from whatever it described.</summary>
+        public void CapturePointer(Element element)
+        {
+            CapturedPointerElement = element;
+            TooltipElement.Hide();
+        }
 
         /// <summary>While set, MIDDLE-button held/release events route here
         /// regardless of hover. Deliberately a second slot rather than a mode
@@ -947,6 +954,17 @@ namespace GustUI.Managers
             if (mouseState.LeftButton == ButtonState.Pressed && previousMouseState.LeftButton == ButtonState.Released)
             {
                 LeftJustPressed = true;
+            }
+
+            // Any press puts the hover tooltip away (ezmuze #297), as a desktop
+            // does: the pointer is now doing something, and a label left up
+            // through a drag was stranded wherever the drag began. Before
+            // dispatch, so a press handler that shows one of its own keeps it.
+            if ((mouseState.LeftButton == ButtonState.Pressed && previousMouseState.LeftButton == ButtonState.Released)
+                || (mouseState.RightButton == ButtonState.Pressed && previousMouseState.RightButton == ButtonState.Released)
+                || (mouseState.MiddleButton == ButtonState.Pressed && previousMouseState.MiddleButton == ButtonState.Released))
+            {
+                TooltipElement.Hide();
             }
 
             currentlyHovered = ProcessHovers(Resources.StaticResources.RootWindow, mouseState.Position.ToVector2());

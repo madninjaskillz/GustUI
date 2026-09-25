@@ -873,13 +873,12 @@ public class Element : IDisposable
             clickEventArgs.Element.CapturePointer();
         }
 
-        this.Set<OnExitTrait>(new TVEvent<ClickEventArgs>((x) =>
-        {
-            if (x.MouseState.LeftButton == ButtonState.Released)
-            {
-                handleStopDrag(x);
-            }
-        }));
+        // No exit handler here (ezmuze #297). This used to REPLACE the
+        // element's OnExitTrait with a "stop dragging on exit" handler, which
+        // threw away whatever was already chained there for good -- the hover
+        // tooltip's Hide() among them, so a window's tooltip stayed on screen
+        // after its first drag. Update() already ends the drag the frame the
+        // button is up, which is all that handler ever did.
     }
 
     int escapeDragging = 0;
@@ -918,8 +917,8 @@ public class Element : IDisposable
         // preview > popup > status bar > loading > MODAL > side panels >
         // content) intact no matter what else happens to be alive when a
         // floating window is brought to front.
-        int ceiling = MoveToFrontCeiling;
-        this.Depth = candidates.Any() ? Math.Min(candidates.Max(x => x.Depth) + 1, ceiling) : 0;
+        this.Depth = FrontDepth(candidates.Any() ? candidates.Max(x => x.Depth) : (int?)null,
+            MoveToFrontFloor, MoveToFrontCeiling);
 
         // 2026-08-17 (inactive-title-bar-desaturation feature): Depth alone
         // can't answer "which window was brought to front most recently"
@@ -930,7 +929,61 @@ public class Element : IDisposable
         // never-clamped, always-increasing sequence number — bumped here,
         // the one place "this window is now the front one" is decided —
         // has no ceiling to saturate against.
+        MarkBroughtForward();
+    }
+
+    /// <summary>Records that this element was just brought forward: bumps
+    /// <see cref="FrontSequence"/> and re-sorts its siblings.</summary>
+    internal void MarkBroughtForward()
+    {
         this.FrontSequence = ++frontSequenceCounter;
+
+        // Siblings at the same Depth are ordered by FrontSequence (see
+        // TVElements.Items), so bringing a window forward re-sorts even when
+        // its Depth did not change -- which, with every floating window
+        // clamped to the same ceiling, is nearly always (ezmuze #301: the
+        // window you clicked took the active shading and stayed behind).
+        Parent?.Children?.InvalidateSort();
+    }
+
+    /// <summary>
+    /// The Depth <see cref="MoveToFront"/> assigns: one above the highest
+    /// sibling (<paramref name="poolMax"/>, null when there is none, which
+    /// gives 0), raised to <paramref name="floor"/> and then limited to
+    /// <paramref name="ceiling"/>. The ceiling wins over the floor.
+    /// </summary>
+    internal static int FrontDepth(int? poolMax, int floor, int ceiling)
+    {
+        int depth = poolMax.HasValue ? (poolMax.Value == int.MaxValue ? int.MaxValue : poolMax.Value + 1) : 0;
+        depth = Math.Max(depth, floor);
+        return Math.Min(depth, ceiling);
+    }
+
+    /// <summary>
+    /// The lowest Depth <see cref="MoveToFront"/> may assign. No floor by
+    /// default; a <see cref="ModalWindowElement"/> uses it to keep floating
+    /// windows above the band windows that fill the available space sit in.
+    /// </summary>
+    private protected virtual int MoveToFrontFloor => int.MinValue;
+
+    /// <summary>
+    /// Re-applies the depth band without bringing this element forward: the
+    /// same Depth rule as <see cref="MoveToFront"/>, but FrontSequence is
+    /// left alone. For when the band itself changes (a window stops filling
+    /// the available space) and the stacking has to follow.
+    /// </summary>
+    internal void ReapplyFrontDepth()
+    {
+        Element root = Resources.StaticResources?.RootWindow;
+        if (root == null || Parent == null)
+        {
+            return;
+        }
+
+        var candidates = root.Children.Items.Where(x => !(x is TooltipElement) && !ReferenceEquals(x, this));
+        this.Depth = FrontDepth(candidates.Any() ? candidates.Max(x => x.Depth) : (int?)null,
+            MoveToFrontFloor, MoveToFrontCeiling);
+        Parent.Children?.InvalidateSort();
     }
 
     /// <summary>
