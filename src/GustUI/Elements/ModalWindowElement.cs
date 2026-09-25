@@ -2285,6 +2285,12 @@ namespace GustUI.Elements
         /// to decide whether this press has become a real drag yet.</summary>
         private Vector2? dockPressMouse;
 
+        /// <summary>Where the title bar was pressed, for any window, and
+        /// whether the pointer has since moved far enough for the drag to
+        /// merge into another window (see UpdateTabMergeGesture, #292).</summary>
+        private Vector2? mergePressMouse;
+        private bool mergeArmed;
+
         /// <summary>
         /// One hosted view. Every window has at least one — its own body — so
         /// "a window" and "a tabbed window" are the same object in two states
@@ -4335,6 +4341,25 @@ namespace GustUI.Elements
         {
             MouseState mouse = Resources.StaticResources.InputManager.CurrentMouseState;
             Vector2 mousePos = new Vector2(mouse.X, mouse.Y);
+
+            // Only a real drag can merge (ezmuze #292). BeingDragged is true
+            // from the PRESS, so a window whose title bar already sat over
+            // another's found its target on the first frame and merged on
+            // release with no movement at all -- and pop-out places the new
+            // window exactly over the one it came from, so the first plain
+            // click on it put it straight back. Same threshold, same reason,
+            // as undocking. Once crossed it stays armed until release.
+            if (!mergeArmed)
+            {
+                if (mergePressMouse.HasValue
+                    && Vector2.Distance(mousePos, mergePressMouse.Value) < UndockDragThresholdPixels)
+                {
+                    return;
+                }
+
+                mergeArmed = true;
+            }
+
             ModalWindowElement found = null;
 
             foreach (Element sibling in Resources.StaticResources.RootWindow.Children.Items)
@@ -4399,11 +4424,14 @@ namespace GustUI.Elements
         /// picks the modal up with no visible jump.</summary>
         internal void HandleTitleBarPress(TVEventArgs x)
         {
+            MouseState mouse = Resources.StaticResources.InputManager.CurrentMouseState;
             if (DockedSide != DockSide.None)
             {
-                MouseState mouse = Resources.StaticResources.InputManager.CurrentMouseState;
                 dockPressMouse = new Vector2(mouse.X, mouse.Y);
             }
+
+            mergePressMouse = new Vector2(mouse.X, mouse.Y);
+            mergeArmed = false;
 
             handleStartDrag(x);
         }
@@ -4415,6 +4443,8 @@ namespace GustUI.Elements
         {
             handleStopDrag(x);
             dockPressMouse = null;
+            mergePressMouse = null;
+            mergeArmed = false;
 
             if (tabMergeTarget != null)
             {
