@@ -53,11 +53,21 @@ namespace GustUI.Elements
         /// <summary>
         /// Straight routing only (<see cref="WireRouting.Orthogonal"/>): the X
         /// of this wire's vertical run, from
-        /// <see cref="OrthogonalWireRoute.AssignLanes"/>, so wires sharing a
+        /// <see cref="OrthogonalWireRoute.AssignRoutes"/>, so wires sharing a
         /// column run side by side and a fan-out shares one trunk. Null takes
         /// the default: halfway across.
         /// </summary>
         public float? LaneX;
+
+        /// <summary>Straight routing, a wire that loops BACK: the Y of its
+        /// return run, from <see cref="OrthogonalWireRoute.AssignRoutes"/>
+        /// (<see cref="WireLanes.ReturnY"/>). Null takes the default channel.</summary>
+        public float? ReturnLaneY;
+
+        /// <summary>Straight routing, a wire that loops BACK: the X of its
+        /// last vertical, into the input (<see cref="WireLanes.InX"/>). Null
+        /// takes the default: a stub before the input.</summary>
+        public float? InLaneX;
 
         /// <summary>Straight routing only: the vertical extent of the node at
         /// each end (element-relative), so a wire that has to loop BACK knows
@@ -171,8 +181,13 @@ namespace GustUI.Elements
                 Color toColor = wire.Selected ? WireSelectedColor : wire.ToColor ?? WireColor;
                 if (Routing == WireRouting.Orthogonal)
                 {
-                    BuildRoute(from, to, wire.LaneX.HasValue ? origin.X + wire.LaneX.Value : (float?)null,
-                        Offset(wire.FromSpan, origin.Y), Offset(wire.ToSpan, origin.Y));
+                    var lanes = new WireLanes
+                    {
+                        X = origin.X + wire.LaneX,
+                        ReturnY = origin.Y + wire.ReturnLaneY,
+                        InX = origin.X + wire.InLaneX,
+                    };
+                    BuildRoute(from, to, lanes, Offset(wire.FromSpan, origin.Y), Offset(wire.ToSpan, origin.Y));
                     if (wire.Dashed)
                     {
                         DrawDashedPolyline(manager, routePoints, fromColor, toColor);
@@ -219,7 +234,7 @@ namespace GustUI.Elements
                 {
                     // Routed like the wire it will become, so the drag shows
                     // what the drop gives. No lane: it has no neighbours yet.
-                    BuildRoute(from, to, null, null, null);
+                    BuildRoute(from, to, default, null, null);
                     manager.DrawPolyline(routePoints, PreviewColor, PreviewColor, 2);
                 }
                 else
@@ -232,9 +247,9 @@ namespace GustUI.Elements
             base.Draw();
         }
 
-        private void BuildRoute(Vector2 from, Vector2 to, float? laneX, WireNodeSpan? fromSpan, WireNodeSpan? toSpan)
+        private void BuildRoute(Vector2 from, Vector2 to, WireLanes lanes, WireNodeSpan? fromSpan, WireNodeSpan? toSpan)
         {
-            OrthogonalWireRoute.Corners(routeCorners, from, to, Stub, CornerRadius, laneX, fromSpan, toSpan);
+            OrthogonalWireRoute.Corners(routeCorners, from, to, Stub, CornerRadius, lanes, fromSpan, toSpan);
             OrthogonalWireRoute.Round(routeCorners, CornerRadius, routePoints);
         }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Xna.Framework;
 
 namespace GustUI.Elements
@@ -22,14 +23,41 @@ namespace GustUI.Elements
         }
     }
 
-    /// <summary>One wire as <see cref="OrthogonalWireRoute.AssignLanes"/>
-    /// sees it: its two ends, and which output it comes from. Wires with
-    /// equal <see cref="SourceKey"/>s share a trunk.</summary>
+    /// <summary>One wire as <see cref="OrthogonalWireRoute.AssignRoutes"/>
+    /// sees it: its two ends, which output it comes from, and the nodes at
+    /// each end. Wires with equal <see cref="SourceKey"/>s share a trunk.</summary>
     public struct LaneWire
     {
         public Vector2 From;
         public Vector2 To;
         public object SourceKey;
+
+        /// <summary>The nodes' vertical extents, as the router's Corners
+        /// takes them — a backward wire's return channel depends on them.</summary>
+        public WireNodeSpan? FromSpan;
+
+        /// <inheritdoc cref="FromSpan"/>
+        public WireNodeSpan? ToSpan;
+    }
+
+    /// <summary>
+    /// The runs of one wire's route that <see cref="OrthogonalWireRoute.AssignRoutes"/>
+    /// chose, each null for "the default". A forward wire only has
+    /// <see cref="X"/>; a backward wire uses all three.
+    /// </summary>
+    public struct WireLanes
+    {
+        /// <summary>The X of a forward wire's vertical run, or of a backward
+        /// wire's FIRST vertical (out of the output).</summary>
+        public float? X;
+
+        /// <summary>A backward wire's return run: the Y it runs back left
+        /// along.</summary>
+        public float? ReturnY;
+
+        /// <summary>A backward wire's LAST vertical: the X it comes down (or
+        /// up) to its input at.</summary>
+        public float? InX;
     }
 
     /// <summary>
@@ -70,35 +98,45 @@ namespace GustUI.Elements
         /// much room after the output before it can turn.</param>
         /// <param name="laneX">Where the vertical run goes (a forward wire)
         /// or where the wire first turns (a backward one), from
-        /// <see cref="AssignLanes"/>. Null means the default.</param>
+        /// <see cref="AssignRoutes"/>. Null means the default.</param>
         public static List<Vector2> Corners(Vector2 from, Vector2 to, float stub, float radius,
             float? laneX = null, WireNodeSpan? fromSpan = null, WireNodeSpan? toSpan = null)
         {
             var points = new List<Vector2>(6);
-            Corners(points, from, to, stub, radius, laneX, fromSpan, toSpan);
+            Corners(points, from, to, stub, radius, new WireLanes { X = laneX }, fromSpan, toSpan);
             return points;
         }
 
         /// <summary>As <see cref="Corners(Vector2, Vector2, float, float, float?, WireNodeSpan?, WireNodeSpan?)"/>,
+        /// with every lane <see cref="AssignRoutes"/> picked.</summary>
+        public static List<Vector2> Corners(Vector2 from, Vector2 to, float stub, float radius,
+            WireLanes lanes, WireNodeSpan? fromSpan = null, WireNodeSpan? toSpan = null)
+        {
+            var points = new List<Vector2>(6);
+            Corners(points, from, to, stub, radius, lanes, fromSpan, toSpan);
+            return points;
+        }
+
+        /// <summary>As <see cref="Corners(Vector2, Vector2, float, float, WireLanes, WireNodeSpan?, WireNodeSpan?)"/>,
         /// into a caller's list (cleared first) — the per-frame path.</summary>
         public static void Corners(List<Vector2> points, Vector2 from, Vector2 to, float stub, float radius,
-            float? laneX = null, WireNodeSpan? fromSpan = null, WireNodeSpan? toSpan = null)
+            WireLanes lanes, WireNodeSpan? fromSpan = null, WireNodeSpan? toSpan = null)
         {
             points.Clear();
             points.Add(from);
 
             if (IsForward(from, to, stub, radius))
             {
-                float x = ClampForward(laneX ?? (from.X + to.X) * 0.5f, from, to, stub, radius);
+                float x = ClampForward(lanes.X ?? (from.X + to.X) * 0.5f, from, to, stub, radius);
                 Add(points, new Vector2(x, from.Y));
                 Add(points, new Vector2(x, to.Y));
                 Add(points, to);
                 return;
             }
 
-            float outX = laneX.HasValue && laneX.Value >= from.X + radius ? laneX.Value : from.X + stub;
-            float inX = to.X - stub;
-            float y = ReturnChannel(from, to, stub, radius, fromSpan, toSpan);
+            float outX = OutX(from, stub, radius, lanes.X);
+            float inX = InX(to, stub, lanes.InX);
+            float y = lanes.ReturnY ?? ReturnChannel(from, to, stub, radius, fromSpan, toSpan, out _, out _, out _);
 
             Add(points, new Vector2(outX, from.Y));
             Add(points, new Vector2(outX, y));
@@ -126,27 +164,39 @@ namespace GustUI.Elements
         /// The height a backward wire runs back along: through the middle of
         /// the gap between the two nodes if there is one, otherwise a stub
         /// below the lower of the two. Without node spans the ports stand in
-        /// for the nodes.
+        /// for the nodes. <paramref name="min"/>..<paramref name="max"/> is
+        /// where lanes may spread to (a corner's room inside a gap), and
+        /// <paramref name="under"/> says the channel is below both nodes, so
+        /// lanes stack downward from it rather than around it.
         /// </summary>
         private static float ReturnChannel(Vector2 from, Vector2 to, float stub, float radius,
-            WireNodeSpan? fromSpan, WireNodeSpan? toSpan)
+            WireNodeSpan? fromSpan, WireNodeSpan? toSpan, out float min, out float max, out bool under)
         {
             WireNodeSpan a = fromSpan ?? new WireNodeSpan(from.Y, from.Y);
             WireNodeSpan b = toSpan ?? new WireNodeSpan(to.Y, to.Y);
+            under = false;
 
             // A gap has to fit two corners to be worth threading.
             float minGap = radius * 2f;
             if (b.Top - a.Bottom >= minGap)
             {
+                min = a.Bottom + radius;
+                max = b.Top - radius;
                 return (a.Bottom + b.Top) * 0.5f;
             }
 
             if (a.Top - b.Bottom >= minGap)
             {
+                min = b.Bottom + radius;
+                max = a.Top - radius;
                 return (b.Bottom + a.Top) * 0.5f;
             }
 
-            return Math.Max(a.Bottom, b.Bottom) + stub;
+            under = true;
+            float y = Math.Max(a.Bottom, b.Bottom) + stub;
+            min = y;
+            max = float.MaxValue;
+            return y;
         }
 
         private static void Add(List<Vector2> points, Vector2 point)
@@ -231,37 +281,66 @@ namespace GustUI.Elements
         }
 
         /// <summary>
-        /// Picks a vertical run for every wire that has one, so wires that
-        /// would share the same column run side by side instead of on top of
-        /// each other.
+        /// Picks every run a wire's route has a choice about, so wires that
+        /// would share a column (or a return channel) run side by side, one
+        /// port row apart, instead of on top of each other or across each
+        /// other (ezmuze studio #311, #321).
         ///
-        /// TRUNKS FIRST: every wire from the same output (equal
-        /// <see cref="LaneWire.SourceKey"/>) shares one vertical run, placed
-        /// halfway to the NEAREST of its targets — a fan-out reads as one
-        /// cable that branches, the way a workflow graph draws it, rather
-        /// than as parallel wires. Then trunks whose runs would land within
-        /// <paramref name="spacing"/> of each other AND overlap vertically are
-        /// spread <paramref name="spacing"/> apart around their shared centre,
-        /// in order of source height. Each lane stays inside the range its
-        /// own wires can turn in.
+        /// <b>Spacing.</b> <paramref name="spacing"/> is the gap between
+        /// parallel runs everywhere — pass the pitch of the port rows (at the
+        /// zoom) and a stereo pair keeps ONE gap along its whole length: the
+        /// ports set it on the horizontal runs, the lanes keep it on the
+        /// vertical ones and on a backward wire's return run.
         ///
-        /// Returns one entry per wire, in order: the lane X, or null for a
-        /// wire whose source has no forward wire (it takes the default
-        /// backward route).
+        /// <b>Nesting.</b> Parallel wires never cross at a corner, because
+        /// each keeps the SAME SIDE of its bundle all the way along. A pair
+        /// leaves its outputs heading right with the upper wire on its
+        /// left-hand side (screen space, y down); after turning DOWN that puts
+        /// the upper wire on the RIGHT, after turning UP on the LEFT, and on a
+        /// backward wire's return run (heading left) at the BOTTOM. Applied
+        /// per run, that is: the wire on the INSIDE of the turn into a run
+        /// takes the lane nearest the corner — it turns first.
+        /// <list type="bullet">
+        /// <item>A vertical entered from the LEFT (a forward wire, or a
+        /// backward wire's way out): going down, the LOWER entry is leftmost;
+        /// going up, the UPPER entry is.</item>
+        /// <item>A vertical entered from the RIGHT (a backward wire's way in):
+        /// mirrored — going down, the lower entry is RIGHTMOST.</item>
+        /// <item>A return run entered from above: the rightmost vertical
+        /// takes the lowest lane; entered from below, the highest.</item>
+        /// </list>
+        /// Each run is ordered by where its wires come in from, so a pair that
+        /// is nested at its outputs stays nested to its inputs.
+        ///
+        /// <b>Trunks.</b> Every wire from the same output (equal
+        /// <see cref="LaneWire.SourceKey"/>) shares its first vertical —
+        /// placed halfway to the NEAREST forward target — and backward wires
+        /// from it that share a return channel also share that return run and
+        /// the vertical to their inputs: a fan-out reads as one cable that
+        /// branches, not as parallel wires.
+        ///
+        /// Lanes stay inside the range their own wires can turn in (a group
+        /// slides as a whole to fit, so its gap stays even); a return channel
+        /// between two nodes squeezes its spacing rather than run through a
+        /// node, and one under both nodes stacks downward.
+        ///
+        /// Returns one entry per wire, in order.
         /// </summary>
-        public static float?[] AssignLanes(IReadOnlyList<LaneWire> wires, float stub, float radius, float spacing)
+        public static WireLanes[] AssignRoutes(IReadOnlyList<LaneWire> wires, float stub, float radius, float spacing)
         {
-            var lanes = new float?[wires.Count];
+            var lanes = new WireLanes[wires.Count];
             var trunks = new List<Trunk>();
             var trunkOf = new Dictionary<object, Trunk>();
+            var forwardWire = new bool[wires.Count];
 
+            // ---- 1. Forward trunks: one vertical per output.
             for (int i = 0; i < wires.Count; i++)
             {
                 LaneWire wire = wires[i];
                 object key = wire.SourceKey ?? (object)i;
                 if (!trunkOf.TryGetValue(key, out Trunk trunk))
                 {
-                    trunk = new Trunk { From = wire.From, Min = float.MinValue, Max = float.MaxValue, Top = wire.From.Y, Bottom = wire.From.Y };
+                    trunk = new Trunk { Key = key, From = wire.From, Min = float.MinValue, Max = float.MaxValue, Top = wire.From.Y, Bottom = wire.From.Y };
                     trunkOf[key] = trunk;
                     trunks.Add(trunk);
                 }
@@ -272,41 +351,291 @@ namespace GustUI.Elements
                     continue;
                 }
 
+                forwardWire[i] = true;
                 trunk.Forward = true;
                 trunk.Min = Math.Max(trunk.Min, wire.From.X + radius);
                 trunk.Max = Math.Min(trunk.Max, wire.To.X - stub);
                 trunk.Nearest = Math.Min(trunk.Nearest, wire.To.X);
                 trunk.Top = Math.Min(trunk.Top, wire.To.Y);
                 trunk.Bottom = Math.Max(trunk.Bottom, wire.To.Y);
+                trunk.Travel += wire.To.Y - wire.From.Y;
             }
 
-            var forward = new List<Trunk>();
+            var forward = new List<Run>();
+            var forwardRunOf = new Dictionary<Trunk, Run>();
             foreach (Trunk trunk in trunks)
             {
-                if (trunk.Forward)
+                if (!trunk.Forward)
                 {
-                    trunk.X = Math.Clamp((trunk.From.X + trunk.Nearest) * 0.5f, trunk.Min, Math.Max(trunk.Min, trunk.Max));
-                    forward.Add(trunk);
+                    continue;
+                }
+
+                float max = Math.Max(trunk.Min, trunk.Max);
+                var run = new Run
+                {
+                    Position = Math.Clamp((trunk.From.X + trunk.Nearest) * 0.5f, trunk.Min, max),
+                    Min = trunk.Min,
+                    Max = max,
+                    Start = trunk.Top,
+                    End = trunk.Bottom,
+                    Order = EnteredFromLeft(trunk.Travel, trunk.From.Y),
+                    Tie = trunk.Members[0],
+                };
+                forward.Add(run);
+                forwardRunOf[trunk] = run;
+            }
+
+            foreach (List<Run> cluster in Cluster(forward, spacing))
+            {
+                SpreadCentred(cluster, spacing);
+            }
+
+            foreach (KeyValuePair<Trunk, Run> pair in forwardRunOf)
+            {
+                foreach (int member in pair.Key.Members)
+                {
+                    lanes[member].X = pair.Value.Position;
                 }
             }
 
-            // Cluster: a trunk joins the first cluster it would collide with.
-            forward.Sort((a, b) => a.X.CompareTo(b.X));
-            var clusters = new List<List<Trunk>>();
-            foreach (Trunk trunk in forward)
+            // ---- 2. Backward wires: out, back along a channel, and in.
+            var back = new List<int>();
+            var channels = new Dictionary<int, Channel>();
+            for (int i = 0; i < wires.Count; i++)
             {
-                List<Trunk> home = null;
-                foreach (List<Trunk> cluster in clusters)
+                if (forwardWire[i])
                 {
-                    float centre = Centre(cluster);
-                    if (Math.Abs(centre - trunk.X) >= spacing)
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    foreach (Trunk other in cluster)
+                LaneWire wire = wires[i];
+                back.Add(i);
+                float y = ReturnChannel(wire.From, wire.To, stub, radius, wire.FromSpan, wire.ToSpan,
+                    out float min, out float max, out bool under);
+                channels[i] = new Channel { Y = y, Min = min, Max = max, Under = under };
+            }
+
+            if (back.Count == 0)
+            {
+                return lanes;
+            }
+
+            // 2a. The way out, for an output with no forward trunk to borrow:
+            // one vertical per output, stacked rightward from a stub past it.
+            var outRuns = new List<Run>();
+            var outRunOf = new Dictionary<Trunk, Run>();
+            foreach (int i in back)
+            {
+                LaneWire wire = wires[i];
+                Trunk trunk = trunkOf[wire.SourceKey ?? (object)i];
+                if (trunk.Forward)
+                {
+                    continue;
+                }
+
+                if (!outRunOf.TryGetValue(trunk, out Run run))
+                {
+                    run = new Run
                     {
-                        if (trunk.Top <= other.Bottom + spacing && other.Top <= trunk.Bottom + spacing)
+                        Position = wire.From.X + stub,
+                        Min = wire.From.X + stub,
+                        Max = float.MaxValue,
+                        Start = wire.From.Y,
+                        End = wire.From.Y,
+                        Tie = i,
+                    };
+                    outRunOf[trunk] = run;
+                    outRuns.Add(run);
+                }
+
+                float y = channels[i].Y;
+                run.Start = Math.Min(run.Start, y);
+                run.End = Math.Max(run.End, y);
+                run.Travel += y - wire.From.Y;
+            }
+
+            foreach (KeyValuePair<Trunk, Run> pair in outRunOf)
+            {
+                pair.Value.Order = EnteredFromLeft(pair.Value.Travel, pair.Key.From.Y);
+            }
+
+            foreach (List<Run> cluster in Cluster(outRuns, spacing))
+            {
+                SpreadFrom(cluster, spacing, cluster.Max(r => r.Min), +1f);
+            }
+
+            foreach (int i in back)
+            {
+                Trunk trunk = trunkOf[wires[i].SourceKey ?? (object)i];
+                if (outRunOf.TryGetValue(trunk, out Run run))
+                {
+                    lanes[i].X = run.Position;
+                }
+            }
+
+            // 2b. The return run: one per output and channel, spread across
+            // the channel — squeezed to fit a gap between two nodes, stacked
+            // downward under them.
+            var returnRuns = new List<Run>();
+            var returnRunOf = new Dictionary<(object, float), Run>();
+            var returnOf = new Dictionary<int, Run>();
+            foreach (int i in back)
+            {
+                LaneWire wire = wires[i];
+                Channel channel = channels[i];
+                float outX = OutX(wire.From, stub, radius, lanes[i].X);
+                float inX = InX(wire.To, stub, null);
+                var key = (wire.SourceKey ?? (object)i, channel.Y);
+                if (!returnRunOf.TryGetValue(key, out Run run))
+                {
+                    run = new Run
+                    {
+                        Position = channel.Y,
+                        Min = channel.Min,
+                        Max = channel.Max,
+                        Under = channel.Under,
+                        Start = inX,
+                        End = outX,
+                        // Entered from above, the rightmost vertical is the
+                        // outer one, so the lowest; from below, the highest.
+                        Order = channel.Y >= wire.From.Y ? outX : -outX,
+                        Tie = i,
+                    };
+                    returnRunOf[key] = run;
+                    returnRuns.Add(run);
+                }
+
+                run.Start = Math.Min(run.Start, inX);
+                returnOf[i] = run;
+            }
+
+            foreach (List<Run> cluster in Cluster(returnRuns, spacing))
+            {
+                if (cluster.Exists(r => r.Under))
+                {
+                    SpreadFrom(cluster, spacing, cluster.Max(r => r.Position), +1f);
+                    continue;
+                }
+
+                float min = cluster.Max(r => r.Min);
+                float max = cluster.Min(r => r.Max);
+                float fit = cluster.Count > 1 && max > min ? (max - min) / (cluster.Count - 1) : spacing;
+                SpreadCentred(cluster, Math.Min(spacing, fit));
+            }
+
+            foreach (int i in back)
+            {
+                lanes[i].ReturnY = returnOf[i].Position;
+            }
+
+            // 2c. The way in: one vertical per return run (so a fan-out that
+            // came back together branches at the end), stacked leftward from
+            // a stub before the input.
+            var inRuns = new List<Run>();
+            var inRunOf = new Dictionary<Run, Run>();
+            var inOf = new Dictionary<int, Run>();
+            foreach (int i in back)
+            {
+                LaneWire wire = wires[i];
+                Run ret = returnOf[i];
+                float inX = InX(wire.To, stub, null);
+                if (!inRunOf.TryGetValue(ret, out Run run))
+                {
+                    run = new Run
+                    {
+                        Min = float.MinValue,
+                        Max = inX,
+                        Start = ret.Position,
+                        End = ret.Position,
+                        Tie = i,
+                    };
+                    inRunOf[ret] = run;
+                    inRuns.Add(run);
+                }
+
+                run.Max = Math.Min(run.Max, inX);
+                run.Position = run.Max;
+                run.Start = Math.Min(run.Start, wire.To.Y);
+                run.End = Math.Max(run.End, wire.To.Y);
+                run.Travel += wire.To.Y - ret.Position;
+                inOf[i] = run;
+            }
+
+            foreach (KeyValuePair<Run, Run> pair in inRunOf)
+            {
+                // Entered from the right: going down the lower entry is the
+                // inner wire, which is now the RIGHTMOST lane; going up the
+                // upper entry is. Order ascends rightward.
+                float y = pair.Key.Position;
+                pair.Value.Order = pair.Value.Travel >= 0f ? y : -y;
+            }
+
+            foreach (List<Run> cluster in Cluster(inRuns, spacing))
+            {
+                SpreadFrom(cluster, spacing, cluster.Min(r => r.Max), -1f);
+            }
+
+            foreach (int i in back)
+            {
+                lanes[i].InX = inOf[i].Position;
+            }
+
+            return lanes;
+        }
+
+        /// <summary>The first-vertical lanes only (<see cref="WireLanes.X"/>)
+        /// of <see cref="AssignRoutes"/> — the shape this had before
+        /// backward wires got lanes (#321). A backward wire routed with only
+        /// this X still collapses onto its neighbours on the way back; use
+        /// <see cref="AssignRoutes"/>.</summary>
+        public static float?[] AssignLanes(IReadOnlyList<LaneWire> wires, float stub, float radius, float spacing)
+        {
+            WireLanes[] routes = AssignRoutes(wires, stub, radius, spacing);
+            var lanes = new float?[routes.Length];
+            for (int i = 0; i < routes.Length; i++)
+            {
+                lanes[i] = routes[i].X;
+            }
+
+            return lanes;
+        }
+
+        /// <summary>The sort key of a vertical entered from the left, with
+        /// its lanes in ascending X: going down the lower entry comes first
+        /// (it is on the inside of the turn), going up the upper one does.</summary>
+        private static float EnteredFromLeft(float travel, float entryY)
+            => travel >= 0f ? -entryY : entryY;
+
+        /// <summary>Where a backward wire's first vertical goes: its lane if
+        /// that leaves room for a corner after the output, else a stub out.</summary>
+        private static float OutX(Vector2 from, float stub, float radius, float? laneX)
+            => laneX.HasValue && laneX.Value >= from.X + radius ? laneX.Value : from.X + stub;
+
+        /// <summary>Where a backward wire's last vertical goes: its lane if
+        /// that still leaves a whole stub before the input, else a stub
+        /// before it.</summary>
+        private static float InX(Vector2 to, float stub, float? laneX)
+            => laneX.HasValue && laneX.Value <= to.X - stub + 0.01f ? laneX.Value : to.X - stub;
+
+        /// <summary>
+        /// Groups runs that would collide — closer than
+        /// <paramref name="spacing"/> across the run and overlapping (give or
+        /// take a spacing) along it — then sorts each group by its nesting
+        /// order.
+        /// </summary>
+        private static List<List<Run>> Cluster(List<Run> runs, float spacing)
+        {
+            runs.Sort((a, b) => a.Position != b.Position ? a.Position.CompareTo(b.Position) : a.Tie.CompareTo(b.Tie));
+            var clusters = new List<List<Run>>();
+            foreach (Run run in runs)
+            {
+                List<Run> home = null;
+                foreach (List<Run> cluster in clusters)
+                {
+                    foreach (Run other in cluster)
+                    {
+                        if (Math.Abs(other.Position - run.Position) < spacing - 0.01f
+                            && run.Start <= other.End + spacing && other.Start <= run.End + spacing)
                         {
                             home = cluster;
                             break;
@@ -321,59 +650,96 @@ namespace GustUI.Elements
 
                 if (home == null)
                 {
-                    home = new List<Trunk>();
+                    home = new List<Run>();
                     clusters.Add(home);
                 }
 
-                home.Add(trunk);
+                home.Add(run);
             }
 
-            foreach (List<Trunk> cluster in clusters)
+            foreach (List<Run> cluster in clusters)
             {
-                if (cluster.Count < 2)
-                {
-                    continue;
-                }
-
-                float centre = Centre(cluster);
-                cluster.Sort((a, b) => a.From.Y.CompareTo(b.From.Y));
-                for (int i = 0; i < cluster.Count; i++)
-                {
-                    Trunk trunk = cluster[i];
-                    float x = centre + (i - (cluster.Count - 1) * 0.5f) * spacing;
-                    trunk.X = Math.Clamp(x, trunk.Min, Math.Max(trunk.Min, trunk.Max));
-                }
+                cluster.Sort((a, b) => a.Order != b.Order ? a.Order.CompareTo(b.Order) : a.Tie.CompareTo(b.Tie));
             }
 
-            foreach (Trunk trunk in trunks)
-            {
-                if (!trunk.Forward)
-                {
-                    continue;
-                }
-
-                foreach (int member in trunk.Members)
-                {
-                    lanes[member] = trunk.X;
-                }
-            }
-
-            return lanes;
+            return clusters;
         }
 
-        private static float Centre(List<Trunk> cluster)
+        /// <summary>Spreads a sorted group <paramref name="spacing"/> apart
+        /// around its shared centre, sliding the whole group (not one lane)
+        /// to keep every lane inside its own range where that is possible.</summary>
+        private static void SpreadCentred(List<Run> cluster, float spacing)
         {
-            float sum = 0f;
-            foreach (Trunk trunk in cluster)
+            if (cluster.Count < 2)
             {
-                sum += trunk.X;
+                return;
             }
 
-            return sum / cluster.Count;
+            float centre = cluster.Average(r => r.Position);
+            float lo = float.MinValue;
+            float hi = float.MaxValue;
+            for (int i = 0; i < cluster.Count; i++)
+            {
+                float offset = (i - (cluster.Count - 1) * 0.5f) * spacing;
+                lo = Math.Max(lo, cluster[i].Min - offset);
+                hi = Math.Min(hi, cluster[i].Max - offset);
+            }
+
+            if (lo <= hi)
+            {
+                centre = Math.Clamp(centre, lo, hi);
+            }
+
+            for (int i = 0; i < cluster.Count; i++)
+            {
+                Run run = cluster[i];
+                float at = centre + (i - (cluster.Count - 1) * 0.5f) * spacing;
+                run.Position = Math.Clamp(at, run.Min, Math.Max(run.Min, run.Max));
+            }
+        }
+
+        /// <summary>Stacks a sorted group <paramref name="spacing"/> apart
+        /// from <paramref name="origin"/>: rightward/downward for a positive
+        /// <paramref name="direction"/>, leftward/upward for a negative one.
+        /// Positions always ascend in the group's order, so stacking
+        /// backward puts the LAST in order at the origin.</summary>
+        private static void SpreadFrom(List<Run> cluster, float spacing, float origin, float direction)
+        {
+            int n = cluster.Count;
+            for (int i = 0; i < n; i++)
+            {
+                int step = direction > 0f ? i : n - 1 - i;
+                cluster[i].Position = origin + (direction * step * spacing);
+            }
+        }
+
+        /// <summary>One run a lane is picked for: a vertical (Position is
+        /// its X, Start..End its Y extent) or a return run (Position is its
+        /// Y, Start..End its X extent).</summary>
+        private sealed class Run
+        {
+            public float Position;
+            public float Min;
+            public float Max;
+            public float Start;
+            public float End;
+            public float Travel;
+            public float Order;
+            public int Tie;
+            public bool Under;
+        }
+
+        private struct Channel
+        {
+            public float Y;
+            public float Min;
+            public float Max;
+            public bool Under;
         }
 
         private sealed class Trunk
         {
+            public object Key;
             public Vector2 From;
             public bool Forward;
             public float Min;
@@ -381,7 +747,7 @@ namespace GustUI.Elements
             public float Nearest = float.MaxValue;
             public float Top;
             public float Bottom;
-            public float X;
+            public float Travel;
             public readonly List<int> Members = new List<int>();
         }
     }
