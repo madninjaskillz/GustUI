@@ -764,10 +764,8 @@ namespace GustUI.Extensions
             }
 
             Vector2[] points = RentBezierPoints(segments + 1);
-            float[] lengths = RentBezierLengths(segments + 1);
 
             points[0] = p0;
-            lengths[0] = 0f;
             for (int i = 1; i <= segments; i++)
             {
                 float t = i / (float)segments;
@@ -777,6 +775,38 @@ namespace GustUI.Extensions
                     + 3f * u * u * t * c0
                     + 3f * u * t * t * c1
                     + t * t * t * p1;
+            }
+
+            DrawGradientPolyline(manager, new ReadOnlySpan<Vector2>(points, 0, segments + 1), fromColor, toColor, thickness);
+        }
+
+        /// <summary>
+        /// A polyline of thick segments shading from
+        /// <paramref name="fromColor"/> at its first point to
+        /// <paramref name="toColor"/> at its last, BY ARC LENGTH — the same
+        /// rule, and the same code, as the gradient
+        /// <see cref="DrawCubicBezier(DrawManager, Vector2, Vector2, Vector2, Vector2, Color, Color, int, int)"/>,
+        /// which is a sampled polyline too. For a path that is not a Bézier:
+        /// the module editor's straight wires with rounded corners.
+        /// </summary>
+        public static void DrawPolyline(this DrawManager manager, List<Vector2> points,
+            Color fromColor, Color toColor, int thickness = 2)
+            => DrawGradientPolyline(manager, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(points),
+                fromColor, toColor, thickness);
+
+        private static void DrawGradientPolyline(DrawManager manager, ReadOnlySpan<Vector2> points,
+            Color fromColor, Color toColor, int thickness)
+        {
+            int segments = points.Length - 1;
+            if (segments < 1)
+            {
+                return;
+            }
+
+            float[] lengths = RentBezierLengths(points.Length);
+            lengths[0] = 0f;
+            for (int i = 1; i <= segments; i++)
+            {
                 lengths[i] = lengths[i - 1] + (points[i] - points[i - 1]).Length();
             }
 
