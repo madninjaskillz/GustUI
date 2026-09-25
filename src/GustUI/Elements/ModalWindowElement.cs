@@ -325,20 +325,19 @@ namespace GustUI.Elements
             return false;
         }
 
-        /// <summary>Opt-in (2026-08-21): lets <see cref="Element.MoveToFront"/>
-        /// place this floating window ABOVE the full-screen modal tier
-        /// (<see cref="ModalDepth"/>), instead of the
-        /// default clamp just below it. For auxiliary floats a full-screen
-        /// editor OWNS and shows over itself (the wave picker's loop
-        /// browser) — the 2026-08-17 blanket clamp silently buried those
-        /// behind their owner, including on every later title-bar drag
-        /// (drag-press calls MoveToFront too, so a one-shot depth override
-        /// at spawn wouldn't survive). Stays below the loading tier
-        /// (90,000) and everything above it.</summary>
+        /// <summary>
+        /// No longer changes anything (2026-09-25, ezmuze #301). It lifted a
+        /// window above the modal tier (<see cref="ModalDepth"/>), for
+        /// auxiliary floats and prompts that had to sit over a full-screen
+        /// editor's fixed 60,000 surface. Editors are ordinary windows now,
+        /// and every window shares one stack: whichever was clicked or opened
+        /// last is on top, a prompt included. Kept so existing callers
+        /// compile; <see cref="DepthCeiling"/> is the one explicit override.
+        /// </summary>
         public bool FloatAboveModalTier { get; set; }
 
-        /// <summary>Opt-in (2026-09-04): an EXPLICIT ceiling, overriding both
-        /// the default clamp and <see cref="FloatAboveModalTier"/>.
+        /// <summary>Opt-in (2026-09-04): an EXPLICIT ceiling, overriding the
+        /// default clamp.
         ///
         /// For the rare owner that draws above the modal tiers entirely and
         /// still has to show a dialog over itself. ezmuze studio's beta gate is
@@ -354,83 +353,37 @@ namespace GustUI.Elements
         /// Null (the default) changes nothing.</summary>
         public int? DepthCeiling { get; set; }
 
-        private protected override int MoveToFrontCeiling
-            => BandCeiling(Band, FloatAboveModalTier, DepthCeiling);
-
-        private protected override int MoveToFrontFloor => BandFloor(Band);
-
         /// <summary>
-        /// Where a window stacks within the modal tier (ezmuze #301), bottom to
-        /// top. Within a band, the window clicked last is on top.
+        /// The app's backdrop window (ezmuze #301): the one window that stays
+        /// behind every other window even when it is clicked. ezmuze studio's
+        /// sequencer is the only one. Every other window -- floating, docked,
+        /// tabbed, maximised, a dialog, Preferences -- shares one stack, in
+        /// which the window most recently clicked or opened is on top.
         /// </summary>
-        public enum StackingBand
-        {
-            /// <summary>Fills the available space: the sequencer, a piano roll
-            /// opened maximised, a maximised view. Always behind the rest,
-            /// however often it is clicked.</summary>
-            Background,
+        public bool IsBackdrop { get; set; }
 
-            /// <summary>A floating or docked view (<see cref="Tabable"/> or
-            /// <see cref="KeyboardFollowsFront"/>, or anything docked): the
-            /// panels you move between.</summary>
-            View,
+        private protected override int MoveToFrontCeiling => StackCeiling(IsBackdrop, DepthCeiling);
 
-            /// <summary>Any other window: a dialog. Above every view, so
-            /// clicking the panel behind a file browser cannot bury it.</summary>
-            Dialog,
-        }
+        private protected override int MoveToFrontFloor => StackFloor(IsBackdrop);
 
-        /// <summary>The depth of <see cref="StackingBand.Background"/>. This held
-        /// before only by insertion order: every window clamped to one ceiling,
-        /// and the sequencer happened to be added first.</summary>
-        public const int BackgroundWindowDepth = ModalDepth - 3;
+        /// <summary>The depth of the backdrop window: one below every other window.</summary>
+        public const int BackdropWindowDepth = ModalDepth - 2;
 
-        /// <summary>The depth of <see cref="StackingBand.View"/>.</summary>
-        public const int ViewWindowDepth = ModalDepth - 2;
-
-        /// <summary>The depth of <see cref="StackingBand.Dialog"/>: the old
-        /// single ceiling, just below the modal tier.</summary>
-        public const int DialogWindowDepth = ModalDepth - 1;
+        /// <summary>The depth every other window is raised to, just below the
+        /// modal tier. They all share it, so which of them is on top is decided
+        /// by which was brought forward last (<see cref="Element.FrontSequence"/>).</summary>
+        public const int WindowDepth = ModalDepth - 1;
 
         /// <summary>The highest depth a window may be raised to: an explicit
-        /// <see cref="DepthCeiling"/> first, then the band above the modal tier
-        /// for <see cref="FloatAboveModalTier"/>, then its own band.</summary>
-        internal static int BandCeiling(StackingBand band, bool floatAboveModalTier, int? explicitCeiling)
-            => explicitCeiling
-               ?? (floatAboveModalTier ? ModalDepth + 9999 : BandDepth(band));
+        /// <see cref="DepthCeiling"/> first, then the backdrop's or the
+        /// shared window depth.</summary>
+        internal static int StackCeiling(bool backdrop, int? explicitCeiling)
+            => explicitCeiling ?? StackFloor(backdrop);
 
-        /// <summary>The lowest depth a window is raised to: its band.</summary>
-        internal static int BandFloor(StackingBand band) => BandDepth(band);
+        /// <summary>The lowest depth a window is raised to.</summary>
+        internal static int StackFloor(bool backdrop) => backdrop ? BackdropWindowDepth : WindowDepth;
 
-        private static int BandDepth(StackingBand band) => band switch
-        {
-            StackingBand.Background => BackgroundWindowDepth,
-            StackingBand.View => ViewWindowDepth,
-            _ => DialogWindowDepth,
-        };
-
-        /// <summary>
-        /// This window's <see cref="StackingBand"/>. A window with its own
-        /// <see cref="DepthCeiling"/> or <see cref="FloatAboveModalTier"/> has
-        /// asked to float and is never in the background, and a maximised
-        /// dialog stays a dialog.
-        /// </summary>
-        public StackingBand Band
-        {
-            get
-            {
-                bool floats = DepthCeiling != null || FloatAboveModalTier;
-                bool docked = DockedSide != DockSide.None;
-                if (!floats && !docked && (FillsAvailableSpace || (isFullScreen && TakesKeyboardOnFront)))
-                {
-                    return StackingBand.Background;
-                }
-
-                return TakesKeyboardOnFront || docked ? StackingBand.View : StackingBand.Dialog;
-            }
-        }
-
-        private StackingBand? lastBand;
+        private bool? lastBackdrop;
 
         /// <summary>Opt-in hook (2026-08-17, tear-off/dissolve fix): an app-
         /// level owner that constructs and reuses ONE long-lived
@@ -3700,14 +3653,13 @@ namespace GustUI.Elements
 
             previousLeftButtonForFocus = focusMouseState.LeftButton;
 
-            // A window that starts or stops filling the space (dragged out of
-            // it, maximised, restored) changes depth band, and its stacking
-            // follows at once rather than at its next click (#301).
-            StackingBand band = Band;
-            if (band != lastBand)
+            // A window that becomes (or stops being) the backdrop restacks at
+            // once rather than at its next click (#301).
+            bool backdrop = IsBackdrop;
+            if (backdrop != lastBackdrop)
             {
-                bool first = lastBand == null;
-                lastBand = band;
+                bool first = lastBackdrop == null;
+                lastBackdrop = backdrop;
                 if (!first && !justSpawned)
                 {
                     ReapplyFrontDepth();

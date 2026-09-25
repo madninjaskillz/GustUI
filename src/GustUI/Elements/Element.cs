@@ -989,11 +989,9 @@ public class Element : IDisposable
     /// <summary>
     /// The highest Depth <see cref="MoveToFront"/> may assign this element.
     /// Defaults to just below the full-screen modal tier (the 2026-08-17
-    /// clamp above). <see cref="ModalWindowElement"/> overrides this for its
-    /// opt-in <see cref="ModalWindowElement.FloatAboveModalTier"/> windows —
-    /// auxiliary floats a full-screen editor owns and needs ABOVE its own
-    /// 60,000 surface (e.g. the wave picker's loop browser), which the
-    /// blanket clamp silently buried behind their owner.
+    /// clamp above). <see cref="ModalWindowElement"/> overrides this to put
+    /// its backdrop window one below every other window, and to honour an
+    /// explicit <see cref="ModalWindowElement.DepthCeiling"/>.
     /// </summary>
     private protected virtual int MoveToFrontCeiling => ModalWindowElement.ModalDepth - 1;
 
