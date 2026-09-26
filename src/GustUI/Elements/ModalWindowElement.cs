@@ -290,6 +290,41 @@ namespace GustUI.Elements
             return true;
         }
 
+        /// <summary>
+        /// The window a drag at <paramref name="point"/> would merge into
+        /// (ezmuze #357): the TOPMOST visible window under the pointer, other
+        /// than <paramref name="self"/>, and only when the pointer is on its
+        /// title bar and it accepts tabs. <paramref name="drawOrder"/> is the
+        /// root's children, bottom to top; <paramref name="isWindow"/> says
+        /// which of them are windows (the rest, such as popups and overlays,
+        /// are passed over). A window covered at that point by
+        /// another is never a target, however much of its title bar lies
+        /// under the one covering it. Null for none.
+        /// </summary>
+        internal static Element MergeTargetAt(IReadOnlyList<Element> drawOrder, Element self, Vector2 point,
+            Func<Element, bool> isWindow, Func<Element, bool> acceptsTabs, Func<Element, (Vector2 Position, Vector2 Size)> bounds, float titleBarHeight)
+        {
+            for (int i = drawOrder.Count - 1; i >= 0; i--)
+            {
+                Element window = drawOrder[i];
+                if (window == null || ReferenceEquals(window, self) || !window.Visible || !isWindow(window))
+                {
+                    continue;
+                }
+
+                (Vector2 pos, Vector2 size) = bounds(window);
+                if (point.X < pos.X || point.X > pos.X + size.X || point.Y < pos.Y || point.Y > pos.Y + size.Y)
+                {
+                    continue;
+                }
+
+                // The topmost window here decides: its title bar or nothing.
+                return acceptsTabs(window) && point.Y <= pos.Y + titleBarHeight ? window : null;
+            }
+
+            return null;
+        }
+
         /// <summary>Whether <paramref name="scope"/> belongs to a view window
         /// -- a window that takes part in <see cref="ClaimKeyboard"/>, or one
         /// of its tabs -- rather than to a dialog.</summary>
@@ -324,17 +359,6 @@ namespace GustUI.Elements
 
             return false;
         }
-
-        /// <summary>
-        /// No longer changes anything (2026-09-25, ezmuze #301). It lifted a
-        /// window above the modal tier (<see cref="ModalDepth"/>), for
-        /// auxiliary floats and prompts that had to sit over a full-screen
-        /// editor's fixed 60,000 surface. Editors are ordinary windows now,
-        /// and every window shares one stack: whichever was clicked or opened
-        /// last is on top, a prompt included. Kept so existing callers
-        /// compile; <see cref="DepthCeiling"/> is the one explicit override.
-        /// </summary>
-        public bool FloatAboveModalTier { get; set; }
 
         /// <summary>Opt-in (2026-09-04): an EXPLICIT ceiling, overriding the
         /// default clamp.
@@ -528,6 +552,16 @@ namespace GustUI.Elements
 
         private string title;
 
+        /// <summary>
+        /// What the View window list calls this window, when that should be
+        /// shorter than its <see cref="Title"/> (ezmuze #351): the sequencer's
+        /// title carries the song's author and tempo, and the list only needs
+        /// "Sequencer - song". Null (the default) lists it by its Title. It
+        /// travels with the view into and out of tabs. Not updated by
+        /// <see cref="RetitleContent"/>; a view that sets it sets it again.
+        /// </summary>
+        public string ListTitle { get; set; }
+
         /// <summary>The live content element passed to the constructor —
         /// read-only external access (2026-08-17, tab-container feature):
         /// merging this modal into a <see cref="TabContainerElement"/>
@@ -572,6 +606,7 @@ namespace GustUI.Elements
             var entry = new Tab
             {
                 Title = source.Title,
+                ListTitle = source.tabs.Count == 1 ? source.tabs[0].ListTitle ?? source.ListTitle : source.ListTitle,
                 Content = body,
                 RehostCallback = source.OnContentRehosted,
 
@@ -669,6 +704,7 @@ namespace GustUI.Elements
             tabs.Add(new Tab
             {
                 Title = Title,
+                ListTitle = ListTitle,
                 Content = content,
                 RehostCallback = OnContentRehosted,
                 CloseOverride = OnOwnTabCloseRequested,
@@ -1222,6 +1258,7 @@ namespace GustUI.Elements
                 if (tabs.Count == 1)
                 {
                     Title = tabs[0].Title;
+                    ListTitle = tabs[0].ListTitle;
                 }
 
                 return;
@@ -1283,7 +1320,7 @@ namespace GustUI.Elements
             tabStrip.Set<PositionTrait>(new TVVector(0, 0));
             tabStrip.Set<SizeTrait>(new TVVector(stripWidth, ModalTitleBarElement.BarHeight));
 
-            bool active = IsFrontmostWindow(this);
+            bool active = IsActiveWindow(this);
             tabStrip.Set<BackgroundFillTrait>(new TVFillSolidColor(active ? TabStripFill : Dim(TabStripFill)));
 
             // Each tab is as wide as its caption and its glyphs (#341), up to
@@ -1599,6 +1636,32 @@ namespace GustUI.Elements
                 && point.Y >= pos.Y && point.Y <= pos.Y + size.Y;
         }
 
+        /// <summary>How far down and right of the window it left a popped-out
+        /// tab lands (ezmuze #346): one title bar, as cascading windows do.</summary>
+        public const float PopOutOffset = ModalTitleBarElement.BarHeight;
+
+        /// <summary>Where a popped-out tab's new window goes.</summary>
+        internal readonly record struct PopOutPlacement(Vector2 Position, Vector2 Size, bool Maximised);
+
+        /// <summary>
+        /// Where a tab popped out of a window at <paramref name="sourcePosition"/>
+        /// (<paramref name="sourceSize"/>) lands (ezmuze #346). A floating
+        /// window's tab arrives <see cref="PopOutOffset"/> down and right of
+        /// it, the same size. A maximised window's tab arrives maximised, over
+        /// it. A docked window's tab arrives floating, offset from the corner
+        /// of the rectangle it was docked in. The screen clamp in Update keeps
+        /// whatever this returns on screen.
+        /// </summary>
+        internal static PopOutPlacement PlacePoppedOut(Vector2 sourcePosition, Vector2 sourceSize, bool maximised, bool docked)
+        {
+            if (maximised && !docked)
+            {
+                return new PopOutPlacement(sourcePosition, sourceSize, true);
+            }
+
+            return new PopOutPlacement(sourcePosition + new Vector2(PopOutOffset, PopOutOffset), sourceSize, false);
+        }
+
         /// <summary>
         /// Takes a tab out into its own window — the explicit version of what
         /// dragging one off the strip used to do by accident.
@@ -1611,25 +1674,50 @@ namespace GustUI.Elements
                 return;
             }
 
-            MouseState mouse = Resources.StaticResources.InputManager.CurrentMouseState;
             TVVector size = ElementTrait<SizeTrait>().Value();
             int bottomInset = BottomInset;
+
+            // Where it lands comes from the window it leaves, not the pointer
+            // (ezmuze #346): one title bar down and right of it, so it arrives
+            // on top of that window with both title bars still showing. It
+            // used to be centred on the pointer, which put it wherever along
+            // the strip the pop-out glyph happened to be.
+            PopOutPlacement placement = PlacePoppedOut(
+                this.GetActualXnaPosition(), size.AsXna, IsFullScreen, DockedSide != DockSide.None);
+            (TVVector restorePosition, TVVector restoreSize) = FullScreenRestoreBounds;
 
             // Named after the view it will hold, read before the tab leaves
             // (#288): a sequencer popped out of its window used to leave that
             // window called sequencer-modal and arrive as tab-popped-<guid>.
-            string poppedName = NameOf(entry) ?? "tab-popped-" + Guid.NewGuid();            Tab moved = DetachTab(index);
+            string poppedName = NameOf(entry) ?? "tab-popped-" + Guid.NewGuid();
+            Tab moved = DetachTab(index);
             ReleaseToolbarItems(moved);
             HandOverOwnScope(moved);
 
             var modal = new ModalWindowElement(moved.Title, moved.Content,
-                position: new TVVector(mouse.X - (size.X / 2f), mouse.Y - (ModalTitleBarElement.BarHeight / 2f)),
-                size: size, fitToContent: false, resizable: true, closable: true,
+                position: new TVVector(placement.Position),
+                size: new TVVector(placement.Size), fitToContent: false, resizable: true, closable: true,
                 minSize: new Vector2(MinSize.X, MinSize.Y))
             {
                 Tabable = true,
                 BottomInset = bottomInset,
+                ListTitle = moved.ListTitle,
             };
+
+            if (placement.Maximised)
+            {
+                // A maximised window's tab pops out maximised, exactly over
+                // it. Restoring it goes to where the window it left would
+                // restore to, offset the same as any pop-out, rather than to
+                // the generic 70% fallback.
+                modal.IsFullScreen = true;
+                if (restorePosition != null && restoreSize != null)
+                {
+                    modal.FullScreenRestoreBounds = (
+                        new TVVector(restorePosition.AsXna + new Vector2(PopOutOffset, PopOutOffset)),
+                        restoreSize);
+                }
+            }
 
             Action<ModalWindowElement> rehost = RehostOf(moved);
             if (moved.CloseOverride != null)
@@ -1843,9 +1931,7 @@ namespace GustUI.Elements
                 .Where(w => w.Visible && !w.closing)
                 .ToList();
 
-            ModalWindowElement active = windows
-                .OrderByDescending(w => w.FrontSequence)
-                .FirstOrDefault();
+            ModalWindowElement active = ActiveWindow(windows) as ModalWindowElement;
 
             var entries = new List<(string Title, ModalWindowElement Window, Element Tab)>();
             foreach (ModalWindowElement window in windows)
@@ -1854,15 +1940,16 @@ namespace GustUI.Elements
                 {
                     foreach (Tab tab in window.tabs)
                     {
-                        if (!string.IsNullOrWhiteSpace(tab.Title) && tab.Content != null)
+                        string listed = string.IsNullOrWhiteSpace(tab.ListTitle) ? tab.Title : tab.ListTitle;
+                        if (!string.IsNullOrWhiteSpace(listed) && tab.Content != null)
                         {
-                            entries.Add((tab.Title, window, tab.Content));
+                            entries.Add((listed, window, tab.Content));
                         }
                     }
                 }
-                else if (!string.IsNullOrWhiteSpace(window.Title))
+                else if (!string.IsNullOrWhiteSpace(window.ListTitle ?? window.Title))
                 {
-                    entries.Add((window.Title, window, null));
+                    entries.Add((string.IsNullOrWhiteSpace(window.ListTitle) ? window.Title : window.ListTitle, window, null));
                 }
             }
 
@@ -2679,6 +2766,10 @@ namespace GustUI.Elements
         public sealed class Tab
         {
             public string Title;
+
+            /// <summary>The view's <see cref="ModalWindowElement.ListTitle"/>,
+            /// carried with it while it is a tab. Null lists it by Title.</summary>
+            public string ListTitle;
             public Element Content;
 
             /// <summary>This tab's body height as its caller authored it,
@@ -3086,7 +3177,7 @@ namespace GustUI.Elements
         };
 
         /// <summary>
-        /// Gives the frontmost dialog first refusal on a key. Returns true
+        /// Gives the active dialog first refusal on a key. Returns true
         /// when it took it, in which case the caller must not dispatch that
         /// key any further.
         /// </summary>
@@ -3110,15 +3201,16 @@ namespace GustUI.Elements
                 return false;
             }
 
-            // The FRONT WINDOW wins, and only it (ezmuze #335): a stack of
+            // The ACTIVE WINDOW wins, and only it (ezmuze #335): a stack of
             // dialogs must peel one at a time rather than all at once, and a
-            // window that is not a dialog in front of one shields it. The
-            // front is judged among EVERY window, not just the ones with
+            // window that is not a dialog, activated after one, shields it.
+            // Active is judged among EVERY window, not just the ones with
             // buttons: this used to drop the buttonless windows first, so a
             // full-window editor opened over the New song dialog let Escape
             // straight through to that hidden dialog, and the editor's own
-            // Escape never ran. A window pinned to the front over a dialog
-            // shields it too; it is the one on top.
+            // Escape never ran. Active, not drawn in front: keys go where the
+            // lit title bar says, so Preferences opened from a panel pinned to
+            // the front takes Escape although the panel is drawn over it.
             Element root = Resources.StaticResources?.RootWindow;
             var windows = new List<Element>(LiveDialogs.Count);
             for (int i = 0; i < LiveDialogs.Count; i++)
@@ -3157,11 +3249,22 @@ namespace GustUI.Elements
         }
 
         /// <summary>
-        /// The window on top of <paramref name="windows"/> — the one drawn
-        /// last: highest <see cref="Element.Depth"/>, which is what a pin
-        /// changes, and within a depth whichever was brought forward last
-        /// (<see cref="Element.FrontSequence"/>). The order the root sorts its
-        /// children into for drawing (TVElements.Items). Null for none.
+        /// The window on top of <paramref name="windows"/> — the one DRAWN
+        /// last (<see cref="StacksAbove"/>), pins included. Null for none.
+        ///
+        /// Two different questions have two different answers here, and this
+        /// is only the first:
+        /// - FRONT (this): which window is drawn on top. Pins count. It is
+        ///   what a press or a merge lands on (ezmuze #357) -- a question
+        ///   about what you can see.
+        /// - ACTIVE (<see cref="ActiveWindow"/>): which window was clicked or
+        ///   activated last, and so has the keyboard. Pins do not count. It is
+        ///   what EVERY key question follows -- dialog keys
+        ///   (<see cref="DialogKeyWindow"/>), menu-bar shortcuts -- and what
+        ///   the title-bar shading, the OS window title and the window list's
+        ///   tick show, so the lit title bar always says where keys go. As on
+        ///   Windows, an always-on-top window stays on top but dims when you
+        ///   click the window under it (ezmuze #358, closed as intended).
         /// </summary>
         internal static Element FrontWindow(IEnumerable<Element> windows)
         {
@@ -3173,9 +3276,7 @@ namespace GustUI.Elements
                     continue;
                 }
 
-                if (front == null
-                    || window.Depth > front.Depth
-                    || (window.Depth == front.Depth && window.FrontSequence > front.FrontSequence))
+                if (front == null || StacksAbove(window, front))
                 {
                     front = window;
                 }
@@ -3185,15 +3286,50 @@ namespace GustUI.Elements
         }
 
         /// <summary>
-        /// The window a dialog key (Escape, Enter) is offered to: the front
-        /// window, when <paramref name="isDialog"/> says it is a dialog, and
-        /// otherwise nobody — the key then goes on to the front view's own
-        /// shortcuts. Never a dialog BEHIND the front window (ezmuze #335).
+        /// Whether <paramref name="a"/> is DRAWN above <paramref name="b"/>:
+        /// the order the root sorts windows into for drawing. Depth first,
+        /// which is where a pin puts a window (back-pinned, normal and
+        /// front-pinned each have their own) and also honours an explicit
+        /// <see cref="DepthCeiling"/> (the beta gate's dialog); then the pin
+        /// group itself, for a window whose pin changed before it was
+        /// restacked; then whichever was brought forward last. For "front",
+        /// never for "active" — see <see cref="FrontWindow"/>.
+        /// </summary>
+        internal static bool StacksAbove(Element a, Element b)
+        {
+            if (a.Depth != b.Depth)
+            {
+                return a.Depth > b.Depth;
+            }
+
+            int pinA = PinRank(a);
+            int pinB = PinRank(b);
+            if (pinA != pinB)
+            {
+                return pinA > pinB;
+            }
+
+            return a.FrontSequence > b.FrontSequence;
+        }
+
+        private static int PinRank(Element element) => element is ModalWindowElement window
+            ? window.Pin switch { WindowPin.Front => 1, WindowPin.Back => -1, _ => 0 }
+            : 0;
+
+        /// <summary>
+        /// The window a dialog key (Escape, Enter) is offered to: the ACTIVE
+        /// window (<see cref="ActiveWindow"/>, the one clicked or activated
+        /// last, whose title bar is lit), when <paramref name="isDialog"/>
+        /// says it is a dialog, and otherwise nobody — the key then goes on to
+        /// that window's own shortcuts. Never a dialog that is not the active
+        /// window (ezmuze #335). A window pinned to the front does not shield
+        /// a dialog opened after it: the dialog is the active one. Clicking the
+        /// pinned window makes IT active, and then it gets the key.
         /// </summary>
         internal static Element DialogKeyWindow(IEnumerable<Element> windows, Func<Element, bool> isDialog)
         {
-            Element front = FrontWindow(windows);
-            return front != null && isDialog(front) ? front : null;
+            Element active = ActiveWindow(windows);
+            return active != null && isDialog(active) ? active : null;
         }
 
         private bool TryDialogKey(Keys key, bool typing)
@@ -3244,13 +3380,12 @@ namespace GustUI.Elements
         {
             ModalWindowElement front = null;
             MenuItemModel item = null;
-            long best = long.MinValue;
 
             for (int i = 0; i < LiveDialogs.Count; i++)
             {
                 ModalWindowElement window = LiveDialogs[i];
                 if (window.menuBar == null || window.Parent == null
-                    || window.MenuHookScope != activeScope || window.FrontSequence <= best)
+                    || window.MenuHookScope != activeScope || (front != null && window.FrontSequence <= front.FrontSequence))
                 {
                     continue;
                 }
@@ -3258,7 +3393,6 @@ namespace GustUI.Elements
                 MenuItemModel match = MenuBarElement.FindShortcut(window.menuBar.Sections, key, state);
                 if (match != null)
                 {
-                    best = window.FrontSequence;
                     front = window;
                     item = match;
                 }
@@ -3467,32 +3601,21 @@ namespace GustUI.Elements
                 return null;
             }
 
-            long best = long.MinValue;
-            string title = null;
+            // An untitled window is chrome, not a place — it must not blank
+            // the title just for being active. Active, not drawn in front: a
+            // front-pinned window over the one you clicked does not take the
+            // title from it (see FrontWindow).
+            Element active = ActiveWindow(root.Children.Items
+                .Where(child => child is ModalWindowElement modal && !string.IsNullOrWhiteSpace(modal.Title)));
 
-            foreach (Element child in root.Children.Items)
-            {
-                string candidate = child switch
-                {
-                    ModalWindowElement modal => modal.Title,
-                    _ => null,
-                };
-
-                // An untitled window is chrome, not a place — it must not blank
-                // the title just for being in front.
-                if (string.IsNullOrWhiteSpace(candidate) || child.FrontSequence <= best)
-                {
-                    continue;
-                }
-
-                best = child.FrontSequence;
-                title = candidate;
-            }
-
-            return title;
+            return (active as ModalWindowElement)?.Title;
         }
 
-        internal static bool IsFrontmostWindow(Element host)
+        /// <summary>Whether <paramref name="host"/> is the ACTIVE window — the
+        /// one clicked or activated last, which has the keyboard — and so
+        /// draws its title bar lit. Pins play no part (see
+        /// <see cref="FrontWindow"/>).</summary>
+        internal static bool IsActiveWindow(Element host)
         {
             if (host?.Parent == null)
             {
@@ -3503,16 +3626,57 @@ namespace GustUI.Elements
                 return true;
             }
 
-            long maxSequence = long.MinValue;
-            foreach (Element sibling in host.Parent.Children.Items)
+            return IsActiveAmong(host, host.Parent.Children.Items.Where(sibling => sibling is ModalWindowElement));
+        }
+
+        /// <summary>Whether no window in <paramref name="windows"/> was clicked
+        /// or activated after <paramref name="host"/>
+        /// (<see cref="Element.FrontSequence"/>).</summary>
+        internal static bool IsActiveAmong(Element host, IEnumerable<Element> windows)
+        {
+            foreach (Element window in windows)
             {
-                if (sibling is ModalWindowElement && sibling.FrontSequence > maxSequence)
+                if (window != null && !ReferenceEquals(window, host) && window.FrontSequence > host.FrontSequence)
                 {
-                    maxSequence = sibling.FrontSequence;
+                    return false;
                 }
             }
 
-            return host.FrontSequence >= maxSequence;
+            return true;
+        }
+
+        /// <summary>The active window among <paramref name="root"/>'s
+        /// children (see <see cref="ActiveWindow"/>): the one clicked or
+        /// activated last, which has the keyboard and gets dialog keys. Null
+        /// when none is open. For an owner that must keep the keys on its own
+        /// window, such as a gate standing over the rest of the app.</summary>
+        public static ModalWindowElement ActiveModal(Element root)
+        {
+            if (root?.Children == null)
+            {
+                return null;
+            }
+
+            return ActiveWindow(root.Children.Items
+                .Where(child => child is ModalWindowElement window && window.Visible && !window.closing)) as ModalWindowElement;
+        }
+
+        /// <summary>The ACTIVE window of <paramref name="windows"/>: the one
+        /// clicked or activated last (<see cref="Element.FrontSequence"/>),
+        /// pinned or not. Null for none. See <see cref="FrontWindow"/> for
+        /// the other question.</summary>
+        internal static Element ActiveWindow(IEnumerable<Element> windows)
+        {
+            Element active = null;
+            foreach (Element window in windows)
+            {
+                if (window != null && (active == null || window.FrontSequence > active.FrontSequence))
+                {
+                    active = window;
+                }
+            }
+
+            return active;
         }
 
         /// <summary>Same target rect FillsAvailableSpace already computes
@@ -3949,6 +4113,16 @@ namespace GustUI.Elements
                 ModalWindowElement target = pendingMergeTarget;
                 pendingMergeTarget = null;
                 target.AddTab(this);
+
+                // The window you dropped on is where your view now is, so it
+                // comes to the top and takes the keyboard, as a click on it
+                // would (ezmuze #357).
+                if (target.Parent != null)
+                {
+                    target.MoveToFront();
+                    target.ClaimKeyboard();
+                }
+
                 return;
             }
 
@@ -4828,22 +5002,16 @@ namespace GustUI.Elements
                 mergeArmed = true;
             }
 
-            ModalWindowElement found = null;
-
-            foreach (Element sibling in Resources.StaticResources.RootWindow.Children.Items)
-            {
-                if (sibling is ModalWindowElement other && other != this && other.Tabable)
-                {
-                    Vector2 pos = other.GetActualXnaPosition();
-                    TVVector otherSize = other.GetSize();
-                    if (mousePos.X >= pos.X && mousePos.X <= pos.X + otherSize.X
-                        && mousePos.Y >= pos.Y && mousePos.Y <= pos.Y + ModalTitleBarElement.BarHeight)
-                    {
-                        found = other;
-                        break;
-                    }
-                }
-            }
+            // Only a title bar you can SEE (ezmuze #357). The first window in
+            // the list with a title bar under the pointer used to win, even
+            // one buried behind the maximised sequencer, so a drag across the
+            // sequencer could vanish into a window nobody could see.
+            ModalWindowElement found = MergeTargetAt(
+                Resources.StaticResources.RootWindow.Children.Items, this, mousePos,
+                w => w is ModalWindowElement,
+                w => w is ModalWindowElement other && other.Tabable,
+                w => (w.GetActualXnaPosition(), w.GetSize().AsXna),
+                ModalTitleBarElement.BarHeight) as ModalWindowElement;
 
             if (found == null)
             {

@@ -86,6 +86,46 @@ namespace GustUI.Elements
         /// the scroll.</summary>
         private const int MaxResults = 40;
 
+        /// <summary>The narrowest a menu-bar dropdown is: the width every one
+        /// of them had before they sized to their rows (ezmuze #351), so a
+        /// menu whose rows already fit looks exactly as it did.</summary>
+        public const int MinFitWidth = 300;
+
+        /// <summary>The widest a menu-bar dropdown grows to fit its rows;
+        /// past it a row ellipsises as before.</summary>
+        public const int MaxFitWidth = 640;
+
+        /// <summary>
+        /// The width a dropdown of <paramref name="items"/> opened at
+        /// <paramref name="anchorX"/> takes (ezmuze #351): wide enough for its
+        /// widest row, but no narrower than <see cref="MinFitWidth"/>, no
+        /// wider than <see cref="MaxFitWidth"/>, and no wider than the room
+        /// left on screen to the right of the anchor.
+        /// </summary>
+        public static int WidthToFit(IEnumerable<MenuItemModel> items, float anchorX)
+        {
+            float room = Resources.StaticResources.RootWindow.GetSize().X - anchorX;
+            return FitWidth((items ?? Enumerable.Empty<MenuItemModel>()).Select(FruitMenuItem.NaturalWidth),
+                MinFitWidth, MaxFitWidth, room);
+        }
+
+        /// <summary>The arithmetic of <see cref="WidthToFit"/>: the widest of
+        /// <paramref name="naturalRowWidths"/>, clamped to
+        /// [<paramref name="floor"/>, <paramref name="cap"/>] and to
+        /// <paramref name="room"/> -- except that room never takes it below
+        /// the floor (the popup's own screen clamp slides it left instead).</summary>
+        internal static int FitWidth(IEnumerable<float> naturalRowWidths, int floor, int cap, float room)
+        {
+            float widest = 0f;
+            foreach (float width in naturalRowWidths)
+            {
+                widest = Math.Max(widest, width);
+            }
+
+            float limit = Math.Max(floor, Math.Min(cap, room));
+            return (int)Math.Ceiling(Math.Clamp(widest, floor, limit));
+        }
+
         public FruitPopupMenu(List<MenuItemModel> items, int width, Element trigger = null)
             : this(items, width, trigger, searchable: false, searchHint: null)
         {

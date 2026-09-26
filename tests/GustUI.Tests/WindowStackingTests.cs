@@ -170,5 +170,65 @@ namespace GustUI.Tests
         {
             Assert.Equal(42, Raise(pool: 1000000, ceiling: 42));
         }
+
+        // Two questions, two answers (ezmuze #358, closed as intended). FRONT
+        // is the window drawn on top, pins included: dialog keys and presses
+        // go there. ACTIVE is the window clicked or activated last: the lit
+        // title bar, the OS title and the keyboard follow it, pins or not --
+        // as an always-on-top window on Windows stays on top but dims when
+        // you click the window under it.
+
+        [Fact]
+        public void AFrontPinnedWindowStaysInFrontButDimsWhenAWindowUnderItIsClicked()
+        {
+            Element root = Parent();
+            Element pinned = Child(root, "pinned", Pin.Front);
+            Element sequencer = Child(root, "sequencer");
+            Click(pinned, Pin.Front);
+
+            Click(sequencer);
+
+            Assert.Same(pinned, ModalWindowElement.FrontWindow(root.Children.Items));
+            Assert.Same(sequencer, ModalWindowElement.ActiveWindow(root.Children.Items));
+            Assert.True(ModalWindowElement.IsActiveAmong(sequencer, root.Children.Items));
+            Assert.False(ModalWindowElement.IsActiveAmong(pinned, root.Children.Items));
+
+            // Clicking the pinned window again makes it active once more.
+            Click(pinned, Pin.Front);
+            Assert.Same(pinned, ModalWindowElement.ActiveWindow(root.Children.Items));
+            Assert.True(ModalWindowElement.IsActiveAmong(pinned, root.Children.Items));
+        }
+
+        [Fact]
+        public void WithinAPinGroupTheWindowClickedLastIsBothFrontAndActive()
+        {
+            Element root = Parent();
+            Element first = Child(root, "first");
+            Element second = Child(root, "second");
+
+            Click(first);
+
+            Assert.Same(first, ModalWindowElement.FrontWindow(root.Children.Items));
+            Assert.True(ModalWindowElement.IsActiveAmong(first, root.Children.Items));
+            Assert.False(ModalWindowElement.IsActiveAmong(second, root.Children.Items));
+        }
+
+        [Fact]
+        public void FrontIsAlwaysTheWindowDrawnLastAndActiveTheOneClickedLast()
+        {
+            Element root = Parent();
+            Element back = Child(root, "back", Pin.Back);
+            Element normal = Child(root, "normal");
+            Element front = Child(root, "front", Pin.Front);
+
+            foreach (Element clicked in new[] { back, normal, front, normal, back })
+            {
+                Click(clicked, clicked == back ? Pin.Back : clicked == front ? Pin.Front : Pin.Normal);
+
+                Assert.Same(root.Children.Items[^1], ModalWindowElement.FrontWindow(root.Children.Items));
+                Assert.Same(clicked, ModalWindowElement.ActiveWindow(root.Children.Items));
+                Assert.True(ModalWindowElement.IsActiveAmong(clicked, root.Children.Items));
+            }
+        }
     }
 }

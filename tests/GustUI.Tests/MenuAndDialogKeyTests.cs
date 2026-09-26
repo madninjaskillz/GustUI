@@ -106,7 +106,8 @@ namespace GustUI.Tests
             Assert.Null(InputManager.OfferNewKeys(new KeyboardState(Keys.Escape), new KeyboardState(), null));
         }
 
-        // ---- dialog keys go to the front window only -------------------------
+        // ---- dialog keys go to the active window only ------------------------
+        // Active = clicked or activated last, pins ignored (ezmuze #358).
 
         private static Element Root()
         {
@@ -150,13 +151,27 @@ namespace GustUI.Tests
         }
 
         [Fact]
-        public void AWindowPinnedToTheFrontShieldsADialogOpenedLater()
+        public void ADialogOpenedUnderAFrontPinnedWindowIsActiveAndGetsTheKey()
+        {
+            // Preferences opened from a panel pinned to the front: drawn under
+            // the panel, but the window activated last, so Escape closes it.
+            Element root = Root();
+            Element pinned = Open(root, "panel", Pin.Front);
+            Element dialog = Open(root, "preferences");
+
+            Assert.Same(pinned, ModalWindowElement.FrontWindow(new[] { pinned, dialog }));
+            Assert.Same(dialog, ModalWindowElement.DialogKeyWindow(new[] { pinned, dialog }, w => w == dialog));
+        }
+
+        [Fact]
+        public void ClickingTheFrontPinnedWindowMakesItActiveAndTheDialogLosesTheKey()
         {
             Element root = Root();
             Element pinned = Open(root, "panel", Pin.Front);
-            Element dialog = Open(root, "save");
+            Element dialog = Open(root, "newSong");
 
-            Assert.Same(pinned, ModalWindowElement.FrontWindow(new[] { pinned, dialog }));
+            pinned.MarkBroughtForward();
+
             Assert.Null(ModalWindowElement.DialogKeyWindow(new[] { pinned, dialog }, w => w == dialog));
         }
 

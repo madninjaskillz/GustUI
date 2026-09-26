@@ -391,7 +391,7 @@ namespace GustUI.Elements
             // Zero size when active — "hide via zero size," the same idiom
             // DockPreviewOverlay/TabMergePreviewOverlay already use, rather
             // than a visibility trait GustUI doesn't have.
-            bool active = ModalWindowElement.IsFrontmostWindow(parent);
+            bool active = ModalWindowElement.IsActiveWindow(parent);
             inactiveOverlay?.Set<SizeTrait>(active ? new TVVector(0, 0) : new TVVector(size.X, BarHeight));
             inactiveOverlay?.Set<PositionTrait>(new TVVector(0, 0));
 

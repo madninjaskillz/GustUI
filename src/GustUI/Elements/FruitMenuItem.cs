@@ -116,6 +116,36 @@ namespace GustUI.Elements
 
         private const int LabelLeft = 38;
 
+        /// <summary>
+        /// The row width <paramref name="item"/>'s label needs to be shown
+        /// whole (ezmuze #351): the icon column, the label, and whatever sits
+        /// at the right -- the margin the label column leaves, a submenu's
+        /// arrow, or the shortcut's chips. A separator needs nothing.
+        /// </summary>
+        public static float NaturalWidth(MenuItemModel item)
+        {
+            if (item == null || string.IsNullOrEmpty(item.Text))
+            {
+                return 0f;
+            }
+
+            float text = Resources.StaticResources.FontManager
+                .MeasureSdfText(Resources.StaticResources.Theme.MenuFont, item.Text).X;
+            float right = 16f;
+            if (item.SubItems?.Count > 0)
+            {
+                right = Math.Max(right, 34f);
+            }
+
+            if (item.Shortcut != null)
+            {
+                // The chips start 22 + 26 per modifier in from the edge.
+                right = Math.Max(right, 30f + (item.Shortcut.Modifiers.Count * 26f));
+            }
+
+            return LabelLeft + (float)Math.Ceiling(text) + right;
+        }
+
         /// <summary>The label's own inset from the top of the row. The icon
         /// takes the same one, so glyph and text sit on one line rather than
         /// the icon riding 2px high as it did while it was taller.</summary>

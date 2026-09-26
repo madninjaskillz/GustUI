@@ -236,8 +236,10 @@ namespace GustUI.Elements
                 open.Kill();
             }
 
-            FruitPopupMenu popup = new FruitPopupMenu(items, 300, this);
+            // As wide as its rows need, within bounds (ezmuze #351): a fixed
+            // 300 cut the window list's longer titles short.
             TVVector ps = args.Element.GetActualPosition();
+            FruitPopupMenu popup = new FruitPopupMenu(items, FruitPopupMenu.WidthToFit(items, ps.X), this);
             TVVector sz = args.Element.GetSize();
             popup.Set<PositionTrait>(new TVVector(ps.X, ps.Y + sz.Y));
             Resources.StaticResources.RootWindow.AddChild(popup, "popup " + Guid.NewGuid().ToString());

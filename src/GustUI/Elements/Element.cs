@@ -203,6 +203,21 @@ public class Element : IDisposable
     internal bool isFullScreen;
     bool sizeTransition = false;
 
+    /// <summary>Where a maximised element goes back to when restored: the
+    /// position and size captured as it was maximised, or null for either
+    /// when there is none. Settable so a window made maximised directly
+    /// (a tab popped out of a maximised window, ezmuze #346) can be given a
+    /// real place to restore to instead of the 70% fallback.</summary>
+    internal (TVVector Position, TVVector Size) FullScreenRestoreBounds
+    {
+        get => (fs_prepos, fs_presize);
+        set
+        {
+            fs_prepos = value.Position;
+            fs_presize = value.Size;
+        }
+    }
+
     private Vector2 desired_position;
     private Vector2 desired_size = Vector2.Zero;
 
@@ -924,7 +939,7 @@ public class Element : IDisposable
         // can't answer "which window was brought to front most recently"
         // once two or more windows are both clamped to the same `ceiling`
         // above — found live, via the control API, the very first time
-        // ModalWindowElement.IsFrontmostWindow tried to use Depth for
+        // ModalWindowElement.IsActiveWindow tried to use Depth for
         // exactly that: it ties, so both windows read as active. A separate,
         // never-clamped, always-increasing sequence number — bumped here,
         // the one place "this window is now the front one" is decided —
@@ -1001,7 +1016,7 @@ public class Element : IDisposable
     /// never reset, never clamped. The highest value among a set of
     /// siblings is unambiguously "whichever was brought to front most
     /// recently," unlike <see cref="Depth"/> once several of them share the
-    /// same clamped ceiling. internal: <see cref="ModalWindowElement.IsFrontmostWindow"/>
+    /// same clamped ceiling. internal: <see cref="ModalWindowElement.IsActiveWindow"/>
     /// is the one reader.</summary>
     internal long FrontSequence { get; private set; }
 
