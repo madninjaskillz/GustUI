@@ -239,6 +239,42 @@ public class Element : IDisposable
     /// meant to return to.</summary>
     private const float FullScreenSizeEqualityToleragePx = 4f;
 
+    /// <summary>
+    /// Whether a maximise/restore transition has reached its target, so it can
+    /// stop and snap exactly onto it.
+    ///
+    /// SIZE AND POSITION BOTH (ezmuze #367). This used to watch the size alone.
+    /// A window whose size already matched the maximised rect (the sequencer
+    /// dragged off a dock at the free space's size) therefore "arrived" on the
+    /// first frame, after one 40% step of its position, and stayed there, over
+    /// the docked window beside it.
+    ///
+    /// NOT THE POSITION WHILE DRAGGED. Dragging a maximised window off restores
+    /// it mid-drag, and the pointer owns the position from then on, so a
+    /// transition that also waited for the position would never end.
+    /// </summary>
+    internal static bool TransitionArrived(Vector2 size, Vector2 desiredSize, Vector2 position, Vector2 desiredPosition, bool dragging)
+    {
+        return SizeArrived(size, desiredSize) && (dragging || SizeArrived(position, desiredPosition));
+    }
+
+    /// <summary>Within a pixel on both axes.</summary>
+    internal static bool SizeArrived(Vector2 value, Vector2 target) =>
+        Math.Abs(value.X - target.X) < 1 && Math.Abs(value.Y - target.Y) < 1;
+
+    /// <summary>The fraction of the remaining distance a transition covers
+    /// each frame.</summary>
+    internal const float TransitionStep = 0.4f;
+
+    /// <summary>Frames a transition keeps running for its position once its
+    /// size has arrived — see <see cref="TransitionArrived"/>. At a 40% step,
+    /// 20 frames close a gap of more than 25,000 px to under one, so a
+    /// position that is still out after that is being held there by
+    /// something else.</summary>
+    internal const int PositionSettleFrameAllowance = 20;
+
+    private int positionSettleFrames;
+
     internal void ToggleFullScreen()
     {
         isFullScreen = !isFullScreen;
@@ -1215,14 +1251,42 @@ public class Element : IDisposable
             var currentSize = this.ElementTrait<SizeTrait>().Value().AsXna;
             var currentPosition = this.ElementTrait<PositionTrait>().Value().AsXna;
 
-            var newSize = Vector2.Lerp(currentSize, desired_size, 0.4f);
-            var newPosition = Vector2.Lerp(currentPosition, desired_position, 0.4f);
+            var newSize = Vector2.Lerp(currentSize, desired_size, TransitionStep);
+            var newPosition = Vector2.Lerp(currentPosition, desired_position, TransitionStep);
             Set<SizeTrait>(new TVVector(newSize));
             Set<PositionTrait>(new TVVector(newPosition));
 
-            if (Math.Abs(newSize.X - desired_size.X) < 1 && Math.Abs(newSize.Y - desired_size.Y) < 1)
+            if (TransitionArrived(newSize, desired_size, newPosition, desired_position, BeingDragged))
             {
+                // Land exactly, not a fraction of a pixel short: the lerp
+                // only ever approaches its target.
+                Set<SizeTrait>(new TVVector(desired_size));
+                if (!BeingDragged)
+                {
+                    Set<PositionTrait>(new TVVector(desired_position));
+                }
+
                 sizeTransition = false;
+                positionSettleFrames = 0;
+            }
+            else if (SizeArrived(newSize, desired_size))
+            {
+                // The size is there and the position is not. A real lerp gets
+                // it there well inside the allowance; one that has not by then
+                // is being overruled every frame by something that owns the
+                // position (AutoCenter re-centring a restored window), and
+                // waiting on it would keep this transition alive forever,
+                // pulling at the window the next time it is dragged.
+                if (++positionSettleFrames > PositionSettleFrameAllowance)
+                {
+                    Set<SizeTrait>(new TVVector(desired_size));
+                    sizeTransition = false;
+                    positionSettleFrames = 0;
+                }
+            }
+            else
+            {
+                positionSettleFrames = 0;
             }
         }
 

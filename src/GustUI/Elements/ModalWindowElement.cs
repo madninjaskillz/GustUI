@@ -4667,9 +4667,17 @@ namespace GustUI.Elements
             // and only on the way in from floating — docking from one side
             // straight to another must not overwrite the real floating size
             // with a dock rect.
+            // A window that was filling the free space has no floating size
+            // of its own to come back to: that size is the space, and bringing
+            // it back leaves a free-space-sized window floating off the corner
+            // it was dragged to (ezmuze #367). Measured here, before Register,
+            // so the free space does not yet exclude this window's own dock.
             if (DockedSide == DockSide.None)
             {
-                preDockSize = ElementTrait<SizeTrait>().Value();
+                TVVector size = ElementTrait<SizeTrait>().Value();
+                preDockSize = WasFillingFreeSpace(size.AsXna, Managers.DockLayout.AvailableRect(BottomInset, MinSize).Size)
+                    ? null
+                    : size;
             }
 
             DockedSide = side;
@@ -4749,6 +4757,36 @@ namespace GustUI.Elements
         /// FRACTION, which is the same thing every OS does when you drag a
         /// maximised window off the top of the screen.
         /// </summary>
+        /// <summary>
+        /// The size a panel takes as it comes off a dock — see
+        /// <see cref="ShrinkOffDock"/>. Restore first, shrink second, and
+        /// never bigger than the free space it is floating in (ezmuze #367):
+        /// a remembered size from a different layout, or a dock taller than
+        /// the space left beside the others, would otherwise hang over the
+        /// windows docked round it and the chrome under it.
+        /// </summary>
+        internal static Vector2 OffDockSize(Vector2 current, Vector2? remembered, Vector2 minSize, Vector2 freeSize)
+        {
+            Vector2 target = remembered ?? current * UndockShrink;
+
+            // A restore that lands on the size it already is says nothing, so
+            // fall back to shrinking rather than doing visibly nothing.
+            if (Math.Abs(target.X - current.X) < 2f && Math.Abs(target.Y - current.Y) < 2f)
+            {
+                target = current * UndockShrink;
+            }
+
+            target = Vector2.Min(target, freeSize);
+            return Vector2.Max(minSize, target);
+        }
+
+        /// <summary>Whether a window of <paramref name="size"/> is filling
+        /// the free space of <paramref name="freeSize"/> — within the same few
+        /// pixels un-maximise allows, since a lerped size rarely lands on a
+        /// whole pixel.</summary>
+        internal static bool WasFillingFreeSpace(Vector2 size, Vector2 freeSize) =>
+            Math.Abs(size.X - freeSize.X) <= 4f && Math.Abs(size.Y - freeSize.Y) <= 4f;
+
         private void ShrinkOffDock()
         {
             Vector2 current = ElementTrait<SizeTrait>().Value().AsXna;
@@ -4757,21 +4795,9 @@ namespace GustUI.Elements
                 return;
             }
 
-            Vector2 target = preDockSize != null
-                ? preDockSize.AsXna
-                : current * UndockShrink;
-
-            target.X = Math.Max(MinSize.X, target.X);
-            target.Y = Math.Max(MinSize.Y, target.Y);
-
-            // A restore that lands on the size it already is says nothing, so
-            // fall back to shrinking rather than doing visibly nothing.
-            if (Math.Abs(target.X - current.X) < 2f && Math.Abs(target.Y - current.Y) < 2f)
-            {
-                target = new Vector2(
-                    Math.Max(MinSize.X, current.X * UndockShrink),
-                    Math.Max(MinSize.Y, current.Y * UndockShrink));
-            }
+            Vector2 target = OffDockSize(
+                current, preDockSize?.AsXna, MinSize,
+                Managers.DockLayout.AvailableRect(BottomInset, MinSize).Size);
 
             if (Math.Abs(target.X - current.X) < 1f && Math.Abs(target.Y - current.Y) < 1f)
             {
