@@ -106,6 +106,7 @@ namespace GustUI.Elements
         {
             this.trigger = trigger;
             Depth = PopupDepth;
+            Live.Add(this);
             menuItems = items;
             unfilteredItems = items;
             this.searchHint = searchHint ?? "Search...";
@@ -365,7 +366,6 @@ namespace GustUI.Elements
             base.Update(parent);
 
             ApplySearch();
-            HandleKeys();
 
             // Self-clamp to the window (mirrors ModalWindowElement's own
             // screen-clamp) — a popup taller/wider than the space below/
@@ -485,6 +485,7 @@ namespace GustUI.Elements
         /// a level closes the whole tail below it however deep it goes.</summary>
         public override void Kill()
         {
+            Live.Remove(this);
             CloseSubmenu();
             base.Kill();
         }
@@ -501,71 +502,122 @@ namespace GustUI.Elements
         /// something.</summary>
         private int keyboardRow = -1;
 
-        private KeyboardState previousKeys;
-        private bool keysReady;
+        /// <summary>What a key does to an open menu. See
+        /// <see cref="CommandFor"/>.</summary>
+        public enum MenuCommand
+        {
+            None,
+            Down,
+            Up,
+            Activate,
+            Close,
+            EnterSubmenu,
+            Back,
+        }
 
         /// <summary>
-        /// Arrow-key navigation, for the DEEPEST open popup only.
-        ///
-        /// Down and Up move a highlight that looks exactly like a hover (see
-        /// TVSmartFill.ForceHovered), skipping separators and disabled rows.
-        /// Right opens a submenu and moves into it; Left closes one and comes
-        /// back out; Enter runs the row; Escape closes this level.
-        ///
-        /// LEFT AND RIGHT BELONG TO A SEARCH FIELD when there is one and it
-        /// has the focus, because that is where the caret lives and a caret
-        /// that cannot be moved is a box you cannot correct a typo in. Up,
-        /// Down, Enter and Escape are the menu's either way: in a single-line
-        /// field Up and Down only jump the caret to the ends, which is worth
-        /// less than moving down a list of results.
+        /// Every popup built and not yet killed, oldest first. A submenu is
+        /// built after the level it hangs off, so the deepest open level is
+        /// the last one here that is still on screen.
         /// </summary>
-        private void HandleKeys()
+        private static readonly List<FruitPopupMenu> Live = new List<FruitPopupMenu>();
+
+        /// <summary>
+        /// The key a menu takes, and what it does with it (ezmuze #330, #350).
+        ///
+        /// Up, Down, Enter and Escape are the menu's whatever has the focus:
+        /// in a single-line search field Up and Down only jump the caret to
+        /// the ends, which is worth less than moving down a list of results.
+        /// LEFT AND RIGHT BELONG TO THE SEARCH FIELD while it has the focus,
+        /// because that is where the caret lives and a caret that cannot be
+        /// moved is a box you cannot correct a typo in. Everything else is not
+        /// the menu's, and goes on to the window as usual.
+        /// </summary>
+        internal static MenuCommand CommandFor(Keys key, bool typingInSearch)
         {
-            KeyboardState keys = Resources.StaticResources.InputManager.CurrentKeyboardState;
-            KeyboardState was = previousKeys;
-            previousKeys = keys;
+            switch (key)
+            {
+                case Keys.Down: return MenuCommand.Down;
+                case Keys.Up: return MenuCommand.Up;
+                case Keys.Enter: return MenuCommand.Activate;
+                case Keys.Escape: return MenuCommand.Close;
+                case Keys.Right: return typingInSearch ? MenuCommand.None : MenuCommand.EnterSubmenu;
+                case Keys.Left: return typingInSearch ? MenuCommand.None : MenuCommand.Back;
+                default: return MenuCommand.None;
+            }
+        }
 
-            // The first frame has no "before" to compare against, and a key
-            // still held from whatever opened the menu is not a press in it.
-            if (!keysReady)
+        /// <summary>
+        /// Offers a newly pressed key to the open menu, if there is one, and
+        /// says whether it took it. Called by InputManager AHEAD of dialogs,
+        /// text fields and every shortcut: an open menu is what the person is
+        /// looking at, so a key it takes goes nowhere else.
+        ///
+        /// It used to read the keyboard for itself in Update, which runs after
+        /// InputManager has already dispatched the frame's keys — so Escape
+        /// closed the menu AND ran the window's own Escape, and one press
+        /// meant to dismiss a menu shut the module panel or the module editor
+        /// behind it (ezmuze #350, #330). Enter did the same to the
+        /// sequencer's "open the piano roll".
+        ///
+        /// Only the DEEPEST open level navigates: a submenu is what the person
+        /// is looking at.
+        /// </summary>
+        internal static bool HandleOpenMenuKey(Keys key)
+        {
+            FruitPopupMenu menu = Deepest();
+            if (menu == null)
             {
-                keysReady = true;
-                return;
+                return false;
             }
 
-            // One level navigates at a time, and it is the innermost: a
-            // submenu is what the person is looking at.
-            if (submenu != null)
+            switch (CommandFor(key, menu.TypingInSearch()))
             {
-                return;
+                case MenuCommand.Down:
+                    menu.MoveHighlight(+1);
+                    return true;
+                case MenuCommand.Up:
+                    menu.MoveHighlight(-1);
+                    return true;
+                case MenuCommand.Activate:
+                    menu.Activate();
+                    return true;
+                case MenuCommand.Close:
+                case MenuCommand.Back:
+                    menu.CloseLevel();
+                    return true;
+                case MenuCommand.EnterSubmenu:
+                    menu.EnterSubmenu();
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>Whether any menu is open on screen.</summary>
+        public static bool AnyOpen => Deepest() != null;
+
+        /// <summary>The innermost open level: the newest live popup that is
+        /// on screen, followed down its open submenus.</summary>
+        private static FruitPopupMenu Deepest()
+        {
+            for (int i = Live.Count - 1; i >= 0; i--)
+            {
+                FruitPopupMenu menu = Live[i];
+                if (menu.Parent == null)
+                {
+                    continue;
+                }
+
+                while (menu.submenu != null && menu.submenu.Parent != null)
+                {
+                    menu = menu.submenu;
+                }
+
+                return menu;
             }
 
-            bool Pressed(Keys key) => keys.IsKeyDown(key) && !was.IsKeyDown(key);
-
-            if (Pressed(Keys.Down))
-            {
-                MoveHighlight(+1);
-            }
-            else if (Pressed(Keys.Up))
-            {
-                MoveHighlight(-1);
-            }
-            else if (Pressed(Keys.Enter))
-            {
-                Activate();
-            }
-            else if (Pressed(Keys.Escape))
-            {
-                CloseLevel();
-            }
-            else if (Pressed(Keys.Right) && !TypingInSearch())
-            {
-                EnterSubmenu();
-            }
-            else if (Pressed(Keys.Left) && !TypingInSearch())
-            {
-                CloseLevel();
-            }
+            return null;
         }
 
         private bool TypingInSearch()

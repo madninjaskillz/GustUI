@@ -227,6 +227,47 @@ namespace GustUI.Managers
         /// matters.</summary>
         private static readonly Keys[] DialogKeys = { Keys.Escape, Keys.Enter };
 
+        /// <summary>
+        /// Where a newly pressed key goes first: to the open menu, if there is
+        /// one (<see cref="Elements.FruitPopupMenu.HandleOpenMenuKey"/>).
+        /// Returns whether it was taken. Settable so a test can stand in for
+        /// the menu.
+        /// </summary>
+        internal Func<Keys, bool> MenuKeyHandler { get; set; } = Elements.FruitPopupMenu.HandleOpenMenuKey;
+
+        /// <summary>
+        /// Offers each key newly pressed this frame to <paramref name="offer"/>,
+        /// and returns the ones it took (null when none). Bare keys only, by
+        /// the rule the dialog keys follow (#280): with a modifier held a key
+        /// is some other shortcut, not menu navigation.
+        /// </summary>
+        internal static List<Keys> OfferNewKeys(KeyboardState now, KeyboardState before, Func<Keys, bool> offer)
+        {
+            if (offer == null || AnyModifierHeld(now))
+            {
+                return null;
+            }
+
+            List<Keys> taken = null;
+            foreach (Keys key in now.GetPressedKeys())
+            {
+                if (before.IsKeyDown(key))
+                {
+                    continue;
+                }
+
+                if (offer(key))
+                {
+                    (taken ??= new List<Keys>()).Add(key);
+                }
+            }
+
+            return taken;
+        }
+
+        private static bool IsConsumed(List<Keys> consumed, Keys key)
+            => consumed != null && consumed.Contains(key);
+
         /// <summary>True only during the frame that observed the left button's
         /// press edge (elements can react to "a click started somewhere",
         /// e.g. popups closing on an outside press).</summary>
@@ -771,10 +812,19 @@ namespace GustUI.Managers
             // Bare keys only (#280): Ctrl+Enter or Shift+Escape is some other
             // shortcut, not "confirm" or "cancel", by the same exact-modifier
             // rule the hooks follow.
-            Keys consumed = Keys.None;
+            // ---- ...and an open MENU gets it before even the dialogs ----
+            //
+            // (ezmuze #330, #350.) A menu is the thing on top of everything,
+            // popups sit above every window, so the keys it navigates by are
+            // its alone: Escape closes the menu and NOT the panel it came
+            // from, Enter runs the item and NOT the sequencer's "open the
+            // piano roll". Keys it does not use carry on as usual.
+            List<Keys> consumed = OfferNewKeys(keyboardState, previousKeyboardState, MenuKeyHandler);
+
             foreach (Keys dialogKey in DialogKeys)
             {
-                if (!keyboardState.IsKeyDown(dialogKey) || previousKeyboardState.IsKeyDown(dialogKey))
+                if (!keyboardState.IsKeyDown(dialogKey) || previousKeyboardState.IsKeyDown(dialogKey)
+                    || IsConsumed(consumed, dialogKey))
                 {
                     continue;
                 }
@@ -786,7 +836,7 @@ namespace GustUI.Managers
 
                 if (Elements.ModalWindowElement.HandleDialogKey(dialogKey, typing))
                 {
-                    consumed = dialogKey;
+                    (consumed ??= new List<Keys>()).Add(dialogKey);
                 }
 
                 break;
@@ -825,7 +875,7 @@ namespace GustUI.Managers
                         repeatKeyStillDown = true;
                     }
 
-                    if (!previousKeyboardState.IsKeyDown(key))
+                    if (!previousKeyboardState.IsKeyDown(key) && !IsConsumed(consumed, key))
                     {
                         // A key handled earlier this frame can end the typing
                         // (Enter submits, and the submit closes the dialog and
@@ -876,9 +926,9 @@ namespace GustUI.Managers
                     continue; // belongs to a view beneath (or above) the active modal scope
                 }
 
-                if (hook.Shortcut.Key == consumed)
+                if (IsConsumed(consumed, hook.Shortcut.Key))
                 {
-                    continue; // a dialog took this key above
+                    continue; // a menu or a dialog took this key above
                 }
 
                 if (!keyboardState.IsKeyDown(hook.Shortcut.Key) || previousKeyboardState.IsKeyDown(hook.Shortcut.Key))
@@ -905,7 +955,7 @@ namespace GustUI.Managers
             {
                 foreach (Keys key in keyboardState.GetPressedKeys())
                 {
-                    if (previousKeyboardState.IsKeyDown(key) || key == consumed
+                    if (previousKeyboardState.IsKeyDown(key) || IsConsumed(consumed, key)
                         || (firedKeys != null && firedKeys.Contains(key)))
                     {
                         continue;

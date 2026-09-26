@@ -3110,27 +3110,90 @@ namespace GustUI.Elements
                 return false;
             }
 
-            // Frontmost WINS, and only it: a stack of dialogs must peel one at
-            // a time rather than all at once.
-            ModalWindowElement front = null;
-            long best = long.MinValue;
-
+            // The FRONT WINDOW wins, and only it (ezmuze #335): a stack of
+            // dialogs must peel one at a time rather than all at once, and a
+            // window that is not a dialog in front of one shields it. The
+            // front is judged among EVERY window, not just the ones with
+            // buttons: this used to drop the buttonless windows first, so a
+            // full-window editor opened over the New song dialog let Escape
+            // straight through to that hidden dialog, and the editor's own
+            // Escape never ran. A window pinned to the front over a dialog
+            // shields it too; it is the one on top.
+            Element root = Resources.StaticResources?.RootWindow;
+            var windows = new List<Element>(LiveDialogs.Count);
             for (int i = 0; i < LiveDialogs.Count; i++)
             {
-                ModalWindowElement dialog = LiveDialogs[i];
-                if (!dialog.keyboardDismiss || dialog.Parent == null || dialog.buttons.Count == 0)
+                ModalWindowElement window = LiveDialogs[i];
+                if (window.Parent != null && window.Visible && (root == null || ReferenceEquals(window.Parent, root)))
+                {
+                    windows.Add(window);
+                }
+            }
+
+            var front = DialogKeyWindow(windows,
+                w => w is ModalWindowElement dialog && dialog.keyboardDismiss && dialog.buttons.Count > 0) as ModalWindowElement;
+            return front != null && front.TryDialogKey(key, typing);
+        }
+
+        /// <summary>
+        /// Every DIALOG open on screen — a window with footer buttons that a
+        /// key may dismiss, as opposed to a view built out of the same element
+        /// (the sequencer, a panel, an editor). Oldest first. For a caller
+        /// that must not open something over one (ezmuze #335: the control
+        /// API opened the module editor over the New song dialog, hiding it).
+        /// </summary>
+        public static List<ModalWindowElement> OpenDialogs()
+        {
+            var open = new List<ModalWindowElement>();
+            foreach (ModalWindowElement window in LiveDialogs)
+            {
+                if (window.Parent != null && window.keyboardDismiss && window.buttons.Count > 0)
+                {
+                    open.Add(window);
+                }
+            }
+
+            return open;
+        }
+
+        /// <summary>
+        /// The window on top of <paramref name="windows"/> — the one drawn
+        /// last: highest <see cref="Element.Depth"/>, which is what a pin
+        /// changes, and within a depth whichever was brought forward last
+        /// (<see cref="Element.FrontSequence"/>). The order the root sorts its
+        /// children into for drawing (TVElements.Items). Null for none.
+        /// </summary>
+        internal static Element FrontWindow(IEnumerable<Element> windows)
+        {
+            Element front = null;
+            foreach (Element window in windows)
+            {
+                if (window == null)
                 {
                     continue;
                 }
 
-                if (dialog.FrontSequence > best)
+                if (front == null
+                    || window.Depth > front.Depth
+                    || (window.Depth == front.Depth && window.FrontSequence > front.FrontSequence))
                 {
-                    best = dialog.FrontSequence;
-                    front = dialog;
+                    front = window;
                 }
             }
 
-            return front != null && front.TryDialogKey(key, typing);
+            return front;
+        }
+
+        /// <summary>
+        /// The window a dialog key (Escape, Enter) is offered to: the front
+        /// window, when <paramref name="isDialog"/> says it is a dialog, and
+        /// otherwise nobody — the key then goes on to the front view's own
+        /// shortcuts. Never a dialog BEHIND the front window (ezmuze #335).
+        /// </summary>
+        internal static Element DialogKeyWindow(IEnumerable<Element> windows, Func<Element, bool> isDialog)
+        {
+            Element front = FrontWindow(windows);
+            return front != null && isDialog(front) ? front : null;
         }
 
         private bool TryDialogKey(Keys key, bool typing)
