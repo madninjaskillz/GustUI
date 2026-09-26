@@ -148,8 +148,23 @@ namespace GustUI.Elements
         /// covers the bar and carries those actions itself.</summary>
         internal bool ChromeHidden { get; set; }
 
-        /// <summary>Width of the close and maximise squares at the right.</summary>
-        private float CloseAndSizeWidth => (closable ? BarHeight : 0) + (hasMaximimizeButton ? BarHeight : 0);
+        /// <summary>Width of the close and, while it shows, maximise squares
+        /// at the right.</summary>
+        private float CloseAndSizeWidth => CloseAndSizeWidthFor(closable, MaximiseShowing);
+
+        /// <summary>The right-hand squares' width for a bar with these two
+        /// showing: a hidden maximise gives its square back (#366).</summary>
+        internal static float CloseAndSizeWidthFor(bool closable, bool maximiseShowing)
+            => (closable ? BarHeight : 0) + (maximiseShowing ? BarHeight : 0);
+
+        /// <summary>Whether the maximise square takes its place on the bar:
+        /// not while the window is docked (ezmuze #366). A docked window's
+        /// geometry belongs to the dock, so maximise could only ever do
+        /// nothing there; it hides like the pin, and the close square and the
+        /// title close up the gap. Drag the window off the dock to maximise
+        /// it.</summary>
+        private bool MaximiseShowing => hasMaximimizeButton
+            && Parent is ModalWindowElement sizeHost && sizeHost.ShowsMaximise;
 
         /// <summary>Everything at the right of the bar: close, maximise and,
         /// while it shows, the pin.</summary>
@@ -410,7 +425,7 @@ namespace GustUI.Elements
 
             if (hasMaximimizeButton)
             {
-                sizeButton.Visible = !ChromeHidden;
+                sizeButton.Visible = !ChromeHidden && MaximiseShowing;
                 sizeButton.Set<PositionTrait>(new TVVector(size.X - CloseAndSizeWidth, 0));
                 sizeButton.Set<SizeTrait>(new TVVector(BarHeight, BarHeight));
                 sizeButton.Set<TextTrait>(((ModalWindowElement)Parent).isFullScreen ? Resources.StaticResources.Theme.Icons.MinimizeIcon.ToTextTrait() : Resources.StaticResources.Theme.Icons.MaximizeIcon.ToTextTrait());

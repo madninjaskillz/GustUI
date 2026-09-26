@@ -497,6 +497,22 @@ namespace GustUI.Elements
         /// against.</summary>
         internal bool ShowsPin => DockedSide == DockSide.None;
 
+        /// <summary>Whether this window offers maximise, on its title bar or
+        /// its active tab (ezmuze #366): not while docked. The dock owns a
+        /// docked window's geometry, so the glyph could only ever do nothing
+        /// there; it hides, as the pin does. Drag the window off the dock to
+        /// maximise it.</summary>
+        internal bool ShowsMaximise => OffersMaximise(DockedSide);
+
+        /// <summary>The rule behind <see cref="ShowsMaximise"/>, for a window
+        /// docked to <paramref name="docked"/> (or floating, at None).</summary>
+        internal static bool OffersMaximise(DockSide docked) => docked == DockSide.None;
+
+        /// <summary>Whether a tab draws the maximise glyph: only the ACTIVE tab
+        /// (maximise belongs to the window), and only while the window
+        /// offers it at all. Every tab keeps the slot regardless.</summary>
+        internal static bool TabShowsMaximise(bool isActive, DockSide docked) => isActive && OffersMaximise(docked);
+
         /// <summary>
         /// The pin glyph's colour and its small up/down mark, shared by the
         /// title bar and the tab strip: the idle glyph colour when normal, the
@@ -1396,11 +1412,13 @@ namespace GustUI.Elements
                 entry.PopOut.Set<TextTrait>(new TVText(tabs.Count > 1 ? UIFont.Symbol.NewWindow.Icon() : string.Empty));
 
                 // Maximise belongs to the WINDOW, so it rides on whichever tab
-                // is showing rather than being repeated on every one.
+                // is showing rather than being repeated on every one -- and,
+                // like the pin, not at all while docked (#366). The slot stays
+                // either way, so the tab keeps its width.
                 slot -= TabCloseSize + 4;
                 entry.Maximise.Set<PositionTrait>(new TVVector(slot, slotY));
                 entry.Maximise.Set<SizeTrait>(new TVVector(TabCloseSize, TabCloseSize));
-                entry.Maximise.Set<TextTrait>(new TVText(!isActive
+                entry.Maximise.Set<TextTrait>(new TVText(!TabShowsMaximise(isActive, DockedSide)
                     ? string.Empty
                     : isFullScreen
                         ? Resources.StaticResources.Theme.Icons.MinimizeIcon
@@ -1511,7 +1529,7 @@ namespace GustUI.Elements
 
             entry.Maximise = TabGlyph(button, "maximise",
                 new TVText(Resources.StaticResources.Theme.Icons.MaximizeIcon),
-                () => "Maximise this window",
+                () => ShowsMaximise ? "Maximise this window" : string.Empty,
                 () =>
                 {
                     if (DockedSide == DockSide.None)
