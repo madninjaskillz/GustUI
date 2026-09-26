@@ -952,6 +952,7 @@ public class Element : IDisposable
     internal void MarkBroughtForward()
     {
         this.FrontSequence = ++frontSequenceCounter;
+        this.StackSequence = this.FrontSequence;
 
         // Siblings at the same Depth are ordered by FrontSequence (see
         // TVElements.Items), so bringing a window forward re-sorts even when
@@ -1019,6 +1020,44 @@ public class Element : IDisposable
     /// same clamped ceiling. internal: <see cref="ModalWindowElement.IsActiveWindow"/>
     /// is the one reader.</summary>
     internal long FrontSequence { get; private set; }
+
+    /// <summary>
+    /// The draw-order key among siblings at the same Depth: bumped by
+    /// <see cref="MarkBroughtForward"/> (with <see cref="FrontSequence"/>)
+    /// AND by <see cref="MarkRaised"/>, which raises without activating.
+    ///
+    /// Split from FrontSequence (ezmuze, 2026-09-26) because "drawn on top"
+    /// and "has the keyboard" had been one number, so a window could not be
+    /// brought up without also taking the keys. Clicking a channel header in
+    /// the sequencer retargets the floating Stack; the Stack must come up
+    /// over the sequencer the click raised, while the keys stay with the
+    /// sequencer that was clicked.
+    /// </summary>
+    internal long StackSequence { get; private set; }
+
+    /// <summary>Records that this element was raised in the DRAW order only:
+    /// bumps <see cref="StackSequence"/>, leaves <see cref="FrontSequence"/>
+    /// (and so which window is active) alone, and re-sorts its siblings.</summary>
+    internal void MarkRaised()
+    {
+        this.StackSequence = ++frontSequenceCounter;
+        Parent?.Children?.InvalidateSort();
+    }
+
+    /// <summary>
+    /// Brings this element to the top of its tier WITHOUT making it the
+    /// active window: the same Depth rule as <see cref="MoveToFront"/>, but
+    /// only the draw order changes (<see cref="MarkRaised"/>). Keys, the lit
+    /// title bar and menu shortcuts stay with whichever window was clicked.
+    /// </summary>
+    internal void RaiseOnly()
+    {
+        var candidates = Resources.StaticResources.RootWindow.Children.Items.Where(x => !(x is TooltipElement));
+        this.Depth = FrontDepth(candidates.Any() ? candidates.Max(x => x.Depth) : (int?)null,
+            MoveToFrontFloor, MoveToFrontCeiling);
+        MarkRaised();
+    }
+
 
     internal void handleStopDrag(TVEventArgs x)
     {

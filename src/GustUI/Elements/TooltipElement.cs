@@ -30,6 +30,27 @@ public class TooltipElement : Element
     private Vector2 anchor;
     private bool visible;
     private long shownAtMs;
+    private Rectangle drawnBounds;
+
+    /// <summary>
+    /// Where the label was last DRAWN, in element space, or
+    /// <see cref="Rectangle.Empty"/> when it is not on screen (hidden, or
+    /// still inside the hover delay).
+    ///
+    /// The tooltip has no Position/Size traits on purpose (see the class
+    /// summary), so an inspector reading element bounds - the ezmuze
+    /// remote-control API's /tree - saw it as 0x0 even while it was plainly
+    /// on screen. This is read-only and plays no part in hit-testing.
+    /// </summary>
+    public Rectangle DrawnBounds => drawnBounds;
+
+    /// <summary>Whether the label is on screen right now (the last draw
+    /// painted it).</summary>
+    public bool IsShowing => drawnBounds != Rectangle.Empty;
+
+    /// <summary>The text the label is showing, or would show once the hover
+    /// delay passes.</summary>
+    public string Text => text;
 
     /// <summary>
     /// Shows <paramref name="text"/> while the pointer hovers
@@ -112,6 +133,7 @@ public class TooltipElement : Element
     {
         if (!visible || text.Length == 0 || Environment.TickCount64 - shownAtMs < HoverDelayMs)
         {
+            drawnBounds = Rectangle.Empty;
             base.Draw();
             return;
         }
@@ -128,6 +150,8 @@ public class TooltipElement : Element
         float x = MathHelper.Clamp(anchor.X, 0, Math.Max(0, windowSize.X - w));
         float y = MathHelper.Clamp(anchor.Y, 0, Math.Max(0, windowSize.Y - h));
         var rect = new Rectangle((int)x, (int)y, w, h);
+        drawnBounds = rect;
+
 
         // design-guide.md §9: one standard tooltip style everywhere —
         // SurfaceHeader-family background, SurfaceBorder outline, BodyText.

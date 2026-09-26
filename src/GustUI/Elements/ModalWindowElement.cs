@@ -3309,7 +3309,7 @@ namespace GustUI.Elements
                 return pinA > pinB;
             }
 
-            return a.FrontSequence > b.FrontSequence;
+            return a.StackSequence > b.StackSequence;
         }
 
         private static int PinRank(Element element) => element is ModalWindowElement window
@@ -4015,6 +4015,37 @@ namespace GustUI.Elements
         /// <summary>A window that has just spawned claims the keyboard one
         /// update later (see its use in Update, #293).</summary>
         private bool spawnClaimPending;
+
+        /// <summary>Updates left before a <see cref="RaiseWithoutActivating"/>
+        /// takes effect; 0 when none is pending.</summary>
+        private int raiseCountdown;
+
+        /// <summary>
+        /// Brings this window to the top WITHOUT taking the keyboard: the lit
+        /// title bar, dialog keys and menu shortcuts stay with the window that
+        /// was clicked (ezmuze, 2026-09-26). For a window another window's
+        /// click retargets - a channel-header click in the sequencer points the
+        /// floating Stack at that channel, and the Stack has to come up where
+        /// it can be seen while the sequencer keeps its keys.
+        ///
+        /// Applied after the press that asked for it has been dealt with, not
+        /// immediately: the window that was pressed raises itself for that same
+        /// press in its own update, which can come later in the frame than the
+        /// call that got here, and would bury this window again (the same trap
+        /// <see cref="spawnClaimPending"/> exists for). Two updates later is
+        /// always after the whole of the pressing frame, whichever order the two
+        /// windows update in. A tab container is raised as a whole; the tab
+        /// on show is left alone, because switching tabs moves the keyboard.
+        /// </summary>
+        public void RaiseWithoutActivating()
+        {
+            if (Parent == null || closing)
+            {
+                return;
+            }
+
+            raiseCountdown = 2;
+        }
         private int maximizeAttemptCount = 0;
 
         /// <summary>Edge-detection state for the click-anywhere-brings-to-
@@ -4028,6 +4059,14 @@ namespace GustUI.Elements
         {
             UpdateTabs();
             base.Update(parent);
+
+            // A pending RaiseWithoutActivating. Up here, before any early
+            // return, so a docked or merging window still counts its updates.
+            if (raiseCountdown > 0 && --raiseCountdown == 0 && Parent != null && !closing)
+            {
+                RaiseOnly();
+            }
+
 
             // Keeps the toolbar/menu wrap decision live across a resize —
             // chromeRow re-lays-out itself (and ContentTop/ChromeRowHeight
@@ -4318,6 +4357,7 @@ namespace GustUI.Elements
             if (spawnClaimPending)
             {
                 spawnClaimPending = false;
+
 
                 // Raised AGAIN, a frame after arriving, for the same reason the
                 // keyboard is claimed here (#301). A window opened BY a press

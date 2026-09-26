@@ -65,11 +65,13 @@ public class TVElements : TraitValue
 
     /// <summary>Draw and hit-test order: Depth, then — among siblings at the
     /// same Depth — whichever was brought forward (<see cref="Element.MoveToFront"/>)
-    /// most recently, then insertion order. Floating windows all clamp to one
-    /// ceiling, so without the second key a click could not change which of
-    /// them is on top (ezmuze #301).</summary>
+    /// or raised (<see cref="Element.RaiseOnly"/>) most recently, then
+    /// insertion order. Floating windows all clamp to one ceiling, so without
+    /// the second key a click could not change which of them is on top
+    /// (ezmuze #301).</summary>
     public List<Element> Items => sortedCache ??= namedItems.Select(x => x.Item1)
-        .OrderBy(x => x.Depth).ThenBy(x => x.FrontSequence).ToList();
+        .OrderBy(x => x.Depth).ThenBy(x => x.StackSequence).ToList();
+
     public Element Get(string name)
     {
         var result = namedItems.FirstOrDefault(x => x.Item2 == name);
