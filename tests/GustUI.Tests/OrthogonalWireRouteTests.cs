@@ -413,9 +413,12 @@ namespace GustUI.Tests
         }
 
         [Fact]
-        public void AReturnChannelTooNarrowForThePitchSqueezesRatherThanHitANode()
+        public void AReturnChannelTooNarrowForTheGroupGoesUnderBothNodesAtFullPitch()
         {
-            // A 40px gap: two corners' room leaves 24px, three wires fit 12 apart.
+            // #323. A 40px gap: two corners' room leaves 24px, and three wires
+            // need 44. They used to squeeze to 12 apart and, in a tighter gap,
+            // merge into one thick line; now the group goes under both nodes,
+            // one pitch apart, like nodes that overlap.
             var fromSpan = new WireNodeSpan(0, 60);
             var toSpan = new WireNodeSpan(100, 200);
             var wires = new LaneWire[3];
@@ -425,10 +428,183 @@ namespace GustUI.Tests
             }
 
             WireLanes[] lanes = OrthogonalWireRoute.AssignRoutes(wires, Stub, Radius, Pitch);
+            var ys = new List<float>();
             foreach (WireLanes lane in lanes)
             {
-                Assert.InRange(lane.ReturnY.Value, 60f + Radius - 0.01f, 100f - Radius + 0.01f);
+                Assert.True(lane.ReturnY.Value >= 200f + Stub - 0.01f, $"return run at {lane.ReturnY} is not under both nodes");
+                ys.Add(lane.ReturnY.Value);
             }
+
+            ys.Sort();
+            Assert.Equal(Pitch, ys[1] - ys[0], 3);
+            Assert.Equal(Pitch, ys[2] - ys[1], 3);
+
+            var routes = new List<Vector2>[3];
+            for (int i = 0; i < 3; i++)
+            {
+                routes[i] = RouteWith(wires[i], lanes[i]);
+            }
+
+            AssertNoCrossing(routes[0], routes[1]);
+            AssertNoCrossing(routes[1], routes[2]);
+            AssertNoCrossing(routes[0], routes[2]);
+        }
+
+        [Fact]
+        public void AGapWideEnoughForTheGroupKeepsItsFullPitch()
+        {
+            // The same pair through a gap that fits it: still in the gap, and
+            // still exactly one pitch apart (no squeezing either way).
+            var fromSpan = new WireNodeSpan(0, 60);
+            var toSpan = new WireNodeSpan(120, 200);
+            var l = new LaneWire { From = new Vector2(300, 10), To = new Vector2(100, 140), SourceKey = "L", FromSpan = fromSpan, ToSpan = toSpan };
+            var r = new LaneWire { From = new Vector2(300, 10 + Pitch), To = new Vector2(100, 140 + Pitch), SourceKey = "R", FromSpan = fromSpan, ToSpan = toSpan };
+            WireLanes[] lanes = OrthogonalWireRoute.AssignRoutes(new[] { l, r }, Stub, Radius, Pitch);
+            Assert.Equal(Pitch, Math.Abs(lanes[0].ReturnY.Value - lanes[1].ReturnY.Value), 3);
+            Assert.InRange(lanes[0].ReturnY.Value, 60f, 120f);
+            Assert.InRange(lanes[1].ReturnY.Value, 60f, 120f);
+        }
+
+        // ------------------------------------------------ #324: other nodes
+
+        private static bool SegmentHitsRect(Vector2 a, Vector2 b, WireRect r)
+            => Math.Max(a.X, b.X) > r.Left && Math.Min(a.X, b.X) < r.Right
+                && Math.Max(a.Y, b.Y) > r.Top && Math.Min(a.Y, b.Y) < r.Bottom;
+
+        [Fact]
+        public void WithoutObstaclesTheRoutesAreUnchanged()
+        {
+            var wires = new[]
+            {
+                new LaneWire { From = new Vector2(0, 0), To = new Vector2(200, 300), SourceKey = "a" },
+                new LaneWire { From = new Vector2(0, Pitch), To = new Vector2(200, 300 + Pitch), SourceKey = "b" },
+                new LaneWire { From = new Vector2(300, 20), To = new Vector2(100, 200), SourceKey = "c", FromSpan = new WireNodeSpan(0, 60), ToSpan = new WireNodeSpan(180, 260) },
+            };
+
+            WireLanes[] plain = OrthogonalWireRoute.AssignRoutes(wires, Stub, Radius, Pitch);
+            WireLanes[] empty = OrthogonalWireRoute.AssignRoutes(wires, Stub, Radius, Pitch, new WireRect[0]);
+            for (int i = 0; i < wires.Length; i++)
+            {
+                Assert.Equal(plain[i].X, empty[i].X);
+                Assert.Equal(plain[i].ReturnY, empty[i].ReturnY);
+                Assert.Equal(plain[i].InX, empty[i].InX);
+            }
+        }
+
+        [Fact]
+        public void AForwardVerticalMovesToTheNearestClearColumn()
+        {
+            // A node sits right where the vertical would go (x = 150).
+            var node = new WireRect(140, 50, 160, 150);
+            var wire = new LaneWire { From = new Vector2(0, 0), To = new Vector2(300, 200), SourceKey = "a" };
+            WireLanes lanes = OrthogonalWireRoute.AssignRoutes(new[] { wire }, Stub, Radius, Pitch, new[] { node })[0];
+
+            float clearance = OrthogonalWireRoute.Clearance(Radius, Pitch);
+            float x = lanes.X.Value;
+            Assert.True(x <= node.Left - clearance || x >= node.Right + clearance, $"vertical at {x} is within {clearance} of the node");
+            Assert.True(Math.Abs(x - 150f) < 10f + clearance + 1f, $"vertical at {x} is not the NEAREST clear column");
+
+            List<Vector2> route = RouteWith(wire, lanes);
+            for (int i = 1; i < route.Count; i++)
+            {
+                Assert.False(SegmentHitsRect(route[i - 1], route[i], node), $"run {route[i - 1]}->{route[i]} crosses the node");
+            }
+        }
+
+        [Fact]
+        public void ABackwardWireOnACrowdedCanvasNeverDetoursFurtherThanItsLimit()
+        {
+            // Nodes everywhere to the left of the input and right of the
+            // output: nothing near is clear. The runs may cross a node, but
+            // they must not go the long way round the whole canvas.
+            var obstacles = new List<WireRect>();
+            for (int i = 0; i < 20; i++)
+            {
+                obstacles.Add(new WireRect(-2000 + (i * 90), -500, -2000 + (i * 90) + 80, 900));
+                obstacles.Add(new WireRect(330 + (i * 90), -500, 330 + (i * 90) + 80, 900));
+            }
+
+            var wire = new LaneWire
+            {
+                From = new Vector2(300, 20), To = new Vector2(100, 200), SourceKey = "a",
+                FromSpan = new WireNodeSpan(0, 60), ToSpan = new WireNodeSpan(180, 260),
+            };
+            WireLanes plain = OrthogonalWireRoute.AssignRoutes(new[] { wire }, Stub, Radius, Pitch)[0];
+            WireLanes crowded = OrthogonalWireRoute.AssignRoutes(new[] { wire }, Stub, Radius, Pitch, obstacles)[0];
+
+            float reach = Pitch * OrthogonalWireRoute.MaxDetourLanes + 1f;
+            Assert.True(Math.Abs(crowded.X.Value - plain.X.Value) <= reach, $"way out moved {crowded.X - plain.X}");
+            Assert.True(Math.Abs(crowded.InX.Value - plain.InX.Value) <= reach, $"way in moved {crowded.InX - plain.InX}");
+            Assert.True(Math.Abs(crowded.ReturnY.Value - plain.ReturnY.Value) <= reach, $"return moved {crowded.ReturnY - plain.ReturnY}");
+        }
+
+        [Fact]
+        public void AWiresOwnNodesDoNotPushItsVerticalAway()
+        {
+            // The two nodes the wire joins are obstacles too, but its own.
+            var fromNode = new WireRect(-100, -20, 0, 80);
+            var toNode = new WireRect(300, 150, 400, 250);
+            var wire = new LaneWire { From = new Vector2(0, 0), To = new Vector2(300, 200), SourceKey = "a", FromNode = 0, ToNode = 1 };
+            WireLanes lanes = OrthogonalWireRoute.AssignRoutes(new[] { wire }, Stub, Radius, Pitch, new[] { fromNode, toNode })[0];
+            Assert.Equal(150f, lanes.X.Value, 3);
+        }
+
+        [Fact]
+        public void AStereoPairSlidesTogetherAndKeepsItsGap()
+        {
+            var node = new WireRect(135, 60, 165, 140);
+            var l = new LaneWire { From = new Vector2(0, 0), To = new Vector2(300, 200), SourceKey = "L" };
+            var r = new LaneWire { From = new Vector2(0, Pitch), To = new Vector2(300, 200 + Pitch), SourceKey = "R" };
+            WireLanes[] lanes = OrthogonalWireRoute.AssignRoutes(new[] { l, r }, Stub, Radius, Pitch, new[] { node });
+
+            Assert.Equal(Pitch, Math.Abs(lanes[0].X.Value - lanes[1].X.Value), 3);
+            AssertOneGap(RouteWith(l, lanes[0]), RouteWith(r, lanes[1]), Pitch);
+            float clearance = OrthogonalWireRoute.Clearance(Radius, Pitch);
+            foreach (WireLanes lane in lanes)
+            {
+                Assert.True(lane.X.Value <= node.Left - clearance || lane.X.Value >= node.Right + clearance);
+            }
+        }
+
+        [Fact]
+        public void AReturnRunUnderItsNodesMovesOffAThirdNode()
+        {
+            // Side-by-side nodes, so the wire loops under both - straight
+            // through a third node sitting below them (Korben's mute/solo
+            // wires across Band 3 gain).
+            var fromSpan = new WireNodeSpan(0, 100);
+            var toSpan = new WireNodeSpan(10, 120);
+            var third = new WireRect(150, 130, 250, 190);
+            var wire = new LaneWire { From = new Vector2(300, 40), To = new Vector2(100, 50), SourceKey = "a", FromSpan = fromSpan, ToSpan = toSpan };
+            WireLanes lanes = OrthogonalWireRoute.AssignRoutes(new[] { wire }, Stub, Radius, Pitch, new[] { third })[0];
+
+            List<Vector2> route = RouteWith(wire, lanes);
+            for (int i = 1; i < route.Count; i++)
+            {
+                Assert.False(SegmentHitsRect(route[i - 1], route[i], third), $"run {route[i - 1]}->{route[i]} crosses the third node");
+            }
+
+            // Still under its own nodes, not back through them.
+            Assert.True(lanes.ReturnY.Value >= 120f + Radius, $"return run at {lanes.ReturnY} is inside its own nodes");
+        }
+
+        [Fact]
+        public void AReturnRunIsBlockedByItsOwnNodes()
+        {
+            // A return run crosses both of its own nodes' columns, so unlike a
+            // vertical it may not use them: marking them as the wire's own
+            // leaves the default under-channel (clear of both) where it was.
+            var fromSpan = new WireNodeSpan(0, 100);
+            var toSpan = new WireNodeSpan(10, 120);
+            var fromNode = new WireRect(200, 0, 300, 100);
+            var toNode = new WireRect(100, 10, 200, 120);
+            var wire = new LaneWire
+            {
+                From = new Vector2(300, 40), To = new Vector2(100, 50), SourceKey = "a",
+                FromSpan = fromSpan, ToSpan = toSpan, FromNode = 0, ToNode = 1,
+            };
+            WireLanes lanes = OrthogonalWireRoute.AssignRoutes(new[] { wire }, Stub, Radius, Pitch, new[] { fromNode, toNode })[0];
+            Assert.Equal(120f + Stub, lanes.ReturnY.Value, 3);
         }
 
         [Fact]

@@ -100,7 +100,9 @@ namespace GustUI.Elements
     /// input end. Deliberately carries NO mouse traits, so pointer events
     /// fall through to the node elements above/below it; the host places its
     /// own small hit elements over the affordance squares
-    /// (<see cref="ScalerAnchor"/> exposes the shared geometry).
+    /// (<see cref="ScalerAnchor"/> exposes the shared geometry), and asks
+    /// <see cref="HitTest(Vector2, float)"/> from its own background press to
+    /// select a wire anywhere along it.
     /// </summary>
     [ElementTraits(typeof(PositionTrait), typeof(SizeTrait))]
     public class NodeWireLayerElement : Element
@@ -245,6 +247,86 @@ namespace GustUI.Elements
             }
 
             base.Draw();
+        }
+
+        /// <summary>
+        /// The wire under <paramref name="point"/> (element-relative), or
+        /// null: the one whose DRAWN path passes within
+        /// <paramref name="tolerance"/> of it. Topmost first - the last wire
+        /// drawn is the one on top - so a click where two cross picks the
+        /// one you can see (ezmuze studio #314).
+        ///
+        /// The layer still carries no mouse traits: a host asks this from its
+        /// own background press, so a press on a node or a port never has to
+        /// get past the wires first.
+        /// </summary>
+        public Guid? HitTest(Vector2 point, float tolerance = 6f)
+            => HitTest(Wires, Routing, Stub, CornerRadius, point, tolerance);
+
+        /// <summary>As <see cref="HitTest(Vector2, float)"/>, on any list of
+        /// wires - the pure form, which is what the tests drive.</summary>
+        public static Guid? HitTest(IReadOnlyList<NodeWireView> wires, WireRouting routing, float stub, float radius,
+            Vector2 point, float tolerance)
+        {
+            if (wires == null)
+            {
+                return null;
+            }
+
+            var corners = new List<Vector2>(8);
+            var path = new List<Vector2>(64);
+            for (int i = wires.Count - 1; i >= 0; i--)
+            {
+                NodeWireView wire = wires[i];
+                WirePath(wire, routing, stub, radius, corners, path);
+                for (int k = 1; k < path.Count; k++)
+                {
+                    if (DistanceToSegment(point, path[k - 1], path[k]) <= tolerance)
+                    {
+                        return wire.Id;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// A wire's drawn path as a polyline, element-relative: the rounded
+        /// straight route, or the Bézier walked in short steps. Built from
+        /// the same geometry <see cref="Draw"/> uses (the router, and
+        /// <see cref="ControlPoints"/>), so what a click finds is what is on
+        /// screen.
+        /// </summary>
+        public static void WirePath(NodeWireView wire, WireRouting routing, float stub, float radius,
+            List<Vector2> corners, List<Vector2> into)
+        {
+            into.Clear();
+            if (routing == WireRouting.Orthogonal)
+            {
+                var lanes = new WireLanes { X = wire.LaneX, ReturnY = wire.ReturnLaneY, InX = wire.InLaneX };
+                OrthogonalWireRoute.Corners(corners, wire.From, wire.To, stub, radius, lanes, wire.FromSpan, wire.ToSpan);
+                OrthogonalWireRoute.Round(corners, radius, into);
+                return;
+            }
+
+            (Vector2 c0, Vector2 c1) = ControlPoints(wire.From, wire.To);
+            float chord = Vector2.Distance(wire.From, wire.To);
+            int steps = Math.Max(24, (int)(chord / 6f));
+            for (int i = 0; i <= steps; i++)
+            {
+                float t = i / (float)steps;
+                float u = 1f - t;
+                into.Add((u * u * u * wire.From) + (3f * u * u * t * c0) + (3f * u * t * t * c1) + (t * t * t * wire.To));
+            }
+        }
+
+        private static float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
+        {
+            Vector2 ab = b - a;
+            float length = ab.LengthSquared();
+            float t = length > 0f ? Math.Clamp(Vector2.Dot(p - a, ab) / length, 0f, 1f) : 0f;
+            return Vector2.Distance(p, a + (ab * t));
         }
 
         private void BuildRoute(Vector2 from, Vector2 to, WireLanes lanes, WireNodeSpan? fromSpan, WireNodeSpan? toSpan)

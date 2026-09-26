@@ -38,6 +38,36 @@ namespace GustUI.Elements
 
         /// <inheritdoc cref="FromSpan"/>
         public WireNodeSpan? ToSpan;
+
+        /// <summary>Which of the obstacles handed to
+        /// <see cref="OrthogonalWireRoute.AssignRoutes(IReadOnlyList{LaneWire}, float, float, float, IReadOnlyList{WireRect})"/>
+        /// is the node this wire LEAVES — its own vertical runs are allowed
+        /// beside it. Null when it is not one of them.</summary>
+        public int? FromNode;
+
+        /// <summary>As <see cref="FromNode"/>, for the node the wire ENTERS.</summary>
+        public int? ToNode;
+    }
+
+    /// <summary>
+    /// A rectangle the straight router keeps its choosable runs out of — a
+    /// node on the canvas, in the same space as the wires' endpoints
+    /// (ezmuze studio #324).
+    /// </summary>
+    public struct WireRect
+    {
+        public float Left;
+        public float Top;
+        public float Right;
+        public float Bottom;
+
+        public WireRect(float left, float top, float right, float bottom)
+        {
+            Left = Math.Min(left, right);
+            Right = Math.Max(left, right);
+            Top = Math.Min(top, bottom);
+            Bottom = Math.Max(top, bottom);
+        }
     }
 
     /// <summary>
@@ -327,7 +357,41 @@ namespace GustUI.Elements
         /// Returns one entry per wire, in order.
         /// </summary>
         public static WireLanes[] AssignRoutes(IReadOnlyList<LaneWire> wires, float stub, float radius, float spacing)
+            => AssignRoutes(wires, stub, radius, spacing, null);
+
+        /// <summary>
+        /// As <see cref="AssignRoutes(IReadOnlyList{LaneWire}, float, float, float)"/>,
+        /// keeping every run it has a choice about OUT of
+        /// <paramref name="obstacles"/> (ezmuze studio #324) — the other nodes
+        /// on the canvas, which the router used to treat as if they were not
+        /// there.
+        ///
+        /// The shapes do not change: a forward wire still turns twice and a
+        /// backward one still loops out, back and in. What moves is where the
+        /// choosable runs go. A group of parallel runs that would cross a node
+        /// (or pass closer to its edge than <see cref="Clearance"/>) slides,
+        /// as a whole so its gap stays even, to the NEAREST position where
+        /// every run is clear: a forward vertical to the nearest clear column
+        /// between its ends, a return run to the nearest clear row. Where
+        /// there is no such place the group keeps its old position — a wire
+        /// through a node beats a wire that does not arrive. The horizontal
+        /// runs out of an output and into an input sit at their ports' height
+        /// and are not choosable, so a node straight across one is still
+        /// crossed.
+        ///
+        /// A wire's own two nodes (<see cref="LaneWire.FromNode"/>,
+        /// <see cref="LaneWire.ToNode"/>) do not block its verticals, which
+        /// start and end beside them. They do block its return run, which
+        /// passes across both.
+        ///
+        /// Also (#323): a return channel BETWEEN two nodes is only taken when
+        /// the whole group fits it at full spacing. A group that does not fit
+        /// goes under both nodes instead of squeezing into one thick line.
+        /// </summary>
+        public static WireLanes[] AssignRoutes(IReadOnlyList<LaneWire> wires, float stub, float radius, float spacing,
+            IReadOnlyList<WireRect> obstacles)
         {
+            float clearance = Clearance(radius, spacing);
             var lanes = new WireLanes[wires.Count];
             var trunks = new List<Trunk>();
             var trunkOf = new Dictionary<object, Trunk>();
@@ -346,6 +410,7 @@ namespace GustUI.Elements
                 }
 
                 trunk.Members.Add(i);
+                AddOwn(trunk.Ignore, wire);
                 if (!IsForward(wire.From, wire.To, stub, radius))
                 {
                     continue;
@@ -380,6 +445,8 @@ namespace GustUI.Elements
                     End = trunk.Bottom,
                     Order = EnteredFromLeft(trunk.Travel, trunk.From.Y),
                     Tie = trunk.Members[0],
+                    Vertical = true,
+                    Ignore = trunk.Ignore,
                 };
                 forward.Add(run);
                 forwardRunOf[trunk] = run;
@@ -388,6 +455,7 @@ namespace GustUI.Elements
             foreach (List<Run> cluster in Cluster(forward, spacing))
             {
                 SpreadCentred(cluster, spacing);
+                Avoid(cluster, obstacles, clearance, spacing, unbounded: false);
             }
 
             foreach (KeyValuePair<Trunk, Run> pair in forwardRunOf)
@@ -412,7 +480,14 @@ namespace GustUI.Elements
                 back.Add(i);
                 float y = ReturnChannel(wire.From, wire.To, stub, radius, wire.FromSpan, wire.ToSpan,
                     out float min, out float max, out bool under);
-                channels[i] = new Channel { Y = y, Min = min, Max = max, Under = under };
+                channels[i] = new Channel
+                {
+                    Y = y,
+                    Min = min,
+                    Max = max,
+                    Under = under,
+                    UnderY = UnderChannel(wire.From, wire.To, stub, wire.FromSpan, wire.ToSpan),
+                };
             }
 
             if (back.Count == 0)
@@ -422,60 +497,40 @@ namespace GustUI.Elements
 
             // 2a. The way out, for an output with no forward trunk to borrow:
             // one vertical per output, stacked rightward from a stub past it.
+            // Placed once here against the default channels, so the return
+            // runs below know where they start; placed AGAIN once the return
+            // runs have settled, since a return run that moved (#323, #324)
+            // changes how far, and which way, each way out has to go.
             var outRuns = new List<Run>();
             var outRunOf = new Dictionary<Trunk, Run>();
             foreach (int i in back)
             {
                 LaneWire wire = wires[i];
                 Trunk trunk = trunkOf[wire.SourceKey ?? (object)i];
-                if (trunk.Forward)
+                if (trunk.Forward || outRunOf.ContainsKey(trunk))
                 {
                     continue;
                 }
 
-                if (!outRunOf.TryGetValue(trunk, out Run run))
+                var run = new Run
                 {
-                    run = new Run
-                    {
-                        Position = wire.From.X + stub,
-                        Min = wire.From.X + stub,
-                        Max = float.MaxValue,
-                        Start = wire.From.Y,
-                        End = wire.From.Y,
-                        Tie = i,
-                    };
-                    outRunOf[trunk] = run;
-                    outRuns.Add(run);
-                }
-
-                float y = channels[i].Y;
-                run.Start = Math.Min(run.Start, y);
-                run.End = Math.Max(run.End, y);
-                run.Travel += y - wire.From.Y;
+                    Position = wire.From.X + stub,
+                    Min = wire.From.X + stub,
+                    Max = float.MaxValue,
+                    Tie = i,
+                    Vertical = true,
+                    Ignore = trunk.Ignore,
+                };
+                outRunOf[trunk] = run;
+                outRuns.Add(run);
             }
 
-            foreach (KeyValuePair<Trunk, Run> pair in outRunOf)
-            {
-                pair.Value.Order = EnteredFromLeft(pair.Value.Travel, pair.Key.From.Y);
-            }
-
-            foreach (List<Run> cluster in Cluster(outRuns, spacing))
-            {
-                SpreadFrom(cluster, spacing, cluster.Max(r => r.Min), +1f);
-            }
-
-            foreach (int i in back)
-            {
-                Trunk trunk = trunkOf[wires[i].SourceKey ?? (object)i];
-                if (outRunOf.TryGetValue(trunk, out Run run))
-                {
-                    lanes[i].X = run.Position;
-                }
-            }
+            PlaceWaysOut(wires, back, trunkOf, outRunOf, outRuns, i => channels[i].Y, lanes, spacing, obstacles, clearance);
 
             // 2b. The return run: one per output and channel, spread across
-            // the channel — squeezed to fit a gap between two nodes, stacked
-            // downward under them.
+            // the channel - at full spacing inside a gap between two nodes
+            // when the whole group fits it, otherwise stacked downward under
+            // both (#323); then moved, as a group, off any other node (#324).
             var returnRuns = new List<Run>();
             var returnRunOf = new Dictionary<(object, float), Run>();
             var returnOf = new Dictionary<int, Run>();
@@ -494,6 +549,7 @@ namespace GustUI.Elements
                         Min = channel.Min,
                         Max = channel.Max,
                         Under = channel.Under,
+                        UnderY = channel.UnderY,
                         Start = inX,
                         End = outX,
                         // Entered from above, the rightmost vertical is the
@@ -506,27 +562,49 @@ namespace GustUI.Elements
                 }
 
                 run.Start = Math.Min(run.Start, inX);
+                run.UnderY = Math.Max(run.UnderY, channel.UnderY);
                 returnOf[i] = run;
             }
 
             foreach (List<Run> cluster in Cluster(returnRuns, spacing))
             {
-                if (cluster.Exists(r => r.Under))
+                if (!cluster.Exists(r => r.Under))
                 {
-                    SpreadFrom(cluster, spacing, cluster.Max(r => r.Position), +1f);
-                    continue;
+                    float min = cluster.Max(r => r.Min);
+                    float max = cluster.Min(r => r.Max);
+                    if ((cluster.Count - 1) * spacing <= max - min + 0.01f)
+                    {
+                        SpreadCentred(cluster, spacing);
+                        Avoid(cluster, obstacles, clearance, spacing, unbounded: true);
+                        continue;
+                    }
+
+                    // Too narrow for the group at full spacing (#323): the
+                    // whole group goes under both nodes, as if they overlapped.
+                    // Every run is now entered from above, so re-sort for it.
+                    foreach (Run run in cluster)
+                    {
+                        run.Under = true;
+                        run.Position = run.UnderY;
+                        run.Min = run.UnderY;
+                        run.Max = float.MaxValue;
+                        run.Order = run.End;
+                    }
+
+                    cluster.Sort((a, b) => a.Order != b.Order ? a.Order.CompareTo(b.Order) : a.Tie.CompareTo(b.Tie));
                 }
 
-                float min = cluster.Max(r => r.Min);
-                float max = cluster.Min(r => r.Max);
-                float fit = cluster.Count > 1 && max > min ? (max - min) / (cluster.Count - 1) : spacing;
-                SpreadCentred(cluster, Math.Min(spacing, fit));
+                SpreadFrom(cluster, spacing, cluster.Max(r => r.Position), +1f);
+                Avoid(cluster, obstacles, clearance, spacing, unbounded: true);
             }
 
             foreach (int i in back)
             {
                 lanes[i].ReturnY = returnOf[i].Position;
             }
+
+            // 2a again: the ways out, against where the return runs landed.
+            PlaceWaysOut(wires, back, trunkOf, outRunOf, outRuns, i => returnOf[i].Position, lanes, spacing, obstacles, clearance);
 
             // 2c. The way in: one vertical per return run (so a fan-out that
             // came back together branches at the end), stacked leftward from
@@ -548,6 +626,8 @@ namespace GustUI.Elements
                         Start = ret.Position,
                         End = ret.Position,
                         Tie = i,
+                        Vertical = true,
+                        Ignore = new HashSet<int>(),
                     };
                     inRunOf[ret] = run;
                     inRuns.Add(run);
@@ -558,6 +638,7 @@ namespace GustUI.Elements
                 run.Start = Math.Min(run.Start, wire.To.Y);
                 run.End = Math.Max(run.End, wire.To.Y);
                 run.Travel += wire.To.Y - ret.Position;
+                AddOwn(run.Ignore, wire);
                 inOf[i] = run;
             }
 
@@ -573,6 +654,7 @@ namespace GustUI.Elements
             foreach (List<Run> cluster in Cluster(inRuns, spacing))
             {
                 SpreadFrom(cluster, spacing, cluster.Min(r => r.Max), -1f);
+                Avoid(cluster, obstacles, clearance, spacing, unbounded: false);
             }
 
             foreach (int i in back)
@@ -598,6 +680,253 @@ namespace GustUI.Elements
             }
 
             return lanes;
+        }
+
+        /// <summary>
+        /// How far a choosable run keeps from the edge of a node that is not
+        /// its own (#324): half a lane, and never less than a corner. Half
+        /// the spacing is what makes a run beside a node read as a lane of
+        /// the bundle rather than as the node's border - the complaint was a
+        /// vertical drawn right along a column of node edges.
+        /// </summary>
+        public static float Clearance(float radius, float spacing) => Math.Max(radius, spacing * 0.5f);
+
+        private static void AddOwn(HashSet<int> into, LaneWire wire)
+        {
+            if (wire.FromNode.HasValue)
+            {
+                into.Add(wire.FromNode.Value);
+            }
+
+            if (wire.ToNode.HasValue)
+            {
+                into.Add(wire.ToNode.Value);
+            }
+        }
+
+        /// <summary>The return channel UNDER both of a backward wire's nodes,
+        /// whether or not there is a gap between them - where a group goes
+        /// when the gap is too narrow for it (#323).</summary>
+        private static float UnderChannel(Vector2 from, Vector2 to, float stub, WireNodeSpan? fromSpan, WireNodeSpan? toSpan)
+        {
+            WireNodeSpan a = fromSpan ?? new WireNodeSpan(from.Y, from.Y);
+            WireNodeSpan b = toSpan ?? new WireNodeSpan(to.Y, to.Y);
+            return Math.Max(a.Bottom, b.Bottom) + stub;
+        }
+
+        /// <summary>
+        /// Places the ways out of every backward-only output (step 2a): each
+        /// vertical's extent runs from its output to where its wires turn back
+        /// (<paramref name="returnY"/>), the group is ordered for its turn and
+        /// stacked rightward from a stub past the output, then moved off any
+        /// node in the way. Idempotent, so it can run again once the return
+        /// runs have moved.
+        /// </summary>
+        private static void PlaceWaysOut(IReadOnlyList<LaneWire> wires, List<int> back,
+            Dictionary<object, Trunk> trunkOf, Dictionary<Trunk, Run> outRunOf, List<Run> outRuns,
+            Func<int, float> returnY, WireLanes[] lanes, float spacing, IReadOnlyList<WireRect> obstacles, float clearance)
+        {
+            if (outRuns.Count == 0)
+            {
+                return;
+            }
+
+            foreach (KeyValuePair<Trunk, Run> pair in outRunOf)
+            {
+                Run run = pair.Value;
+                run.Position = run.Min;
+                run.Start = pair.Key.From.Y;
+                run.End = pair.Key.From.Y;
+                run.Travel = 0f;
+            }
+
+            foreach (int i in back)
+            {
+                LaneWire wire = wires[i];
+                if (!outRunOf.TryGetValue(trunkOf[wire.SourceKey ?? (object)i], out Run run))
+                {
+                    continue;
+                }
+
+                float y = returnY(i);
+                run.Start = Math.Min(run.Start, y);
+                run.End = Math.Max(run.End, y);
+                run.Travel += y - wire.From.Y;
+            }
+
+            foreach (KeyValuePair<Trunk, Run> pair in outRunOf)
+            {
+                pair.Value.Order = EnteredFromLeft(pair.Value.Travel, pair.Key.From.Y);
+            }
+
+            foreach (List<Run> cluster in Cluster(outRuns, spacing))
+            {
+                SpreadFrom(cluster, spacing, cluster.Max(r => r.Min), +1f);
+                Avoid(cluster, obstacles, clearance, spacing, unbounded: false);
+            }
+
+            foreach (int i in back)
+            {
+                if (outRunOf.TryGetValue(trunkOf[wires[i].SourceKey ?? (object)i], out Run run))
+                {
+                    lanes[i].X = run.Position;
+                }
+            }
+        }
+
+        /// <summary>
+        /// How badly a run at <paramref name="at"/> collides with the
+        /// obstacles it does not ignore: 2 for each one it goes THROUGH, 1 for
+        /// each it only passes closer to than <paramref name="clearance"/>.
+        /// Along the run only a real overlap counts: its ends are at corners
+        /// and ports, which sit against nodes by design.
+        /// </summary>
+        private static int Collisions(Run run, float at, IReadOnlyList<WireRect> obstacles, float clearance)
+        {
+            float lo = Math.Min(run.Start, run.End);
+            float hi = Math.Max(run.Start, run.End);
+            int count = 0;
+            for (int i = 0; i < obstacles.Count; i++)
+            {
+                if (run.Ignore != null && run.Ignore.Contains(i))
+                {
+                    continue;
+                }
+
+                WireRect r = obstacles[i];
+                float near = run.Vertical ? r.Left : r.Top;
+                float far = run.Vertical ? r.Right : r.Bottom;
+                bool along = run.Vertical ? hi > r.Top && lo < r.Bottom : hi > r.Left && lo < r.Right;
+                if (!along || at <= near - clearance || at >= far + clearance)
+                {
+                    continue;
+                }
+
+                count += at > near && at < far ? 2 : 1;
+            }
+
+            return count;
+        }
+
+        /// <summary>How far, in lanes, <see cref="Avoid"/> will move a group to
+        /// get it off a node. Further than this the detour is worse than the
+        /// crossing: on a crowded canvas a wire that goes round everything
+        /// ends up looping round the whole graph.</summary>
+        public const float MaxDetourLanes = 6f;
+
+        /// <summary>
+        /// Moves a spread group of parallel runs, as a whole, off the nodes it
+        /// crosses (#324): to the NEAREST offset, within
+        /// <see cref="MaxDetourLanes"/> lanes, at which it collides least -
+        /// clear of everything when that is possible, otherwise through as
+        /// few nodes as it can. The candidates are the offsets that put one
+        /// run just past one edge of one obstacle; the least-colliding
+        /// position nearest the start is always one of those (or where it
+        /// already is). Each run stays inside its own range - except that
+        /// with <paramref name="unbounded"/> (a return run, whose ends follow
+        /// it wherever it goes) leaving its range is allowed, at a cost.
+        /// </summary>
+        private static void Avoid(List<Run> cluster, IReadOnlyList<WireRect> obstacles, float clearance, float spacing, bool unbounded)
+        {
+            if (obstacles == null || obstacles.Count == 0)
+            {
+                return;
+            }
+
+            int Cost(float delta, out bool outOfRange)
+            {
+                outOfRange = false;
+                int total = 0;
+                foreach (Run run in cluster)
+                {
+                    float at = run.Position + delta;
+                    if (at < run.Min - 0.01f || at > run.Max + 0.01f)
+                    {
+                        outOfRange = true;
+                    }
+
+                    total += Collisions(run, at, obstacles, clearance);
+                }
+
+                return total;
+            }
+
+            int now = Cost(0f, out _);
+            if (now == 0)
+            {
+                return;
+            }
+
+            const float Nudge = 0.5f;
+            float reach = spacing * MaxDetourLanes;
+            var candidates = new List<float>();
+            foreach (Run run in cluster)
+            {
+                float lo = Math.Min(run.Start, run.End);
+                float hi = Math.Max(run.Start, run.End);
+                for (int i = 0; i < obstacles.Count; i++)
+                {
+                    if (run.Ignore != null && run.Ignore.Contains(i))
+                    {
+                        continue;
+                    }
+
+                    WireRect r = obstacles[i];
+                    bool along = run.Vertical ? hi > r.Top && lo < r.Bottom : hi > r.Left && lo < r.Right;
+                    if (!along)
+                    {
+                        continue;
+                    }
+
+                    float near = run.Vertical ? r.Left : r.Top;
+                    float far = run.Vertical ? r.Right : r.Bottom;
+                    foreach (float d in new[] { near - clearance - Nudge - run.Position, far + clearance + Nudge - run.Position })
+                    {
+                        if (Math.Abs(d) <= reach)
+                        {
+                            candidates.Add(d);
+                        }
+                    }
+                }
+            }
+
+            candidates.Sort((a, b) => Math.Abs(a).CompareTo(Math.Abs(b)));
+            float best = 0f;
+            int bestCost = now;
+            bool bestOut = false;
+            foreach (float delta in candidates)
+            {
+                int cost = Cost(delta, out bool outOfRange);
+
+                // Out of its range is a real price (a return run leaves the
+                // channel it was given): only ever to get fully clear, and
+                // only when nothing in range is.
+                if (outOfRange && (!unbounded || cost != 0))
+                {
+                    continue;
+                }
+
+                // Sorted nearest-first, so a tie keeps the nearer offset.
+                bool better = cost < bestCost || (cost == bestCost && bestOut && !outOfRange);
+                if (better)
+                {
+                    best = delta;
+                    bestCost = cost;
+                    bestOut = outOfRange;
+                    if (cost == 0 && !outOfRange)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (best != 0f)
+            {
+                foreach (Run run in cluster)
+                {
+                    run.Position += best;
+                }
+            }
         }
 
         /// <summary>The sort key of a vertical entered from the left, with
@@ -727,6 +1056,18 @@ namespace GustUI.Elements
             public float Order;
             public int Tie;
             public bool Under;
+
+            /// <summary>A return run: the channel under both its nodes,
+            /// where it goes when its gap is too narrow (#323).</summary>
+            public float UnderY;
+
+            /// <summary>A vertical (Position is an X) rather than a return
+            /// run (Position is a Y).</summary>
+            public bool Vertical;
+
+            /// <summary>Obstacles this run may pass beside: its own wires'
+            /// nodes (#324). Null ignores none.</summary>
+            public HashSet<int> Ignore;
         }
 
         private struct Channel
@@ -735,6 +1076,7 @@ namespace GustUI.Elements
             public float Min;
             public float Max;
             public bool Under;
+            public float UnderY;
         }
 
         private sealed class Trunk
@@ -749,6 +1091,7 @@ namespace GustUI.Elements
             public float Bottom;
             public float Travel;
             public readonly List<int> Members = new List<int>();
+            public readonly HashSet<int> Ignore = new HashSet<int>();
         }
     }
 }
