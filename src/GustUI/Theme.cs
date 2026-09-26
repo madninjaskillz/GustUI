@@ -119,6 +119,16 @@ namespace GustUI
         /// hardcoded near-black, which read as a black slab cut into a white
         /// dialog the moment the light theme was selected (ezmuze #66).</summary>
         public Color MeterWell;
+
+        /// <summary>
+        /// The fade under a waiting dialog (ezmuze #368, design-guide.md
+        /// "Waiting dialogs"): a STRAIGHT colour whose alpha is how much of it
+        /// covers the (blurred) app behind the dialog when fully faded in.
+        /// Dark in BOTH palettes: it says "the app is on hold", and a light
+        /// wash over a light theme would read as the app being disabled rather
+        /// than waiting.
+        /// </summary>
+        public Color Scrim = new Color(13, 13, 17, 128);
     }
 
     public class Theme
@@ -289,6 +299,9 @@ namespace GustUI
         public Color CategorySource, CategoryEffects, CategoryModulation, CategoryUtility, CategoryComposite;
         public Color ElevationShadow;
 
+        /// <summary>See <see cref="Palette.Scrim"/>.</summary>
+        public Color Scrim;
+
         /// <summary>The neutral CONTROL faces — an ordinary button or an
         /// unlit toggle, as opposed to a surface behind content.
         ///
@@ -387,6 +400,7 @@ namespace GustUI
             CategoryComposite = p.CategoryComposite;
 
             ElevationShadow = p.ElevationShadow;
+            Scrim = p.Scrim;
 
             PositiveButtonFill = new TVFillSimpleGradient(p.PositiveBase, p.PositiveBase * 0.75f, Direction.Vertically);
             NegativeButtonFill = new TVFillSimpleGradient(p.NegativeBase, p.NegativeBase * 0.75f, Direction.Vertically);

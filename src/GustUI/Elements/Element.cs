@@ -1154,6 +1154,16 @@ public class Element : IDisposable
         // dismiss firing on genuine clicks inside a tall dropdown — the
         // popup's own IsMouseOver() call here disagreed with the click that
         // just landed on one of its own lower rows and killed itself first.
+        //
+        // Nothing beneath a waiting dialog is under the pointer (ezmuze #368):
+        // this is the question every "was I pressed / hovered" poll asks,
+        // including a window's click-to-front, so answering it here keeps a
+        // click on the maximised sequencer from raising it over the dialog.
+        if (ModalWindowElement.InputBlocked(this))
+        {
+            return false;
+        }
+
         MouseState scaled = Resources.StaticResources.InputManager.CurrentMouseState;
         return IsMouseOver(new Vector2(scaled.X, scaled.Y));
     }

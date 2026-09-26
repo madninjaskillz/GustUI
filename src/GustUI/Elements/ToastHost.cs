@@ -164,6 +164,11 @@ public sealed class Toast
 /// </summary>
 public sealed class ToastHost
 {
+    /// <summary>Where toasts draw: above every window and waiting dialog
+    /// (<see cref="ModalWindowElement.QuestionDepth"/> and up, ezmuze #368),
+    /// below popups (500,000). Was 90,000 until waiting dialogs rose above it.</summary>
+    public const int ToastDepth = 400000;
+
     /// <summary>How long the slide/fade in and out take. Short — a toast that
     /// makes an entrance is worse than one that just appears.</summary>
     private const double EnterSeconds = 0.18;
@@ -239,7 +244,9 @@ public sealed class ToastHost
             // Over everything, including modals (ModalDepth is 60000) — a
             // toast a dialog can hide is a toast nobody reads. Depth alone
             // settles it now that the batch draws in strict order.
-            Depth = 90000,
+            // Above waiting dialogs and their scrim too (ezmuze #368), which
+            // sit from ModalWindowElement.QuestionDepth up; below popups.
+            Depth = ToastDepth,
         };
 
         wrapper.AddChild(content, "toast-content");

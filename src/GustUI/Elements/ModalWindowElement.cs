@@ -421,9 +421,267 @@ namespace GustUI.Elements
             }
         }
 
-        private protected override int MoveToFrontCeiling => StackCeiling(Pin, DepthCeiling);
+        private protected override int MoveToFrontCeiling => QuestionDepthNow ?? StackCeiling(Pin, DepthCeiling);
 
-        private protected override int MoveToFrontFloor => StackFloor(Pin);
+        private protected override int MoveToFrontFloor => QuestionDepthNow ?? StackFloor(Pin);
+
+        // ---- waiting dialogs (ezmuze #368) ---------------------------------
+        //
+        // A dialog that asks a question the app pauses on until it is answered
+        // (Missing packs, Unsaved changes, a rename, a confirm, an error...)
+        // used to be an ordinary window in the one click-order stack (#301), so
+        // a click on the maximised sequencer buried it: the load went on
+        // waiting on a question nobody could see. A WAITING dialog is the one
+        // exception to that stack. It sits above every window, pins included;
+        // a scrim (ModalScrimElement) fades and blurs everything beneath it;
+        // and nothing beneath it can be clicked, hovered, scrolled or typed at
+        // until it is answered. Popups, its own menus, toasts and tooltips stay
+        // above it. Playback carries on.
+
+        /// <summary>The depth the first waiting dialog is raised to: above the
+        /// status bar (100,000) and the now-playing bar (150,000), below toasts
+        /// and popups, so the dialog's own dropdowns stay usable.</summary>
+        public const int QuestionDepth = 200000;
+
+        /// <summary>The key scope that nothing is registered in: what is live
+        /// while a waiting dialog that pushed no scope of its own is up, so no
+        /// shortcut fires at all.</summary>
+        internal const int NoHookScope = -1;
+
+        /// <summary>Every window flagged <see cref="IsModalQuestion"/> that is
+        /// still in the tree (closing ones included, for the scrim's fade),
+        /// oldest first.</summary>
+        private static readonly List<ModalWindowElement> Questions = new List<ModalWindowElement>();
+
+        private bool isModalQuestion;
+        private int? questionDepth;
+
+        /// <summary>Whether this window was ever in the tree, so the registry
+        /// can tell "not added yet" from "gone".</summary>
+        private bool seenInTree;
+
+        /// <summary>
+        /// Marks this window as a WAITING dialog (ezmuze #368): one that asks a
+        /// question the app pauses on until it is answered. While it is open it
+        /// sits above every other window, including front-pinned ones, over a
+        /// dark, blurred scrim, and it is the only thing that takes input.
+        /// Stacked waiting dialogs work: the newest is on top, with the scrim
+        /// between it and the older one. Set it once, before or just after the
+        /// window is added; the dialog owns nothing else.
+        /// </summary>
+        public bool IsModalQuestion
+        {
+            get => isModalQuestion;
+            set
+            {
+                if (isModalQuestion == value)
+                {
+                    return;
+                }
+
+                isModalQuestion = value;
+                questionDepth = null;
+                Questions.Remove(this);
+                if (value)
+                {
+                    Questions.Add(this);
+
+                    // A context menu left open behind the question would still
+                    // be above the scrim and clickable. Nothing in the dialog
+                    // can have opened one yet.
+                    Element root = Resources.StaticResources?.RootWindow;
+                    if (root?.Children != null)
+                    {
+                        foreach (Element open in root.Children.Items.Where(c => c is FruitPopupMenu).ToList())
+                        {
+                            open.Kill();
+                        }
+                    }
+
+                    ModalScrimElement.Ensure();
+                }
+
+                if (Parent != null)
+                {
+                    ReapplyFrontDepth();
+                }
+
+                ModalScrimElement.Refresh();
+            }
+        }
+
+        /// <summary>This waiting dialog's depth, assigned the first time it is
+        /// asked for (so a <see cref="DepthCeiling"/> set after the flag still
+        /// counts): one step above every other open waiting dialog. Null for an
+        /// ordinary window.</summary>
+        private int? QuestionDepthNow
+        {
+            get
+            {
+                if (!isModalQuestion)
+                {
+                    return null;
+                }
+
+                if (questionDepth == null)
+                {
+                    questionDepth = NextQuestionDepth(
+                        Questions.Where(q => !ReferenceEquals(q, this) && q.questionDepth.HasValue && q.BlocksInput)
+                            .Select(q => q.questionDepth.Value),
+                        DepthCeiling);
+                }
+
+                return questionDepth;
+            }
+        }
+
+        /// <summary>The depth a newly opened waiting dialog takes: its explicit
+        /// ceiling (the beta gate's, far above everything) or
+        /// <see cref="QuestionDepth"/>, and always two above every waiting
+        /// dialog already open, so the scrim fits between them.</summary>
+        internal static int NextQuestionDepth(IEnumerable<int> openQuestionDepths, int? explicitCeiling)
+        {
+            int depth = explicitCeiling ?? QuestionDepth;
+            foreach (int open in openQuestionDepths)
+            {
+                depth = Math.Max(depth, open + 2);
+            }
+
+            return depth;
+        }
+
+        /// <summary>Whether this window is a waiting dialog that holds the app
+        /// right now: flagged, in the tree, shown and not on its way out.</summary>
+        internal bool BlocksInput => isModalQuestion && !closing && Visible && Parent != null;
+
+        /// <summary>How far this window's open/close animation has got, 0..1:
+        /// what the scrim fades with.</summary>
+        internal float ShownProgress { get; private set; }
+
+        /// <summary>The waiting dialogs still in the tree, closing ones
+        /// included. Prunes the ones that have gone.</summary>
+        internal static List<ModalWindowElement> LiveQuestions()
+        {
+            Questions.RemoveAll(q => q.Parent == null && (q.seenInTree || q.closing));
+            return Questions.Where(q => q.Parent != null).ToList();
+        }
+
+        /// <summary>
+        /// The waiting dialog on top, the one the app is waiting on: of every
+        /// window in <paramref name="windows"/> that <paramref name="blocks"/>
+        /// says holds the app, the one drawn highest. Null when none does.
+        /// </summary>
+        internal static Element TopQuestion(IEnumerable<Element> windows, Func<Element, bool> blocks)
+        {
+            Element top = null;
+            foreach (Element window in windows)
+            {
+                if (window != null && blocks(window) && (top == null || StacksAbove(window, top)))
+                {
+                    top = window;
+                }
+            }
+
+            return top;
+        }
+
+        /// <summary>The waiting dialog the app is waiting on right now, or null
+        /// when there is none.</summary>
+        public static ModalWindowElement WaitingDialog
+        {
+            get
+            {
+                if (Questions.Count == 0)
+                {
+                    return null;
+                }
+
+                Element root = Resources.StaticResources?.RootWindow;
+                return TopQuestion(Questions, w => w is ModalWindowElement q && q.BlocksInput
+                    && (root == null || ReferenceEquals(q.Parent, root))) as ModalWindowElement;
+            }
+        }
+
+        /// <summary>Whether a waiting dialog is holding the app.</summary>
+        public static bool IsWaiting => WaitingDialog != null;
+
+        /// <summary>
+        /// Whether <paramref name="element"/> sits beneath the waiting dialog
+        /// <paramref name="question"/>, and so must not be pointed at, clicked,
+        /// scrolled or typed into. Decided by the root-level branch it belongs
+        /// to: the dialog's own subtree and anything drawn above it (popups,
+        /// toasts, tooltips) stay live; the root itself and every window
+        /// beneath do not. An element outside the tree is not blocked.
+        /// </summary>
+        internal static bool BlockedBehind(Element element, Element question, Element root)
+        {
+            if (element == null || question == null || root == null)
+            {
+                return false;
+            }
+
+            if (ReferenceEquals(element, root))
+            {
+                return true;
+            }
+
+            Element branch = element;
+            while (branch.Parent != null && !ReferenceEquals(branch.Parent, root))
+            {
+                branch = branch.Parent;
+            }
+
+            if (branch.Parent == null || ReferenceEquals(branch, question))
+            {
+                return false;
+            }
+
+            return branch.Depth < question.Depth;
+        }
+
+        /// <summary>Whether a waiting dialog stands between the user and
+        /// <paramref name="element"/> (see <see cref="BlockedBehind"/>).</summary>
+        public static bool InputBlocked(Element element)
+        {
+            if (Questions.Count == 0)
+            {
+                return false;
+            }
+
+            ModalWindowElement waiting = WaitingDialog;
+            return waiting != null && BlockedBehind(element, waiting, Resources.StaticResources?.RootWindow);
+        }
+
+        /// <summary>
+        /// The only key scope whose shortcuts may fire:
+        /// <paramref name="activeScope"/> normally; while a waiting dialog is
+        /// up, the dialog's own scope, or <see cref="NoHookScope"/> when it
+        /// pushed none. Global shortcuts (the base scope) and every view's
+        /// shortcuts, menu-bar ones included, sleep until it is answered.
+        /// </summary>
+        internal static int KeyScopeWhileWaiting(int activeScope, bool waiting, int questionScope)
+            => !waiting ? activeScope : questionScope != 0 ? questionScope : NoHookScope;
+
+        /// <summary>The key scope InputManager should treat as active this
+        /// frame (see <see cref="KeyScopeWhileWaiting"/>).</summary>
+        internal static int EffectiveKeyScope(int activeScope)
+        {
+            ModalWindowElement waiting = WaitingDialog;
+            return KeyScopeWhileWaiting(activeScope, waiting != null, waiting?.MenuHookScope ?? 0);
+        }
+
+        /// <summary>Pulses the title bar: what a click on the scrim does, to
+        /// say "answer this first".</summary>
+        public void FlashTitle() => titleBarElement?.Flash();
+
+        /// <summary>
+        /// The pin a window takes when it is chosen from the View window list
+        /// (ezmuze #369): a window pinned to BACK is unpinned, because behind a
+        /// maximised window it would otherwise become the active window and
+        /// stay invisible. Front and normal are kept.
+        /// </summary>
+        internal static WindowPin PinWhenChosenFromList(WindowPin pin)
+            => pin == WindowPin.Back ? WindowPin.Normal : pin;
 
         /// <summary>The depth a back-pinned window is raised to.</summary>
         public const int BackPinnedWindowDepth = ModalDepth - 3;
@@ -495,7 +753,7 @@ namespace GustUI.Elements
         /// <summary>Whether this window shows a pin at all: not while docked,
         /// since a docked window overlaps nothing and has nothing to stack
         /// against.</summary>
-        internal bool ShowsPin => DockedSide == DockSide.None;
+        internal bool ShowsPin => DockedSide == DockSide.None && !isModalQuestion;
 
         /// <summary>Whether this window offers maximise, on its title bar or
         /// its active tab (ezmuze #366): not while docked. The dock owns a
@@ -1989,7 +2247,14 @@ namespace GustUI.Elements
                 {
                     Text = entry.Title + suffix,
                     Icon = isActive ? UIFont.Symbol.Accept.Icon() : null,
-                    Action = _ => target.Window.BringToTop(target.Tab),
+                    Action = _ =>
+                    {
+                        // A window pinned to back is unpinned when chosen
+                        // (#369): otherwise it becomes the active window and
+                        // stays hidden behind a maximised one.
+                        target.Window.Pin = PinWhenChosenFromList(target.Window.Pin);
+                        target.Window.BringToTop(target.Tab);
+                    },
                 });
             }
 
@@ -3240,8 +3505,14 @@ namespace GustUI.Elements
                 }
             }
 
-            var front = DialogKeyWindow(windows,
-                w => w is ModalWindowElement dialog && dialog.keyboardDismiss && dialog.buttons.Count > 0) as ModalWindowElement;
+            Func<Element, bool> isDialog = w => w is ModalWindowElement dialog && dialog.keyboardDismiss && dialog.buttons.Count > 0;
+
+            // A waiting dialog (#368) takes them whatever was activated since:
+            // it is the only thing the keys may reach.
+            ModalWindowElement waiting = WaitingDialog;
+            var front = (waiting != null
+                ? (isDialog(waiting) ? waiting : null)
+                : DialogKeyWindow(windows, isDialog)) as ModalWindowElement;
             return front != null && front.TryDialogKey(key, typing);
         }
 
@@ -3644,6 +3915,14 @@ namespace GustUI.Elements
                 return true;
             }
 
+            // While a waiting dialog is up it is the active window, whatever
+            // was opened or activated behind it since (#368).
+            ModalWindowElement waiting = WaitingDialog;
+            if (waiting != null && ReferenceEquals(waiting.Parent, host.Parent))
+            {
+                return ReferenceEquals(host, waiting);
+            }
+
             return IsActiveAmong(host, host.Parent.Children.Items.Where(sibling => sibling is ModalWindowElement));
         }
 
@@ -3684,7 +3963,24 @@ namespace GustUI.Elements
         /// pinned or not. Null for none. See <see cref="FrontWindow"/> for
         /// the other question.</summary>
         internal static Element ActiveWindow(IEnumerable<Element> windows)
+            => ActiveWindow(windows, w => w is ModalWindowElement window && window.BlocksInput);
+
+        /// <summary>
+        /// <see cref="ActiveWindow(IEnumerable{Element})"/> with the waiting
+        /// dialogs named by <paramref name="blocks"/>: while one is open, the
+        /// topmost of them is the active window, whatever was clicked or
+        /// activated behind it (#368). Otherwise the last clicked.
+        /// </summary>
+        internal static Element ActiveWindow(IEnumerable<Element> windows, Func<Element, bool> blocks)
         {
+            List<Element> list = windows as List<Element> ?? windows.ToList();
+            Element waiting = TopQuestion(list, blocks);
+            if (waiting != null)
+            {
+                return waiting;
+            }
+
+            windows = list;
             Element active = null;
             foreach (Element window in windows)
             {
@@ -3912,6 +4208,13 @@ namespace GustUI.Elements
             closing = true;
             closeStartSeconds = animClock.Elapsed.TotalSeconds;
             restPosition = ElementTrait<PositionTrait>().Value();
+
+            // An answered question lets go of the app at once; only the fade
+            // waits for the close animation.
+            if (isModalQuestion)
+            {
+                ModalScrimElement.Refresh();
+            }
         }
 
         /// <summary>Minimum inset between a modal's chrome (title bar,
@@ -4077,6 +4380,16 @@ namespace GustUI.Elements
         {
             UpdateTabs();
             base.Update(parent);
+
+            if (Parent != null)
+            {
+                seenInTree = true;
+            }
+
+            if (isModalQuestion)
+            {
+                ModalScrimElement.Refresh();
+            }
 
             // A pending RaiseWithoutActivating. Up here, before any early
             // return, so a docked or merging window still counts its updates.
@@ -4430,7 +4743,14 @@ namespace GustUI.Elements
             if (BeingDragged)
             {
                 AutoCenter = false;
-                UpdateDockHoldGesture(windowSize);
+
+                // A waiting dialog does not dock: it is meant to be answered,
+                // not parked at an edge.
+                if (!isModalQuestion)
+                {
+                    UpdateDockHoldGesture(windowSize);
+                }
+
                 if (Tabable)
                 {
                     UpdateTabMergeGesture();
@@ -4469,7 +4789,13 @@ namespace GustUI.Elements
                 animProgress = 1f - EaseInCubic(t);
                 if (t >= 1f)
                 {
+                    ShownProgress = 0f;
                     base.Kill();
+                    if (isModalQuestion)
+                    {
+                        ModalScrimElement.Refresh();
+                    }
+
                     return;
                 }
             }
@@ -4500,6 +4826,8 @@ namespace GustUI.Elements
                     }
                 }
             }
+
+            ShownProgress = animProgress;
 
             if (closing || animProgress < 1f)
             {

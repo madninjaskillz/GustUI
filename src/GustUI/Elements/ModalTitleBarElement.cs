@@ -107,6 +107,52 @@ namespace GustUI.Elements
         private FilledRectangleElement accentUnderline;
         private FilledRectangleElement inactiveOverlay;
 
+        /// <summary>The "answer this first" pulse (ezmuze #368): an
+        /// AccentSelection wash over the whole bar, faded in and out twice
+        /// when the scrim under a waiting dialog is clicked. Its own child,
+        /// for the same reason <see cref="inactiveOverlay"/> is.</summary>
+        private FilledRectangleElement flashOverlay;
+
+        private readonly System.Diagnostics.Stopwatch flashClock = System.Diagnostics.Stopwatch.StartNew();
+        private double flashStartSeconds = double.NegativeInfinity;
+
+        /// <summary>One rise or one fall of the pulse: design-guide.md §5's
+        /// 150 ms, ease-out in and ease-in out.</summary>
+        internal const float FlashStepSeconds = 0.15f;
+
+        /// <summary>How many times the bar lights up per flash.</summary>
+        internal const int FlashPulses = 2;
+
+        /// <summary>How strong the wash is at the top of a pulse.</summary>
+        internal const float FlashPeakOpacity = 0.55f;
+
+        /// <summary>Starts (or restarts) the title-bar pulse.</summary>
+        public void Flash() => flashStartSeconds = flashClock.Elapsed.TotalSeconds;
+
+        /// <summary>
+        /// The pulse's strength <paramref name="elapsed"/> seconds after a
+        /// flash started, 0..1: <see cref="FlashPulses"/> pulses, each an
+        /// ease-out rise and an ease-in fall of <see cref="FlashStepSeconds"/>,
+        /// then nothing.
+        /// </summary>
+        internal static float FlashLevel(double elapsed)
+        {
+            if (elapsed < 0 || elapsed >= FlashPulses * 2 * FlashStepSeconds)
+            {
+                return 0f;
+            }
+
+            double within = elapsed % (2 * FlashStepSeconds);
+            if (within < FlashStepSeconds)
+            {
+                float t = (float)(within / FlashStepSeconds);
+                return 1f - (1f - t) * (1f - t) * (1f - t);
+            }
+
+            float f = (float)((within - FlashStepSeconds) / FlashStepSeconds);
+            return 1f - f * f * f;
+        }
+
         /// <summary>What the red X does. Hosts with richer teardown than a
         /// bare Kill (hook scopes, view state) set their own close path here
         /// — the same path their Esc/Back uses. Null = Parent.Kill().</summary>
@@ -275,6 +321,12 @@ namespace GustUI.Elements
 
             AddChild(inactiveOverlay, "inactive-overlay");
 
+            flashOverlay = new FilledRectangleElement(0, 0, 0, 0,
+                new TVFillSolidColor(() => Resources.StaticResources.Theme.AccentSelection));
+            flashOverlay.Depth = 51;
+            flashOverlay.Visible = false;
+            AddChild(flashOverlay, "flash-overlay");
+
             if (closable)
             {
                 closeButton.Set<SizeTrait>(new TVVector(size.Y, size.Y));
@@ -409,6 +461,15 @@ namespace GustUI.Elements
             bool active = ModalWindowElement.IsActiveWindow(parent);
             inactiveOverlay?.Set<SizeTrait>(active ? new TVVector(0, 0) : new TVVector(size.X, BarHeight));
             inactiveOverlay?.Set<PositionTrait>(new TVVector(0, 0));
+
+            if (flashOverlay != null)
+            {
+                float flash = FlashLevel(flashClock.Elapsed.TotalSeconds - flashStartSeconds);
+                flashOverlay.Visible = flash > 0f;
+                flashOverlay.Opacity = flash * FlashPeakOpacity;
+                flashOverlay.Set<SizeTrait>(new TVVector(size.X, BarHeight));
+                flashOverlay.Set<PositionTrait>(new TVVector(0, 0));
+            }
 
             accentUnderline?.Set<SizeTrait>(new TVVector(size.X, 2));
             accentUnderline?.Set<PositionTrait>(new TVVector(0, BarHeight - 2));

@@ -195,12 +195,24 @@ namespace GustUI.Managers
             // relied on to survive.
             RunPrePass();
 
-            Clear(Color.Transparent);
+            // A waiting dialog's scrim asked for the frame beneath it to be
+            // blurred (ezmuze #368): the tree draws into an offscreen target
+            // until the scrim resolves it onto the backbuffer. Opaque black,
+            // not transparent, so the captured frame is opaque everywhere and
+            // copies back exactly (the backbuffer's alpha is never shown).
+            bool capture = BackdropRequested && BeginBackdropCapture();
+            BackdropRequested = false;
+            Clear(capture ? Color.Black : Color.Transparent);
             FrameProfiler.Begin(FrameProfiler.Bucket.DrawRoot);
             Elements.Element.BeginPositionCache();
             Resources.StaticResources.RootWindow.Draw();
             Elements.Element.EndPositionCache();
             FrameProfiler.End(FrameProfiler.Bucket.DrawRoot);
+
+            // The scrim did not draw after all (removed mid-frame): the frame
+            // still has to reach the screen.
+            FinishBackdropCapture();
+
             FrameProfiler.Begin(FrameProfiler.Bucket.DrawDebug);
             var lerpSpeed = 0.5f;
             if (Resources.StaticResources.DebugMode == DebugMode.Full)
@@ -819,7 +831,11 @@ namespace GustUI.Managers
 
             GraphicsDevice device = Resources.StaticResources.GraphicsDevice;
             RenderTarget2D previousTarget = currentTarget;
-            SetRenderTarget(target);
+
+            // Null means "whatever is bound", as documented, and NOT the
+            // backbuffer: while the frame is being captured for a waiting
+            // dialog's blur, what is bound is the capture target.
+            SetRenderTarget(target ?? currentTarget);
             device.BlendState = BlendState.Opaque;
             device.RasterizerState = RasterizerState.CullNone;
             device.DepthStencilState = DepthStencilState.None;
@@ -861,6 +877,198 @@ namespace GustUI.Managers
         }
 
         private Effect sdfEffect;
+
+        // ---- the blurred backdrop under a waiting dialog (ezmuze #368) ----
+        //
+        // A live blur on every platform, cheap enough for the Reach-era DX
+        // head: the frame beneath the scrim is drawn into a full-size target
+        // instead of the backbuffer, box-downsampled twice by bilinear copies
+        // to a quarter of its size, blurred there with a separable 9-tap
+        // Gaussian (five bilinear fetches per pass, horizontal then vertical,
+        // BackdropBlurIterations times), and composited onto the backbuffer in
+        // one pass that also lays the scrim colour over it. Everything drawn
+        // after the scrim (the dialog, popups, toasts, tooltips, the pointer)
+        // goes straight to the backbuffer as usual. Nothing is drawn twice.
+        //
+        // The shader is ModalBackdrop.slang, one Slang source generated to
+        // HLSL and GLSL like every other UI shader.
+
+        /// <summary>Content name of the backdrop effect (Copy, Blur and
+        /// Composite techniques). Settable for the same reason
+        /// <see cref="GeometryEffectAsset"/> is.</summary>
+        public static string BackdropEffectAsset { get; set; } = "ModalBackdrop";
+
+        /// <summary>How many horizontal+vertical blur pairs run at quarter
+        /// size. Two give a radius of roughly 20 screen pixels.</summary>
+        public static int BackdropBlurIterations { get; set; } = 2;
+
+        /// <summary>Set during Update by whatever will call
+        /// <see cref="ResolveBackdrop"/> in the coming frame (the waiting
+        /// dialog's scrim); consumed, and reset, by the next draw.</summary>
+        public bool BackdropRequested { get; set; }
+
+        private Effect backdropEffect;
+        private bool backdropEffectMissing;
+        private RenderTarget2D backdropScene;
+        private RenderTarget2D backdropHalf;
+        private RenderTarget2D backdropBlurA;
+        private RenderTarget2D backdropBlurB;
+        private bool capturingBackdrop;
+
+        /// <summary>Whether this frame is being drawn into the backdrop
+        /// capture target.</summary>
+        public bool CapturingBackdrop => capturingBackdrop;
+
+        private Effect GetBackdropEffect()
+        {
+            if (backdropEffect == null && !backdropEffectMissing)
+            {
+                try
+                {
+                    backdropEffect = Resources.StaticResources.Content.Load<Effect>(BackdropEffectAsset);
+                }
+                catch (Exception ex)
+                {
+                    // Loud, once: a missing effect is a build fault, not a
+                    // platform limit, and the scrim then dims without blurring.
+                    backdropEffectMissing = true;
+                    Console.WriteLine("[draw] ERROR: the waiting-dialog backdrop effect '" + BackdropEffectAsset
+                        + "' did not load, so the scrim cannot blur: " + ex.Message);
+                }
+            }
+
+            return backdropEffect;
+        }
+
+        private static void EnsureTarget(ref RenderTarget2D target, int width, int height, RenderTargetUsage usage)
+        {
+            width = Math.Max(1, width);
+            height = Math.Max(1, height);
+            if (target != null && !target.IsDisposed && target.Width == width && target.Height == height)
+            {
+                return;
+            }
+
+            target?.Dispose();
+            target = new RenderTarget2D(Resources.StaticResources.GraphicsDevice, width, height, false,
+                SurfaceFormat.Color, DepthFormat.None, 0, usage);
+        }
+
+        private bool BeginBackdropCapture()
+        {
+            if (GetBackdropEffect() == null)
+            {
+                return false;
+            }
+
+            PresentationParameters pp = Resources.StaticResources.GraphicsDevice.PresentationParameters;
+            int width = pp.BackBufferWidth;
+            int height = pp.BackBufferHeight;
+
+            // Preserve: a DrawFullScreenEffect in the middle of the tree binds
+            // another target and comes back to this one.
+            EnsureTarget(ref backdropScene, width, height, RenderTargetUsage.PreserveContents);
+            EnsureTarget(ref backdropHalf, width / 2, height / 2, RenderTargetUsage.DiscardContents);
+            EnsureTarget(ref backdropBlurA, width / 4, height / 4, RenderTargetUsage.DiscardContents);
+            EnsureTarget(ref backdropBlurB, width / 4, height / 4, RenderTargetUsage.DiscardContents);
+
+            SetRenderTarget(backdropScene);
+            capturingBackdrop = true;
+            return true;
+        }
+
+        /// <summary>
+        /// Draws the backdrop of a waiting dialog here, in paint order: the
+        /// frame so far, blurred and laid over with <paramref name="scrim"/>
+        /// (a straight colour whose alpha is its strength), both scaled by
+        /// <paramref name="amount"/> (0..1, the fade). Everything drawn after
+        /// this call lands on top, unblurred. When the frame was not captured
+        /// (the effect is missing) it is a flat wash of the scrim colour.
+        /// </summary>
+        public void ResolveBackdrop(float amount, Color scrim)
+        {
+            amount = MathHelper.Clamp(amount, 0f, 1f);
+            if (!capturingBackdrop)
+            {
+                Vector2 rootSize = Resources.StaticResources.RootWindow.GetSize().AsXna;
+                ShapeDrawExtensions.DrawFilledRectangle(this,
+                    new Rectangle(0, 0, (int)Math.Ceiling(rootSize.X), (int)Math.Ceiling(rootSize.Y)),
+                    new Color(scrim.R, scrim.G, scrim.B, (byte)(scrim.A * amount)));
+                return;
+            }
+
+            using (Telemetry.Scope("Draw.Backdrop"))
+            {
+                End();
+                capturingBackdrop = false;
+
+                Effect fx = backdropEffect;
+                RunBackdropPass(fx, "Copy", backdropHalf, backdropScene, null);
+                RunBackdropPass(fx, "Copy", backdropBlurA, backdropHalf, null);
+
+                EffectParameter step = fx.Parameters["TexelStep"];
+                for (int i = 0; i < Math.Max(1, BackdropBlurIterations); i++)
+                {
+                    step?.SetValue(new Vector2(1f / backdropBlurA.Width, 0f));
+                    RunBackdropPass(fx, "Blur", backdropBlurB, backdropBlurA, null);
+                    step?.SetValue(new Vector2(0f, 1f / backdropBlurA.Height));
+                    RunBackdropPass(fx, "Blur", backdropBlurA, backdropBlurB, null);
+                }
+
+                fx.Parameters["Amount"]?.SetValue(amount);
+                fx.Parameters["ScrimColor"]?.SetValue(new Vector4(scrim.R / 255f, scrim.G / 255f, scrim.B / 255f, scrim.A / 255f));
+                RunBackdropPass(fx, "Composite", null, backdropScene, backdropBlurA);
+
+                Begin();
+            }
+        }
+
+        /// <summary>Copies a captured frame to the backbuffer untouched, when
+        /// the scrim that asked for it never drew.</summary>
+        private void FinishBackdropCapture()
+        {
+            if (!capturingBackdrop)
+            {
+                return;
+            }
+
+            End();
+            capturingBackdrop = false;
+            RunBackdropPass(backdropEffect, "Copy", null, backdropScene, null);
+            Begin();
+        }
+
+        /// <summary>One full-target pass of the backdrop effect: binds
+        /// <paramref name="target"/> (null = the backbuffer), the inputs
+        /// AFTER Apply (the KNI GL gotcha in <see cref="DrawFullScreenEffect"/>),
+        /// draws, and unbinds the inputs so the next pass may render into
+        /// one of them.</summary>
+        private void RunBackdropPass(Effect fx, string technique, RenderTarget2D target, Texture2D input0, Texture2D input1)
+        {
+            GraphicsDevice device = Resources.StaticResources.GraphicsDevice;
+            SetRenderTarget(target);
+            device.BlendState = BlendState.Opaque;
+            device.RasterizerState = RasterizerState.CullNone;
+            device.DepthStencilState = DepthStencilState.None;
+            fx.CurrentTechnique = fx.Techniques[technique];
+
+            foreach (EffectPass pass in fx.CurrentTechnique.Passes)
+            {
+                pass.Apply();
+                device.Textures[0] = input0;
+                device.SamplerStates[0] = SamplerState.LinearClamp;
+                if (input1 != null)
+                {
+                    device.Textures[1] = input1;
+                    device.SamplerStates[1] = SamplerState.LinearClamp;
+                }
+
+                device.DrawUserPrimitives(PrimitiveType.TriangleList, fullScreenTriangle, 0, 1);
+            }
+
+            device.Textures[0] = null;
+            device.Textures[1] = null;
+        }
 
         /// <summary>Border-free overload — see the full overload below.</summary>
         public void DrawSdfString(SdfFont sdfFont, string text, Vector2 position, float pixelSize, Color color)

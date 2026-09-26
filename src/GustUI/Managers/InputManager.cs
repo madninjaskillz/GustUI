@@ -790,6 +790,15 @@ namespace GustUI.Managers
             KeyboardState keyboardState = syntheticKeyboardState ?? (realInputReaches ? Keyboard.GetState() : default(KeyboardState));
             CurrentKeyboardState = keyboardState;
 
+            // A field beneath a waiting dialog loses the keyboard (ezmuze
+            // #368): the dialog is the only thing keys may reach, and a search
+            // box that had focus when the question arrived would otherwise
+            // keep taking every keystroke behind it.
+            if (CurrentlyFocused != null && Elements.ModalWindowElement.InputBlocked(CurrentlyFocused))
+            {
+                SetFocus(null);
+            }
+
             // While a text-input element is focused, newly pressed keys go to
             // it and keyboard SHORTCUT hooks are suppressed (typing "z" must
             // not trigger an undo hook).
@@ -916,7 +925,10 @@ namespace GustUI.Managers
                 repeatFocus = null;
             }
 
-            int activeScope = ActiveHookScope;
+            // While a waiting dialog is up only ITS shortcuts are live: the
+            // views behind it, the menu bars and the global (base-scope) keys
+            // all sleep (ezmuze #368).
+            int activeScope = Elements.ModalWindowElement.EffectiveKeyScope(ActiveHookScope);
             List<Keys> firedKeys = null;
             for (int i = 0; !typing && i < Hooks.Count; i++)
             {
