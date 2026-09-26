@@ -620,6 +620,25 @@ namespace GustUI.Managers
         /// GPU-state work can be dropped for the geometry-only case without
         /// touching this method at all.
         /// </summary>
+        /// <summary>
+        /// The clip in force right now as (left, top, right, bottom) in the
+        /// LOGICAL pixel space elements draw in (GetActualXnaPosition()'s) —
+        /// the innermost ClipChildren rect, or the whole viewport. For an
+        /// immediate-mode element to skip work nobody will see: a clip block
+        /// hundreds of bars long is mostly outside the sequencer's body, and
+        /// the per-vertex clip would discard that geometry only after it was
+        /// built (ezmuze #377).
+        /// </summary>
+        public Vector4 LogicalClipBounds
+        {
+            get
+            {
+                Vector4 r = GetClipRectForGeometry();
+                float s = RenderScale > 0f ? RenderScale : 1f;
+                return r / s;
+            }
+        }
+
         internal Vector4 GetClipRectForGeometry()
         {
             if (scissorStack.Count > 0)

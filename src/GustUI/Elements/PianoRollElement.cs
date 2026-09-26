@@ -250,7 +250,7 @@ namespace GustUI.Elements
             }
 
             // ---- notes ----
-            bendManager = manager; // the batch's overflow flush needs it too
+            bendBatch.Begin(manager); // the overflow flush needs the manager too
             foreach (PianoRollNoteView note in Notes)
             {
                 DrawNote(manager, note, x0, y0, width, height, gridX, 1f);
@@ -274,7 +274,7 @@ namespace GustUI.Elements
                 }
             }
 
-            FlushBendGeometry(manager);
+            bendBatch.Flush();
 
             if (BendEditMode)
             {
@@ -420,7 +420,7 @@ namespace GustUI.Elements
                 // Curved geometry, done properly: a float-precision quad
                 // strip that follows Pitch + offset(t) (accumulated and
                 // flushed in ONE DrawTriangles call per frame — see
-                // FlushBendGeometry). Top/bottom edges carry a 1px alpha-
+                // BendGeometryBatch). Top/bottom edges carry a 1px alpha-
                 // feathered skirt: geometric antialiasing, since the render
                 // targets run without MSAA and a hard 1px edge on a slope
                 // would still staircase.
@@ -430,138 +430,27 @@ namespace GustUI.Elements
 
         // ---- bend geometry batch (built during the note pass, flushed once) ----
 
-        private readonly List<VertexPositionColor> bendVerts = new List<VertexPositionColor>();
-        private readonly List<short> bendIndices = new List<short>();
+        /// <summary>This frame's bent bodies and curvature diamonds, drawn in
+        /// ONE call (Rendering.BendGeometryBatch owns the short-index ceiling
+        /// and flushes early past it). Begun at the top of the note pass.</summary>
+        private readonly Rendering.BendGeometryBatch bendBatch = new Rendering.BendGeometryBatch();
 
-        /// <summary>The manager this frame's bend batch flushes to. The batch
-        /// itself is a field (accumulated across the whole note pass), so the
-        /// overflow flush needs one as well; set at the top of that pass.</summary>
-        private Managers.DrawManager bendManager;
-
-        /// <summary>
-        /// Vertex ceiling for ONE bend batch. Indices are shorts, so a batch
-        /// cannot address more than 32,768 vertices — past that
-        /// <c>(short)bendVerts.Count</c> wraps and every quad after it indexes
-        /// back into earlier geometry, which silently swallows whole notes.
-        /// A single long bent note is ~10,000 vertices by itself (512 samples
-        /// x 5 stacked quads x 4), so three or four bent notes on screen
-        /// already reach this; it is a real limit, not a theoretical one.
-        /// A multiple of 4 so a flush never splits a quad.
-        /// </summary>
-        private const int MaxBendVerts = 32764;
-
-        /// <summary>Appends the bent note body: per-sample quads for the body
-        /// band, 1px border bands, and 1px fade-out skirts along both edges.
-        /// All Y coordinates are float (no integer column snapping) and
-        /// clamped to the view rect (the roll clips manually — no scissor).</summary>
+        /// <summary>Appends the bent note body — the shared
+        /// <see cref="Rendering.BendBand"/> shape the sequencer clip's
+        /// mini-roll draws too, here with a border and end caps at row
+        /// height. The roll clips manually (no scissor): X to the grid, Y to
+        /// the view rect.</summary>
         private void AppendBendBody(PianoRollNoteView note, int x0, int y0, int width, int height,
             int gridX, int rowH, Color body, Color border)
         {
-            float[] offsets = note.BendOffsets;
             float leftF = x0 + XForBeat(note.StartBeats, width);
             float rightF = x0 + XForBeat(note.StartBeats + note.LengthBeats, width);
-            float xStart = Math.Max(leftF, gridX);
-            float xEnd = Math.Min(rightF, x0 + width);
-            float span = rightF - leftF;
-            if (xEnd - xStart < 1f || span <= 0f)
-            {
-                return;
-            }
 
-            Color fade = border * 0f; // premultiplied: zero = fully transparent
-            float yMin = y0;
-            float yMax = y0 + height;
-            int samples = Math.Clamp((int)((xEnd - xStart) / 2f), 1, 512);
-
-            float prevX = xStart;
-            float prevTop = y0 + YTopForPitch(note.Pitch + SampleOffsets(offsets, (xStart - leftF) / span)) + 1f;
-            float firstTop = prevTop;
-            for (int i = 1; i <= samples; i++)
-            {
-                float x = xStart + (xEnd - xStart) * i / samples;
-                float t = (x - leftF) / span;
-                float top = y0 + YTopForPitch(note.Pitch + SampleOffsets(offsets, t)) + 1f;
-
-                float b1 = prevTop + rowH;
-                float b2 = top + rowH;
-                AddBendQuad(prevX, prevTop - 1f, x, top - 1f, prevTop, top, fade, border, yMin, yMax);
-                AddBendQuad(prevX, prevTop, x, top, prevTop + 1f, top + 1f, border, border, yMin, yMax);
-                AddBendQuad(prevX, prevTop + 1f, x, top + 1f, b1 - 1f, b2 - 1f, body, body, yMin, yMax);
-                AddBendQuad(prevX, b1 - 1f, x, b2 - 1f, b1, b2, border, border, yMin, yMax);
-                AddBendQuad(prevX, b1, x, b2, b1 + 1f, b2 + 1f, border, fade, yMin, yMax);
-
-                prevX = x;
-                prevTop = top;
-            }
-
-            // End caps (only at TRUE note ends — a pan-clipped edge gets none).
-            if (leftF >= gridX)
-            {
-                AddBendQuad(leftF, firstTop, leftF + 1f, firstTop, firstTop + rowH, firstTop + rowH, border, border, yMin, yMax);
-            }
-
-            if (rightF <= x0 + width)
-            {
-                AddBendQuad(rightF - 1f, prevTop, rightF, prevTop, prevTop + rowH, prevTop + rowH, border, border, yMin, yMax);
-            }
-        }
-
-        /// <summary>One quad between a top edge (x1,y1t)→(x2,y2t) and a bottom
-        /// edge (x1,y1b)→(x2,y2b), with separate top/bottom colors (equal for
-        /// solid bands, one transparent for the feathered skirts).</summary>
-        private void AddBendQuad(float x1, float y1t, float x2, float y2t, float y1b, float y2b,
-            Color cTop, Color cBot, float yMin, float yMax)
-        {
-            if (bendVerts.Count + 4 > MaxBendVerts && bendManager != null)
-            {
-                FlushBendGeometry(bendManager);
-            }
-
-            short baseIx = (short)bendVerts.Count;
-            bendVerts.Add(new VertexPositionColor(new Vector3(x1, Math.Clamp(y1t, yMin, yMax), 0f), cTop));
-            bendVerts.Add(new VertexPositionColor(new Vector3(x2, Math.Clamp(y2t, yMin, yMax), 0f), cTop));
-            bendVerts.Add(new VertexPositionColor(new Vector3(x1, Math.Clamp(y1b, yMin, yMax), 0f), cBot));
-            bendVerts.Add(new VertexPositionColor(new Vector3(x2, Math.Clamp(y2b, yMin, yMax), 0f), cBot));
-            bendIndices.Add(baseIx);
-            bendIndices.Add((short)(baseIx + 1));
-            bendIndices.Add((short)(baseIx + 2));
-            bendIndices.Add((short)(baseIx + 1));
-            bendIndices.Add((short)(baseIx + 3));
-            bendIndices.Add((short)(baseIx + 2));
-        }
-
-        /// <summary>An axis-rotated diamond (the ACTUAL diamond shape, not a
-        /// square posing as one) centered on the curve.</summary>
-        private void AddBendDiamond(float cx, float cy, float r, Color c)
-        {
-            short baseIx = (short)bendVerts.Count;
-            bendVerts.Add(new VertexPositionColor(new Vector3(cx, cy - r, 0f), c));
-            bendVerts.Add(new VertexPositionColor(new Vector3(cx + r, cy, 0f), c));
-            bendVerts.Add(new VertexPositionColor(new Vector3(cx, cy + r, 0f), c));
-            bendVerts.Add(new VertexPositionColor(new Vector3(cx - r, cy, 0f), c));
-            bendIndices.Add(baseIx);
-            bendIndices.Add((short)(baseIx + 1));
-            bendIndices.Add((short)(baseIx + 3));
-            bendIndices.Add((short)(baseIx + 1));
-            bendIndices.Add((short)(baseIx + 2));
-            bendIndices.Add((short)(baseIx + 3));
-        }
-
-        /// <summary>Draws everything accumulated into the bend geometry batch
-        /// in one DrawTriangles call (normally ONE flush for the whole frame,
-        /// per the DrawManager guidance — <see cref="MaxBendVerts"/> forces an
-        /// extra one only when a frame's geometry outgrows a short index),
-        /// then resets the batch.</summary>
-        private void FlushBendGeometry(Managers.DrawManager manager)
-        {
-            if (bendIndices.Count == 0)
-            {
-                return;
-            }
-
-            manager.DrawTriangles(bendVerts.ToArray(), bendIndices.ToArray(), bendIndices.Count / 3);
-            bendVerts.Clear();
-            bendIndices.Clear();
+            // top(p) = y0 + YTopForPitch(p) + 1 = y0 + (TopPitch - p) * RowHeight + 1
+            Rendering.BendBand.Append(bendBatch, note.BendOffsets, note.Pitch,
+                leftF, rightF, Math.Max(leftF, gridX), Math.Min(rightF, x0 + width),
+                y0 + TopPitch * RowHeight + 1f, -RowHeight, rowH,
+                body, border, y0, y0 + height);
         }
 
         /// <summary>The segment-midpoint curvature diamonds, appended to the
@@ -582,11 +471,11 @@ namespace GustUI.Elements
                 // the same sampled curve the note body renders from).
                 double midBeat = (points[i].Beats + points[i + 1].Beats) * 0.5;
                 float t = (float)(midBeat / note.LengthBeats);
-                float offset = SampleOffsets(note.BendOffsets, t);
+                float offset = Rendering.BendBand.SampleOffsets(note.BendOffsets, t);
                 float mx = x0 + XForBeat(note.StartBeats + midBeat, width);
                 float my = y0 + YTopForPitch(note.Pitch + offset) + RowHeight * 0.5f;
-                AddBendDiamond(mx, my, r + 1f, NoteBorderColor);
-                AddBendDiamond(mx, my, r, BendHandleColor * 0.8f);
+                bendBatch.AddDiamond(mx, my, r + 1f, NoteBorderColor);
+                bendBatch.AddDiamond(mx, my, r, BendHandleColor * 0.8f);
             }
         }
 
@@ -621,28 +510,10 @@ namespace GustUI.Elements
             }
         }
 
-        /// <summary>Linear interpolation over the host-sampled bend offsets.</summary>
-        public static float SampleOffsets(float[] offsets, float t)
-        {
-            if (offsets == null || offsets.Length == 0)
-            {
-                return 0f;
-            }
-
-            if (offsets.Length == 1)
-            {
-                return offsets[0];
-            }
-
-            float f = MathHelper.Clamp(t, 0f, 1f) * (offsets.Length - 1);
-            int i = (int)f;
-            if (i >= offsets.Length - 1)
-            {
-                return offsets[offsets.Length - 1];
-            }
-
-            return offsets[i] + (offsets[i + 1] - offsets[i]) * (f - i);
-        }
+        /// <summary>Linear interpolation over the host-sampled bend offsets
+        /// (kept for callers; the implementation is the shared
+        /// <see cref="Rendering.BendBand.SampleOffsets"/>).</summary>
+        public static float SampleOffsets(float[] offsets, float t) => Rendering.BendBand.SampleOffsets(offsets, t);
 
         private static bool IsBlackKey(int pitch)
         {

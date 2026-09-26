@@ -9,15 +9,25 @@ using Microsoft.Xna.Framework.Graphics;
 namespace GustUI.Elements
 {
     /// <summary>One note in a <see cref="MiniPianoRollElement"/>'s display
-    /// list — pattern-local beats, no bend/selection (a read-only thumbnail,
-    /// not an editing surface; see <see cref="PianoRollElement"/> for
-    /// that).</summary>
+    /// list — pattern-local beats, no selection (a read-only thumbnail, not
+    /// an editing surface; see <see cref="PianoRollElement"/> for that).</summary>
     public struct MiniRollNote
     {
         public float Pitch;
         public double StartBeats;
         public double LengthBeats;
         public float Velocity;
+
+        /// <summary>
+        /// Semitone offsets sampled UNIFORMLY across the note — the same
+        /// samples the piano roll draws from (<see cref="PianoRollNoteView.BendOffsets"/>);
+        /// null = a straight note. When present the note draws BENT, as the
+        /// shared <see cref="Rendering.BendBand"/> at this roll's note
+        /// height (ezmuze #377: an MPE study whose notes all start on C4 drew
+        /// as one flat bar while the piano roll fanned out to the chords).
+        /// The host owns and caches the array; this element only reads it.
+        /// </summary>
+        public float[] BendOffsets;
     }
 
     /// <summary>
@@ -99,6 +109,33 @@ namespace GustUI.Elements
         /// WaveformData "silence still reads as a waveform" idiom.</summary>
         private const int MinNotePx = 2;
 
+        /// <summary>Steps across ONE bent note in one tile, at most (one per
+        /// ~2px below it). Higher than the piano roll's 512 because a tile is
+        /// baked once, not rebuilt every frame, and a zoomed-in clip can be
+        /// thousands of pixels wide.</summary>
+        private const int MaxBendSamples = 2048;
+
+        /// <summary>Records bent notes into <see cref="Rendering.BendGeometry"/>.</summary>
+        private readonly Rendering.BendGeometryBatch bendBatch = new Rendering.BendGeometryBatch();
+
+        /// <summary>
+        /// The bent notes of one tile, baked in TILE-LOCAL coordinates and
+        /// redrawn every frame at the tile's offset (#377). Every full tile of
+        /// a Repeat clip is the same picture, so there are two slots: the
+        /// full tile, and the last one when it is cut short. A slot is
+        /// rebuilt only when its key (the notes, their bends, the colours
+        /// and the tile's pixel size and pitch mapping) changes, so panning
+        /// and scrolling draw from the cache and only a zoom (a new width)
+        /// or an edit pays for the curve again.
+        /// </summary>
+        private readonly BakedTile[] bakedTiles = { new BakedTile(), new BakedTile() };
+
+        private sealed class BakedTile
+        {
+            public int Key;
+            public Rendering.BendGeometry Geometry;
+        }
+
         public override void Draw()
         {
             using (Managers.Telemetry.Scope("Draw.MiniPianoRoll"))
@@ -137,6 +174,13 @@ namespace GustUI.Elements
                 // as a texture of ticks rather than one indistinct band.
                 int noteHeight = Math.Max(MinNotePx, height / 24);
 
+                // Tiles the viewport does not show are skipped outright: a
+                // long Repeat clip is mostly off screen.
+                Vector4 clip = manager.LogicalClipBounds;
+                float visibleLeft = Math.Max(pos.X, clip.X);
+                float visibleRight = Math.Min(pos.X + totalWidth, clip.Z);
+                bool anyBent = HasBend(Notes) || HasBend(OverlayNotes);
+
                 int drawnWidth = 0;
                 for (int t = 0; t < tiles; t++)
                 {
@@ -153,12 +197,115 @@ namespace GustUI.Elements
                         continue;
                     }
 
+                    if (tileX > visibleRight || tileX + thisWidth < visibleLeft)
+                    {
+                        continue; // this tile is wholly off screen
+                    }
+
                     DrawNotes(manager, Notes, NoteColor, tileX, thisWidth, pos, height, noteHeight, range, fraction);
                     DrawNotes(manager, OverlayNotes, OverlayNoteColor, tileX, thisWidth, pos, height, noteHeight, range, fraction);
+
+                    if (anyBent)
+                    {
+                        // The bent layer draws over the flat one, own notes
+                        // then overlay, as the piano roll batches its bends.
+                        BakedTile slot = bakedTiles[last && fraction < 1f ? 1 : 0];
+                        int key = BakeKey(thisWidth, height, noteHeight, fraction);
+                        if (slot.Geometry == null || slot.Key != key)
+                        {
+                            slot.Geometry = BakeTile(thisWidth, height, noteHeight, range, fraction);
+                            slot.Key = key;
+                        }
+
+                        slot.Geometry.Draw(manager, new Vector2(tileX, pos.Y));
+                    }
                 }
             }
 
             base.Draw();
+        }
+
+        private static bool HasBend(List<MiniRollNote> notes)
+        {
+            foreach (MiniRollNote note in notes)
+            {
+                if (note.BendOffsets != null && note.BendOffsets.Length >= 2)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>Everything a baked tile's picture depends on, hashed. The
+        /// bend arrays count by IDENTITY: the host hands over a new array
+        /// whenever a bend or a note's length changes, and the same one
+        /// otherwise.</summary>
+        private int BakeKey(int width, int height, int noteHeight, float fraction)
+        {
+            var hash = new HashCode();
+            hash.Add(width);
+            hash.Add(height);
+            hash.Add(noteHeight);
+            hash.Add(fraction);
+            hash.Add(MinPitch);
+            hash.Add(MaxPitch);
+            hash.Add(BeatsVisible);
+            hash.Add(NoteColor);
+            hash.Add(OverlayNoteColor);
+            AddBentNotes(ref hash, Notes);
+            hash.Add(-1);
+            AddBentNotes(ref hash, OverlayNotes);
+            return hash.ToHashCode();
+        }
+
+        private static void AddBentNotes(ref HashCode hash, List<MiniRollNote> notes)
+        {
+            foreach (MiniRollNote note in notes)
+            {
+                if (note.BendOffsets == null || note.BendOffsets.Length < 2)
+                {
+                    continue;
+                }
+
+                hash.Add(note.Pitch);
+                hash.Add(note.StartBeats);
+                hash.Add(note.LengthBeats);
+                hash.Add(note.Velocity);
+                hash.Add(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(note.BendOffsets));
+            }
+        }
+
+        private Rendering.BendGeometry BakeTile(int width, int height, int noteHeight, float range, float fraction)
+        {
+            bendBatch.BeginBake();
+            AppendBentNotes(Notes, NoteColor, width, height, noteHeight, range, fraction);
+            AppendBentNotes(OverlayNotes, OverlayNoteColor, width, height, noteHeight, range, fraction);
+            return bendBatch.EndBake();
+        }
+
+        private void AppendBentNotes(List<MiniRollNote> notes, Color color,
+            int width, int height, int noteHeight, float range, float sourceFraction)
+        {
+            double visible = BeatsVisible * Math.Max(0.0001f, sourceFraction);
+            foreach (MiniRollNote note in notes)
+            {
+                if (note.BendOffsets == null || note.BendOffsets.Length < 2)
+                {
+                    continue;
+                }
+
+                float startT = (float)(note.StartBeats / visible);
+                float endT = (float)((note.StartBeats + note.LengthBeats) / visible);
+                if (endT <= 0f || startT >= 1f)
+                {
+                    continue; // wholly outside this tile
+                }
+
+                float alpha = 0.4f + 0.6f * MathHelper.Clamp(note.Velocity, 0f, 1f);
+                AppendBentNote(note, color * alpha, startT, endT, width, height, noteHeight, range);
+            }
         }
 
         private void DrawNotes(Managers.DrawManager manager, List<MiniRollNote> notes, Color color,
@@ -180,6 +327,13 @@ namespace GustUI.Elements
                     continue; // wholly outside this tile
                 }
 
+                if (note.BendOffsets != null && note.BendOffsets.Length >= 2)
+                {
+                    continue; // drawn from the baked tile (BakeTile)
+                }
+
+                float alpha = 0.4f + 0.6f * MathHelper.Clamp(note.Velocity, 0f, 1f);
+
                 startT = MathHelper.Clamp(startT, 0f, 1f);
                 endT = MathHelper.Clamp(endT, 0f, 1f);
 
@@ -195,9 +349,41 @@ namespace GustUI.Elements
                     (int)pos.Y,
                     (int)pos.Y + Math.Max(0, height - noteHeight));
 
-                float alpha = 0.4f + 0.6f * MathHelper.Clamp(note.Velocity, 0f, 1f);
                 manager.DrawFilledRectangle(new Rectangle(left, top, noteWidth, noteHeight), color * alpha);
             }
+        }
+
+        /// <summary>
+        /// One bent note as the shared <see cref="Rendering.BendBand"/>:
+        /// borderless, the SAME height as a straight note here, centred on the
+        /// sounding pitch exactly as a straight note's rectangle is centred on
+        /// its pitch — so a bent note and a flat one at the same pitch
+        /// coincide, and a pattern mixing them reads at one weight.
+        /// </summary>
+        private void AppendBentNote(MiniRollNote note, Color color, float startT, float endT,
+            int width, int height, int noteHeight, float range)
+        {
+            // Tile-local: x from 0 at the tile's left edge, y from 0 at the
+            // element's top.
+            float leftF = startT * width;
+            float rightF = endT * width;
+            float xStart = Math.Max(leftF, 0f);
+            float xEnd = Math.Min(rightF, width);
+            if (xEnd - xStart < 1f)
+            {
+                return;
+            }
+
+            // centre(p) = (1 - (p - MinPitch) / range) * height; the band's
+            // top sits half a note above it. A zero range (every sounding
+            // pitch equal) centres everything, as DrawNotes does.
+            float perSemitone = range > 0f ? -height / range : 0f;
+            float centreAtZero = range > 0f ? height * (1f + MinPitch / range) : height * 0.5f;
+            float topAtZero = centreAtZero - noteHeight / 2;
+
+            Rendering.BendBand.Append(bendBatch, note.BendOffsets, range > 0f ? note.Pitch : 0f,
+                leftF, rightF, xStart, xEnd, topAtZero, perSemitone, noteHeight,
+                color, Color.Transparent, 0f, height, MaxBendSamples);
         }
     }
 }
