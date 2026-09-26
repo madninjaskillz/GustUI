@@ -422,6 +422,11 @@ namespace GustUI.Elements
             {
                 dragBarElement.Set<OnMousePress>(new TVEvent<ClickEventArgs>((x) => dragHost.HandleTitleBarPress(x)));
                 dragBarElement.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => dragHost.HandleTitleBarRelease(x)));
+
+                // A drag cancelled by a waiting dialog puts the window back
+                // (#374) rather than dropping it where the pointer last was.
+                dragBarElement.AddTrait<OnPointerCaptureCancelled>().Set(
+                    new TVEvent<ClickEventArgs>((x) => dragHost.HandleTitleBarCancel(x)));
             }
 
             Setup();

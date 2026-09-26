@@ -499,6 +499,14 @@ namespace GustUI.Elements
                     }
 
                     ModalScrimElement.Ensure();
+
+                    // A drag already under way ends here (#374). Its capture
+                    // would otherwise keep feeding it held and release events
+                    // straight past the scrim, so a clip dragged when the
+                    // question arrived landed wherever the pointer was let go,
+                    // unseen, under the dialog. What was being dragged goes
+                    // back where it was where it knows how to.
+                    Resources.StaticResources?.InputManager?.CancelPointerCaptures();
                 }
 
                 if (Parent != null)
@@ -5210,16 +5218,21 @@ namespace GustUI.Elements
             {
                 float top = TopLimit();
                 float height = Math.Max(0f, windowSize.Y - top - Managers.DockLayout.BottomInset - BottomInset);
+                float natural = Managers.DockLayout.NaturalSize(this, horizontal: true);
                 float width = Managers.DockLayout.EffectiveSize(this, DockedSide);
                 float x = DockedSide == DockSide.Left ? stackOffset : windowSize.X - width - stackOffset;
 
                 Set<PositionTrait>(new TVVector(x, top));
                 Set<SizeTrait>(new TVVector(width, height));
+
+                // The clamp is what is drawn, not what is wanted (#379).
+                Managers.DockLayout.NoteDockedSize(this, natural, width);
             }
             else
             {
                 float leftInset = Managers.DockLayout.LeftInset;
                 float width = Math.Max(0f, windowSize.X - leftInset - Managers.DockLayout.RightInset);
+                float natural = Managers.DockLayout.NaturalSize(this, horizontal: false);
                 float height = Managers.DockLayout.EffectiveSize(this, DockedSide);
                 // A TOP dock measures from the top of the window plus whatever
                 // is stacked above it — NOT from TopLimit(), which is
@@ -5235,6 +5248,11 @@ namespace GustUI.Elements
 
                 Set<PositionTrait>(new TVVector(leftInset, y));
                 Set<SizeTrait>(new TVVector(width, height));
+
+                // The clamp is what is drawn, not what is wanted (#379): a
+                // window made smaller and then bigger again gets the panel's
+                // own height back rather than keeping the squeeze.
+                Managers.DockLayout.NoteDockedSize(this, natural, height);
             }
 
             // Docked content always spans the full authored width/height
@@ -5481,7 +5499,60 @@ namespace GustUI.Elements
             mergePressMouse = new Vector2(mouse.X, mouse.Y);
             mergeArmed = false;
 
+            // Where the window was, for a drag that is cancelled (#374).
+            titleDragFrom = (ElementTrait<PositionTrait>().Value(), DockedSide, isFullScreen);
+
             handleStartDrag(x);
+        }
+
+        /// <summary>Where a title-bar drag started: position, dock side and
+        /// whether the window was maximised. Null when no drag is under way.</summary>
+        private (TVVector Position, DockSide Side, bool Maximised)? titleDragFrom;
+
+        /// <summary>
+        /// A title-bar drag cancelled rather than dropped (ezmuze #374, a
+        /// waiting dialog opened mid-drag): the window goes back where it was
+        /// and nothing the drag was offering happens -- no dock, no merge. A
+        /// window pulled off a dock goes back onto it; one pulled out of
+        /// maximised is maximised again.
+        /// </summary>
+        internal void HandleTitleBarCancel(TVEventArgs x)
+        {
+            handleStopDrag(x);
+            dockPressMouse = null;
+            mergePressMouse = null;
+            mergeArmed = false;
+
+            if (tabMergeTarget != null)
+            {
+                tabMergeTarget = null;
+                TabMergePreviewOverlay.Hide();
+            }
+
+            ResetDockHoldGesture();
+
+            if (titleDragFrom is { } from)
+            {
+                titleDragFrom = null;
+                if (from.Side != DockSide.None)
+                {
+                    if (DockedSide == DockSide.None)
+                    {
+                        DockTo(from.Side);
+                    }
+                }
+                else if (from.Maximised)
+                {
+                    if (!isFullScreen)
+                    {
+                        ToggleFullScreen();
+                    }
+                }
+                else if (DockedSide == DockSide.None && from.Position != null)
+                {
+                    Set<PositionTrait>(new TVVector(from.Position.X, from.Position.Y));
+                }
+            }
         }
 
         /// <summary>Routed here (not straight to handleStopDrag) so a
@@ -5489,6 +5560,7 @@ namespace GustUI.Elements
         /// instead of leaving the modal floating at the raw drop point.</summary>
         internal void HandleTitleBarRelease(TVEventArgs x)
         {
+            titleDragFrom = null;
             handleStopDrag(x);
             dockPressMouse = null;
             mergePressMouse = null;

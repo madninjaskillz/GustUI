@@ -120,6 +120,10 @@ namespace GustUI.Managers
             // A panel that has left the dock keeps no claim on the boundary —
             // re-docking it later should start from its content size again.
             reservations.Remove(modal);
+
+            // ...nor on the size it wanted while docked (#379): off the dock it
+            // is a floating window again and its SizeTrait is simply its size.
+            preferred.Remove(modal);
         }
 
         /// <summary>
@@ -239,21 +243,65 @@ namespace GustUI.Managers
             Vector2 windowSize = Resources.StaticResources.RootWindow.GetSize().AsXna;
             float axisSize = horizontal ? windowSize.X : windowSize.Y;
 
-            float cap = 0.5f * axisSize;
             // The explicit boundary wins; the panel's own size is only the
             // default for one that has never been dragged.
             float natural = reservations.TryGetValue(modal, out float reserved)
                 ? reserved
-                : (horizontal ? modal.GetSize().X : modal.GetSize().Y);
+                : NaturalSize(modal, horizontal);
 
-            float own = Math.Min(natural, cap);
+            return Clamp(natural, axisSize, MaxFillerMinSize(horizontal), StackOffset(modal, side));
+        }
 
-            float fillerFloor = MaxFillerMinSize(horizontal);
+        /// <summary>The arithmetic of <see cref="EffectiveSize"/>, with the
+        /// window read out: <paramref name="natural"/> capped to half the axis
+        /// and to what is left once the biggest filler's floor and the panels
+        /// stacked outboard of this one have been paid for.</summary>
+        internal static float Clamp(float natural, float axisSize, float fillerFloor, float before)
+        {
+            float own = Math.Min(natural, 0.5f * axisSize);
             float budget = Math.Max(0f, axisSize - fillerFloor);
-            float before = StackOffset(modal, side);
             float remaining = Math.Max(0f, budget - before);
-
             return Math.Min(own, remaining);
+        }
+
+        // ---- the size a docked panel WANTS (ezmuze #379) ----------------------
+        //
+        // LayoutDocked renders a docked panel at its EFFECTIVE size, and has to
+        // write that into the panel's SizeTrait (hit-testing and the panel's own
+        // reflow read it). That same SizeTrait was also where EffectiveSize read
+        // the panel's natural size from, so every clamp became the new natural
+        // size: a small window squeezed the explorer to 118 px, and it stayed
+        // at 118 when the window grew again -- and went lower each time the
+        // window shrank. The fix keeps the two apart: what LayoutDocked wrote is
+        // remembered, and while the SizeTrait still holds exactly that, the
+        // panel still wants what it wanted before. Anything ELSE writing the
+        // size (the panel's own content reflow) is a new preference, taken as is.
+
+        private static readonly Dictionary<ModalWindowElement, (float Written, float Preferred)> preferred = new();
+
+        /// <summary>What a docked panel wants along its dock axis, before any
+        /// clamp: its preferred size while its SizeTrait still holds the value
+        /// <see cref="NoteDockedSize"/> last wrote, and its SizeTrait otherwise.</summary>
+        internal static float NaturalSize(ModalWindowElement modal, bool horizontal)
+        {
+            float current = horizontal ? modal.GetSize().X : modal.GetSize().Y;
+            return PreferredSize(current, preferred.TryGetValue(modal, out var note) ? note : null);
+        }
+
+        /// <summary>The rule <see cref="NaturalSize"/> applies, testable
+        /// without a window.</summary>
+        internal static float PreferredSize(float current, (float Written, float Preferred)? note)
+            => note is { } n && Math.Abs(current - n.Written) < 0.5f ? n.Preferred : current;
+
+        /// <summary>Records that <see cref="ModalWindowElement.LayoutDocked"/>
+        /// wrote <paramref name="written"/> into a panel that wanted
+        /// <paramref name="natural"/>.</summary>
+        internal static void NoteDockedSize(ModalWindowElement modal, float natural, float written)
+        {
+            if (modal != null)
+            {
+                preferred[modal] = (written, natural);
+            }
         }
 
         /// <summary>

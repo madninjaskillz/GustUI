@@ -6,6 +6,14 @@ namespace GustUI.Traits
 
     public class OnMousePress : Trait<TVEvent<ClickEventArgs>> { }
     public class OnMouseRelease : Trait<TVEvent<ClickEventArgs>> { }
+
+    // A captured gesture was cancelled rather than finished (ezmuze #374:
+    // InputManager.CancelPointerCaptures, raised when a waiting dialog opens
+    // mid-drag). Opt-in: an element that declares it puts things back as they
+    // were before the press and commits nothing; one that does not gets its
+    // ordinary release instead, at the pointer's last position before the
+    // cancel. Serves all three capture slots (left, middle, right).
+    public class OnPointerCaptureCancelled : Trait<TVEvent<ClickEventArgs>> { }
     public class OnHoverTrait : Trait<TVEvent<ClickEventArgs>> { }
     public class OnEnterTrait : Trait<TVEvent<ClickEventArgs>> { }
     public class OnExitTrait : Trait<TVEvent<ClickEventArgs>> { }

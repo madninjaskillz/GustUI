@@ -35,6 +35,16 @@ namespace GustUI.Managers
         /// whose hooks fire. 0 = base (no modal scope pushed).</summary>
         public int ActiveHookScope => hookScopeStack.Count > 0 ? hookScopeStack[hookScopeStack.Count - 1] : 0;
 
+        /// <summary>
+        /// The hook scope of an overlay drawn over every window (the ezmuze
+        /// full-screen visualiser, #380), or 0. While it is the active scope and
+        /// no waiting dialog is up, keys go to its hooks alone: open menus and
+        /// dialogs beneath it get none, because none of them can be seen.
+        /// Set it to the overlay's pushed scope when it opens and back to 0 when
+        /// it closes.
+        /// </summary>
+        public int OverlayHookScope { get; set; }
+
         /// <summary>Every pushed scope, bottom first, the active one last. For
         /// diagnostics: whether a view's scope is still on the stack is what
         /// says whether its shortcuts can ever fire again.</summary>
@@ -343,7 +353,136 @@ namespace GustUI.Managers
                 CapturedRightElement = null;
             }
         }
-        
+
+        // ---- cancelling a gesture (ezmuze #374) ----------------------------
+        //
+        // A capture outlives whatever appears on top of it: held and release
+        // go straight to the captured element before any hit-testing, so a
+        // clip drag that began before a waiting dialog opened carried on under
+        // the dialog and landed where the pointer was let go. Cancelling ends
+        // every capture at once, and the button that was driving it then reads
+        // as UP until it is physically let go, so the rest of the gesture
+        // reaches nobody at all.
+
+        /// <summary>The element whose capture release is being dispatched right
+        /// now, if any. A cancel raised from inside that release (the drop
+        /// opened a dialog) must not also cancel the gesture that is finishing
+        /// normally.</summary>
+        private Element releasingElement;
+
+        private bool maskLeft;
+        private bool maskMiddle;
+        private bool maskRight;
+
+        /// <summary>Which buttons are being held "up" after a cancel, until they
+        /// are physically released. For tests.</summary>
+        internal (bool Left, bool Middle, bool Right) MaskedButtons => (maskLeft, maskMiddle, maskRight);
+
+        /// <summary>Lets a test say where the pointer was last frame.</summary>
+        internal void SeedPreviousMouseState(MouseState state) => previousMouseState = state;
+
+        /// <summary>
+        /// Ends every pointer capture NOW (ezmuze #374: a waiting dialog opened
+        /// in the middle of a drag). Each captured element is told in one of two
+        /// ways:
+        ///
+        ///  - it declares <see cref="OnPointerCaptureCancelled"/>: that runs,
+        ///    and the element puts things back as they were before the press
+        ///    (a clip drag drops its preview and commits nothing);
+        ///  - it does not: it gets its ordinary release, at the position the
+        ///    pointer had BEFORE the cancel, so a gesture nobody taught to revert
+        ///    still ends cleanly on what the user last saw rather than staying
+        ///    half-done.
+        ///
+        /// Either way the button stays masked as released until it really is,
+        /// so the rest of the drag (held frames, the eventual release) reaches
+        /// nothing. Returns how many captures were cancelled.
+        /// </summary>
+        public int CancelPointerCaptures()
+        {
+            MouseState at = previousMouseState;
+            int cancelled = 0;
+
+            Element left = CapturedPointerElement;
+            if (left != null && !ReferenceEquals(left, releasingElement))
+            {
+                CapturedPointerElement = null;
+                maskLeft |= at.LeftButton == ButtonState.Pressed;
+                EndCaptured(left, at, e => e.HasTrait<OnMouseRelease>() ? e.ElementTrait<OnMouseRelease>().Value() : null);
+                cancelled++;
+            }
+
+            Element middle = CapturedMiddleElement;
+            if (middle != null && !ReferenceEquals(middle, releasingElement))
+            {
+                CapturedMiddleElement = null;
+                maskMiddle |= at.MiddleButton == ButtonState.Pressed;
+                EndCaptured(middle, at, e => e.HasTrait<OnMiddleMouseRelease>() ? e.ElementTrait<OnMiddleMouseRelease>().Value() : null);
+                cancelled++;
+            }
+
+            Element right = CapturedRightElement;
+            if (right != null && !ReferenceEquals(right, releasingElement))
+            {
+                CapturedRightElement = null;
+                maskRight |= at.RightButton == ButtonState.Pressed;
+                EndCaptured(right, at, e => e.HasTrait<OnRightMouseRelease>() ? e.ElementTrait<OnRightMouseRelease>().Value() : null);
+                cancelled++;
+            }
+
+            previousMouseState = Masked(previousMouseState);
+            currentlyClicked = new List<Element>();
+            return cancelled;
+        }
+
+        private static void EndCaptured(Element element, MouseState at, Func<Element, TVEvent<ClickEventArgs>> release)
+        {
+            TVEvent<ClickEventArgs> handler = element.HasTrait<OnPointerCaptureCancelled>()
+                ? element.ElementTrait<OnPointerCaptureCancelled>().Value()
+                : release(element);
+            handler?.TriggerAction?.Invoke(element.GetClickArgs(at));
+        }
+
+        /// <summary><paramref name="state"/> with every masked button read as
+        /// released.</summary>
+        private MouseState Masked(MouseState state)
+        {
+            if (!maskLeft && !maskMiddle && !maskRight)
+            {
+                return state;
+            }
+
+            return new MouseState(
+                state.X, state.Y, state.ScrollWheelValue, state.HorizontalScrollWheelValue,
+                state.RawX, state.RawY,
+                maskLeft ? ButtonState.Released : state.LeftButton,
+                maskMiddle ? ButtonState.Released : state.MiddleButton,
+                maskRight ? ButtonState.Released : state.RightButton,
+                state.XButton1, state.XButton2);
+        }
+
+        /// <summary>Lifts a button's mask the frame it is really let go, and
+        /// otherwise hides it.</summary>
+        private MouseState ApplyMasks(MouseState state)
+        {
+            if (maskLeft && state.LeftButton == ButtonState.Released)
+            {
+                maskLeft = false;
+            }
+
+            if (maskMiddle && state.MiddleButton == ButtonState.Released)
+            {
+                maskMiddle = false;
+            }
+
+            if (maskRight && state.RightButton == ButtonState.Released)
+            {
+                maskRight = false;
+            }
+
+            return Masked(state);
+        }
+
         internal int FloatedElementCount { get; private set; }
         internal string FloatedElementName { get; private set; }
 
@@ -828,9 +967,19 @@ namespace GustUI.Managers
             // its alone: Escape closes the menu and NOT the panel it came
             // from, Enter runs the item and NOT the sequencer's "open the
             // piano roll". Keys it does not use carry on as usual.
-            List<Keys> consumed = OfferNewKeys(keyboardState, previousKeyboardState, MenuKeyHandler);
+            // ---- ...unless a full-screen overlay owns the keyboard ----
+            //
+            // (ezmuze #380.) An overlay drawn over every window (the full-screen
+            // visualiser) is the only thing the user can see, so its own keys
+            // are the only ones that may run: Escape must close IT, not press
+            // Cancel on a dialog hidden beneath it, and no menu can be open
+            // behind it to take the key first. A waiting dialog always wins.
+            bool overlayOwnsKeys = OverlayHookScope != 0 && ActiveHookScope == OverlayHookScope
+                && Elements.ModalWindowElement.WaitingDialog == null;
 
-            foreach (Keys dialogKey in DialogKeys)
+            List<Keys> consumed = overlayOwnsKeys ? null : OfferNewKeys(keyboardState, previousKeyboardState, MenuKeyHandler);
+
+            foreach (Keys dialogKey in overlayOwnsKeys ? Array.Empty<Keys>() : DialogKeys)
             {
                 if (!keyboardState.IsKeyDown(dialogKey) || previousKeyboardState.IsKeyDown(dialogKey)
                     || IsConsumed(consumed, dialogKey))
@@ -1010,6 +1159,9 @@ namespace GustUI.Managers
         /// release, right-click; scroll only on the final pass per frame).</summary>
         private void ProcessMouseState(MouseState mouseState, bool isFinal)
         {
+            // A button whose gesture was cancelled reads as up until it is let
+            // go (#374), everywhere downstream, CurrentMouseState included.
+            mouseState = ApplyMasks(mouseState);
             CurrentMouseState = mouseState;
             int scrollWheel = mouseState.ScrollWheelValue;
 
@@ -1079,7 +1231,15 @@ namespace GustUI.Managers
                 {
                     if (previousMouseState.LeftButton == ButtonState.Pressed && captured.HasTrait<OnMouseRelease>())
                     {
-                        captured.ElementTrait<OnMouseRelease>().Value().TriggerAction?.Invoke(captured.GetClickArgs(mouseState));
+                        releasingElement = captured;
+                        try
+                        {
+                            captured.ElementTrait<OnMouseRelease>().Value().TriggerAction?.Invoke(captured.GetClickArgs(mouseState));
+                        }
+                        finally
+                        {
+                            releasingElement = null;
+                        }
                     }
 
                     CapturedPointerElement = null;
@@ -1200,7 +1360,15 @@ namespace GustUI.Managers
                 {
                     if (wasDown && captured.HasTrait<OnMiddleMouseRelease>())
                     {
-                        captured.ElementTrait<OnMiddleMouseRelease>().Value().TriggerAction?.Invoke(captured.GetClickArgs(mouseState));
+                        releasingElement = captured;
+                        try
+                        {
+                            captured.ElementTrait<OnMiddleMouseRelease>().Value().TriggerAction?.Invoke(captured.GetClickArgs(mouseState));
+                        }
+                        finally
+                        {
+                            releasingElement = null;
+                        }
                     }
 
                     CapturedMiddleElement = null;
@@ -1267,7 +1435,15 @@ namespace GustUI.Managers
                 {
                     if (wasDown && captured.HasTrait<OnRightMouseRelease>())
                     {
-                        captured.ElementTrait<OnRightMouseRelease>().Value().TriggerAction?.Invoke(captured.GetClickArgs(mouseState));
+                        releasingElement = captured;
+                        try
+                        {
+                            captured.ElementTrait<OnRightMouseRelease>().Value().TriggerAction?.Invoke(captured.GetClickArgs(mouseState));
+                        }
+                        finally
+                        {
+                            releasingElement = null;
+                        }
                     }
 
                     CapturedRightElement = null;
