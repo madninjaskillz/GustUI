@@ -810,6 +810,96 @@ namespace GustUI.Elements
         /// offers it at all. Every tab keeps the slot regardless.</summary>
         internal static bool TabShowsMaximise(bool isActive, DockSide docked) => isActive && OffersMaximise(docked);
 
+        /// <summary>Whether the maximise square shows its restore glyph:
+        /// maximised, or filling the free space (ezmuze #401). A window that
+        /// fills the space beside the docks is maximised within them, so it
+        /// offers to restore, not to maximise into the rect it already
+        /// occupies.</summary>
+        internal bool ShowsRestore => ShowsRestoreGlyph(isFullScreen, FillsAvailableSpace);
+
+        /// <summary>The rule behind <see cref="ShowsRestore"/>.</summary>
+        internal static bool ShowsRestoreGlyph(bool maximised, bool filling) => maximised || filling;
+
+        /// <summary>What a press of the maximise square (or the active tab's
+        /// maximise glyph) does.</summary>
+        internal enum MaximisePress
+        {
+            /// <summary>Docked: the dock owns the geometry (#366).</summary>
+            Nothing,
+
+            /// <summary>Floating: maximise, remembering this rect to restore to.</summary>
+            Maximise,
+
+            /// <summary>Maximised: restore to the remembered rect, or 70%.</summary>
+            Restore,
+
+            /// <summary>Filling the free space (#401): stop filling and float
+            /// at 70% of it, held to the minimum and the free space (#400).
+            /// A window both filling and maximised (the sequencer rebuilt
+            /// maximised) restores to its remembered rect instead.</summary>
+            RestoreFromFilling,
+        }
+
+        /// <summary>The rule behind <see cref="ToggleMaximise"/>.</summary>
+        internal static MaximisePress PressOfMaximise(DockSide docked, bool maximised, bool filling)
+        {
+            if (!OffersMaximise(docked))
+            {
+                return MaximisePress.Nothing;
+            }
+
+            if (filling)
+            {
+                return MaximisePress.RestoreFromFilling;
+            }
+
+            return maximised ? MaximisePress.Restore : MaximisePress.Maximise;
+        }
+
+        /// <summary>
+        /// The maximise square's press, from the title bar or the active tab.
+        ///
+        /// FILLING IS MAXIMISED (ezmuze #401). A window filling the free space
+        /// used to take the press as a plain maximise: it flagged itself
+        /// maximised, the fill layout went on writing the same rect every
+        /// frame, and nothing moved. The second press started a 70% restore
+        /// that the fill layout overwrote every frame, so it never arrived --
+        /// until the title bar was dragged, which stops the filling, and the
+        /// window shrank under the pointer. Now the press restores: the window
+        /// stops filling and floats at 70% of the space, as a maximised window
+        /// with nowhere of its own to go back to does (#367, #400). Maximise
+        /// on it afterwards is the ordinary one, and restore then comes back
+        /// to where it floated.
+        /// </summary>
+        internal void ToggleMaximise()
+        {
+            switch (PressOfMaximise(DockedSide, isFullScreen, FillsAvailableSpace))
+            {
+                case MaximisePress.Nothing:
+                    return;
+
+                case MaximisePress.RestoreFromFilling:
+                    FillsAvailableSpace = false;
+                    CancelSizeTransition();
+                    if (!isFullScreen)
+                    {
+                        // Leave it as a window maximised with no rect of its
+                        // own, so the restore below takes the 70% fallback
+                        // from the rect it fills now -- not a stale rect from
+                        // some earlier maximise.
+                        isFullScreen = true;
+                        FullScreenRestoreBounds = (null, null);
+                    }
+
+                    ToggleFullScreen();
+                    return;
+
+                default:
+                    ToggleFullScreen();
+                    return;
+            }
+        }
+
         /// <summary>
         /// The pin glyph's colour and its small up/down mark, shared by the
         /// title bar and the tab strip: the idle glyph colour when normal, the
@@ -1723,7 +1813,7 @@ namespace GustUI.Elements
                 entry.Maximise.Set<SizeTrait>(new TVVector(TabCloseSize, TabCloseSize));
                 entry.Maximise.Set<TextTrait>(new TVText(!TabShowsMaximise(isActive, DockedSide)
                     ? string.Empty
-                    : isFullScreen
+                    : ShowsRestore
                         ? Resources.StaticResources.Theme.Icons.MinimizeIcon
                         : Resources.StaticResources.Theme.Icons.MaximizeIcon));
 
@@ -1832,14 +1922,8 @@ namespace GustUI.Elements
 
             entry.Maximise = TabGlyph(button, "maximise",
                 new TVText(Resources.StaticResources.Theme.Icons.MaximizeIcon),
-                () => ShowsMaximise ? "Maximise this window" : string.Empty,
-                () =>
-                {
-                    if (DockedSide == DockSide.None)
-                    {
-                        ToggleFullScreen();
-                    }
-                });
+                () => !ShowsMaximise ? string.Empty : ShowsRestore ? "Restore this window" : "Maximise this window",
+                ToggleMaximise);
 
             button.Set<OnMousePress>(new TVEvent<ClickEventArgs>(args => BeginTabDrag(entry, args)));
 
@@ -4605,6 +4689,11 @@ namespace GustUI.Elements
                     {
                         AbsorbResizeIntoDocks();
                     }
+
+                    // The fill owns the geometry, so a maximise/restore
+                    // transition can never arrive while it lasts. Drop it
+                    // rather than let it finish on the next drag (#401).
+                    CancelSizeTransition();
 
                     var fill = Managers.DockLayout.AvailableRect(BottomInset, MinSize);
                     Set<PositionTrait>(new TVVector(fill.Position));

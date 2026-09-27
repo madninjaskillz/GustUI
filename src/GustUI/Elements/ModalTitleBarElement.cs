@@ -381,11 +381,10 @@ namespace GustUI.Elements
                     // the very next frame. No-op instead — same treatment
                     // ResizeHandlesElement now gives its own handles while
                     // docked.
-                    var modalWindow = (ModalWindowElement)Parent;
-                    if (modalWindow.DockedSide == DockSide.None)
-                    {
-                        modalWindow.ToggleFullScreen();
-                    }
+                    //
+                    // A window filling the free space restores rather than
+                    // maximising in place (#401): see ToggleMaximise.
+                    ((ModalWindowElement)Parent).ToggleMaximise();
                 }));
                 sizeButton.Set<OnEnterTrait>(new TVEvent<ClickEventArgs>((x) =>
                 {
@@ -495,7 +494,7 @@ namespace GustUI.Elements
                 sizeButton.Visible = !ChromeHidden && MaximiseShowing;
                 sizeButton.Set<PositionTrait>(new TVVector(size.X - CloseAndSizeWidth, 0));
                 sizeButton.Set<SizeTrait>(new TVVector(BarHeight, BarHeight));
-                sizeButton.Set<TextTrait>(((ModalWindowElement)Parent).isFullScreen ? Resources.StaticResources.Theme.Icons.MinimizeIcon.ToTextTrait() : Resources.StaticResources.Theme.Icons.MaximizeIcon.ToTextTrait());
+                sizeButton.Set<TextTrait>(((ModalWindowElement)Parent).ShowsRestore ? Resources.StaticResources.Theme.Icons.MinimizeIcon.ToTextTrait() : Resources.StaticResources.Theme.Icons.MaximizeIcon.ToTextTrait());
             }
 
             if (pinButton != null)

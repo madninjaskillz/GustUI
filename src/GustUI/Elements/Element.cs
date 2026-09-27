@@ -348,6 +348,21 @@ public class Element : IDisposable
         }
     }
 
+    /// <summary>Whether a maximise/restore transition is still on its way to
+    /// its target.</summary>
+    internal bool SizeTransitionPending => sizeTransition;
+
+    /// <summary>Drops a maximise/restore transition that is still on its way
+    /// (ezmuze #401). Something else owns this element's geometry (a window
+    /// filling the free space), so the transition can never arrive while that
+    /// lasts. Left running, it arrived the moment that stopped: on the next
+    /// title-bar drag, shrinking the window under the pointer.</summary>
+    internal void CancelSizeTransition()
+    {
+        sizeTransition = false;
+        positionSettleFrames = 0;
+    }
+
 
     public T AddChildElement<T>(string name = null) where T : Element
     {
