@@ -232,6 +232,17 @@ public class Element : IDisposable
     /// <see cref="FullScreenTargetPosition"/>.</summary>
     protected virtual Vector2 FullScreenTargetSize() => Resources.StaticResources.RootWindow.GetSize().AsXna;
 
+    /// <summary>The size a window leaving maximised actually takes, given the
+    /// one it would restore to. The base element has no minimum and takes it
+    /// as is; <see cref="ModalWindowElement"/> keeps it between its
+    /// <c>MinSize</c> and the free space (ezmuze #400).</summary>
+    protected virtual Vector2 RestoredSize(Vector2 size) => size;
+
+    /// <summary>Where a window leaving maximised at <paramref name="size"/>
+    /// actually goes, given where it would. The base element takes it as is;
+    /// <see cref="ModalWindowElement"/> keeps it inside the free space.</summary>
+    protected virtual Vector2 RestoredPosition(Vector2 position, Vector2 size) => position;
+
     /// <summary>Below this many px of difference on either axis, a captured
     /// "previous size" counts as "the same as fullscreen" — floats from a
     /// lerped transition rarely land on an exact integer, and a handful of
@@ -315,15 +326,22 @@ public class Element : IDisposable
                 && (Math.Abs(fs_presize.AsXna.X - fullSize.X) > FullScreenSizeEqualityToleragePx
                     || Math.Abs(fs_presize.AsXna.Y - fullSize.Y) > FullScreenSizeEqualityToleragePx);
 
+            //
+            // Either way the result goes through RestoredSize and
+            // RestoredPosition, so a restore never lands below the window's
+            // minimum or outside the space it floats in (ezmuze #400): the 70%
+            // of a sequencer maximised beside a bottom dock (1052 x 260) was
+            // 736 x 182, under its 260 minimum, and a remembered size or
+            // place can come from a roomier layout.
             if (hasDistinctPreviousSize)
             {
-                desired_size = fs_presize.AsXna;
-                desired_position = fs_prepos.AsXna;
+                desired_size = RestoredSize(fs_presize.AsXna);
+                desired_position = RestoredPosition(fs_prepos.AsXna, desired_size);
             }
             else
             {
-                desired_size = fullSize * 0.7f;
-                desired_position = fullCenter - desired_size / 2f;
+                desired_size = RestoredSize(fullSize * 0.7f);
+                desired_position = RestoredPosition(fullCenter - desired_size / 2f, desired_size);
             }
 
             sizeTransition = true;
@@ -920,7 +938,9 @@ public class Element : IDisposable
         if (isFullScreen)
         {
             ToggleFullScreen();
-            desired_position = new Vector2(fs_prepos.AsXna.X, FullScreenTargetPosition().Y);
+            // No remembered position (a window made maximised directly, with
+            // no restore bounds) keeps the centred one ToggleFullScreen chose.
+            desired_position = new Vector2(fs_prepos?.AsXna.X ?? desired_position.X, FullScreenTargetPosition().Y);
         }
 
         BeingDragged = true;

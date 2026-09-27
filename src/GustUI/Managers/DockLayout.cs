@@ -396,6 +396,13 @@ namespace GustUI.Managers
                 ? reserved
                 : NaturalSize(modal, horizontal);
 
+            // Never thinner than the window's own minimum across the dock,
+            // where the caps below allow it (ezmuze #400): a sequencer that
+            // came off maximised at 182 docked top at 182 of its 260, with a
+            // 78 px gap above the explorer. The splitter's reservation is
+            // floored here too, so dragging the boundary stops at it.
+            natural = OwnFloor(natural, horizontal ? modal.MinSize.X : modal.MinSize.Y);
+
             float floor = Math.Max(MaxFillerMinSize(horizontal), LaterCrossDockFloor(modal, horizontal));
             floor = Math.Max(floor, LaterOppositeDockFloor(modal, side));
 
@@ -585,6 +592,9 @@ namespace GustUI.Managers
                 opposite = Math.Min(opposite, Math.Max(0f, axis - minAcross - chrome));
             }
 
+            // Docked, it is never thinner than its own minimum (#400).
+            natural = OwnFloor(natural, minAcross);
+
             float thickness = Clamp(natural, axis, Math.Max(fillerFloor, chrome), sameSide + opposite);
 
             // The end dock (bottom, or right) gives way to the new dock's
@@ -599,6 +609,13 @@ namespace GustUI.Managers
 
             return DockRect(side, window, thickness, sameSide, startInset, endInset, chromeBottom);
         }
+
+        /// <summary>What a docked window wants across its dock once its own
+        /// minimum is counted: <paramref name="natural"/>, raised to
+        /// <paramref name="minimum"/>. The caps in <see cref="Clamp"/> still
+        /// apply on top (half the axis, and the room other windows need), so
+        /// the minimum holds wherever the free space allows (ezmuze #400).</summary>
+        internal static float OwnFloor(float natural, float minimum) => Math.Max(natural, minimum);
 
         /// <summary>The arithmetic of <see cref="EffectiveSize"/>, with the
         /// window read out: <paramref name="natural"/> capped to half the axis

@@ -175,7 +175,9 @@ public class DockSplitterElement : Element
         // A floor rather than zero: a panel dragged to nothing is unrecoverable
         // without finding a 7px strip against the screen edge. DockLayout still
         // applies its own ceilings (half the axis, and whatever the fillers
-        // need), so this only has to stop the bottom end.
+        // need), so this only has to stop the bottom end. DockLayout also
+        // floors the result at the panel's own minimum (ezmuze #400), so a
+        // panel with one stops there rather than at 48.
         DockLayout.SetReservation(panel, Math.Max(48f, size));
     }
 

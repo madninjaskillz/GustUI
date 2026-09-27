@@ -5150,8 +5150,50 @@ namespace GustUI.Elements
                 target = current * UndockShrink;
             }
 
-            target = Vector2.Min(target, freeSize);
-            return Vector2.Max(minSize, target);
+            return FloatingSize(target, minSize, freeSize);
+        }
+
+        /// <summary>
+        /// The one rule for a size a window takes as it starts floating, off a
+        /// dock (<see cref="OffDockSize"/>) or out of maximised
+        /// (<see cref="RestoredSize"/>): no bigger than the free space, and
+        /// never below its minimum. The minimum wins when the two disagree,
+        /// as it does everywhere else a window is sized (ezmuze #400: the
+        /// restore path had neither, and a sequencer maximised beside a
+        /// bottom dock came back at 736 x 182, under its 260 minimum).
+        /// </summary>
+        internal static Vector2 FloatingSize(Vector2 size, Vector2 minSize, Vector2 freeSize) =>
+            Vector2.Max(minSize, Vector2.Min(size, freeSize));
+
+        /// <summary>A restore from maximised keeps to this window's minimum and
+        /// the free space (ezmuze #400) — see <see cref="FloatingSize"/>.</summary>
+        protected override Vector2 RestoredSize(Vector2 size) =>
+            FloatingSize(size, MinSize, FullScreenTargetSize());
+
+        /// <summary>A restore from maximised lands inside the free space
+        /// (ezmuze #400) — see <see cref="FloatingPosition"/>.</summary>
+        protected override Vector2 RestoredPosition(Vector2 position, Vector2 size)
+        {
+            (Vector2 freePosition, Vector2 freeSize) = Managers.DockLayout.AvailableRect(BottomInset);
+            return FloatingPosition(position, size, freePosition, freeSize);
+        }
+
+        /// <summary>
+        /// <paramref name="position"/> moved just far enough that a window of
+        /// <paramref name="size"/> lies inside the free space, on each axis
+        /// where it fits; where it does not, it starts at the free space's
+        /// near edge. A restore held at its minimum is taller than the size it
+        /// remembered, and without this it hung over the dock below it
+        /// (ezmuze #400: 260 tall at y = 43, over an explorer at 260).
+        /// </summary>
+        internal static Vector2 FloatingPosition(Vector2 position, Vector2 size, Vector2 freePosition, Vector2 freeSize)
+        {
+            static float Axis(float at, float length, float start, float room) =>
+                length >= room ? start : Math.Clamp(at, start, start + room - length);
+
+            return new Vector2(
+                Axis(position.X, size.X, freePosition.X, freeSize.X),
+                Axis(position.Y, size.Y, freePosition.Y, freeSize.Y));
         }
 
         /// <summary>Whether a window of <paramref name="size"/> is filling
