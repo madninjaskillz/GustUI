@@ -20,6 +20,11 @@ namespace GustUI.Elements
         TextElement textElement;
         TextElement moreElement;
         MenuItemModel _menuItem;
+
+        /// <summary>The item's enabled state and label as they were when this
+        /// row was built — see the constructor (#411).</summary>
+        private readonly bool enabled;
+        private readonly string label;
         FruitPopupMenu popup = null;
         /// <summary>
         /// How long the pointer has dwelt on this row, counted in frames: a
@@ -164,19 +169,27 @@ namespace GustUI.Elements
         {
             _menuItem = menuItem;
 
+            // Asked ONCE, now (#411): a row is built when its menu opens, so
+            // this is the moment a live EnabledWhen/TextWhen is answered. The
+            // row then keeps that answer while it is up rather than greying
+            // or relabelling under the pointer, and a click, the keyboard
+            // and the drawing all agree about it.
+            enabled = menuItem.Enabled;
+
             // Same rule as the bar above it (#224): the rows of a menu are
             // pressable, except the ones that are not.
-            AddTrait<CursorTrait>().Set(new TVText(menuItem.Enabled
+            AddTrait<CursorTrait>().Set(new TVText(enabled
                 ? Managers.StandardCursors.PointingHand
                 : Managers.StandardCursors.Forbidden));
 
             var icon = menuItem.Icon;
-            var text = menuItem.Text;
+            var text = menuItem.Text ?? "";
+            label = text;
             var action = actionOverride != null ? actionOverride : (x)=>{
                 // Disabled items ignore clicks entirely (the popup stays open,
                 // matching native menus); enabled items without an Action are
                 // placeholders and must not NRE — they just close the menu.
-                if (!menuItem.Enabled)
+                if (!enabled)
                 {
                     return;
                 }
@@ -278,7 +291,7 @@ namespace GustUI.Elements
                         var modElement = this.AddChildElement<FilledRectangleElement>();
                         modElement.Set<PositionTrait>(new TVVector(ps, height));
                         modElement.Set<SizeTrait>(new TVVector(iconSize, iconHeight));
-                        modElement.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.KBModifiers[mod].SetOpacity(menuItem.Enabled ? 1 : 0.5f));
+                        modElement.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.KBModifiers[mod].SetOpacity(enabled ? 1 : 0.5f));
 
                         ps += iconSize + 2;
                     }
@@ -286,7 +299,7 @@ namespace GustUI.Elements
                     keyElement.Set<PositionTrait>(new TVVector(ps, height));
                     keyElement.Set<SizeTrait>(new TVVector(22, iconHeight));
                     keyElement.Set<FontTrait>(Resources.StaticResources.Theme.MenuFont);
-                    keyElement.Set<ForegroundColorTrait>(Ink(Color.Black, menuItem.Enabled ? 1f : 0.5f));
+                    keyElement.Set<ForegroundColorTrait>(Ink(Color.Black, enabled ? 1f : 0.5f));
                     keyElement.Set<TextTrait>(new TVText(menuItem.Shortcut.Key.ToString()));
                 }
             }
@@ -308,7 +321,7 @@ namespace GustUI.Elements
             textElement.Set<ForegroundColorTrait>(Ink(Color.Black));
             textElement.Set<TextTrait>(new TVText(TextElement.Ellipsise(text, labelWidth, labelFont)));
 
-            if (!menuItem.Enabled)
+            if (!enabled)
             {
                 textElement.Set<ForegroundColorTrait>(Ink(Color.Black, 0.5f));
                 Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
@@ -335,8 +348,8 @@ namespace GustUI.Elements
         /// <summary>Whether a keyboard can land on this row: a separator has
         /// nothing to land on and a disabled row has nothing to do.</summary>
         internal bool Selectable => _menuItem != null
-                                    && !string.IsNullOrEmpty(_menuItem.Text)
-                                    && _menuItem.Enabled;
+                                    && !string.IsNullOrEmpty(label)
+                                    && enabled;
 
         internal bool HasSubmenu => _menuItem?.SubItems?.Count > 0;
 
