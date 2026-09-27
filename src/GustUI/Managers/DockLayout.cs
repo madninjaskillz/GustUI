@@ -107,7 +107,145 @@ namespace GustUI.Managers
         internal static void Register(ModalWindowElement modal, DockSide side)
         {
             Unregister(modal); // idempotent: re-docking (e.g. left -> right) just moves it
-            StackFor(side)?.Add(modal);
+            List<ModalWindowElement> stack = StackFor(side);
+            if (stack != null)
+            {
+                stack.Add(modal);
+                dockedAt[modal] = ++dockSequence;
+            }
+        }
+
+        // ---- who owns a corner (ezmuze #384) ------------------------------------
+        //
+        // A side dock and a bottom (or top) dock meet in a corner, and each used
+        // to leave it to the other: a side dock stopped at the bottom docks'
+        // edge, and a bottom dock started at the side docks' edge. With the
+        // explorer docked along the bottom and the sequencer then docked left,
+        // the block below the one and beside the other belonged to nobody:
+        // 1126 x 330 px of bare backdrop. Now the dock that was there FIRST keeps
+        // the corner and the later one fits inside it, which is exactly what the
+        // dock preview (DockPreviewOverlay) has always shown while you hold.
+        // Docking something never moves or narrows a panel already docked.
+
+        /// <summary>When each docked window docked, so the earlier of two
+        /// perpendicular docks can keep the corner they share.</summary>
+        private static readonly Dictionary<ModalWindowElement, long> dockedAt = new();
+
+        private static long dockSequence;
+
+        /// <summary>
+        /// How much of <paramref name="side"/> is taken, as far as
+        /// <paramref name="modal"/> is concerned: the panels docked to that side
+        /// BEFORE it was. They keep the corners they share with it, so its span
+        /// stops at them; panels docked later sit inside its span instead.
+        /// </summary>
+        internal static float InsetBefore(ModalWindowElement modal, DockSide side)
+        {
+            List<ModalWindowElement> stack = StackFor(side);
+            if (stack == null)
+            {
+                return 0f;
+            }
+
+            if (!dockedAt.TryGetValue(modal, out long mine))
+            {
+                return Reserved(stack, side);
+            }
+
+            // Every docked window asks this every frame: one scratch list, not
+            // one per call. The UI is single-threaded, and EffectiveSize (below)
+            // never comes back in here.
+            insetScratch.Clear();
+            foreach (ModalWindowElement other in stack)
+            {
+                insetScratch.Add((dockedAt.TryGetValue(other, out long theirs) ? theirs : long.MaxValue, EffectiveSize(other, side)));
+            }
+
+            return SumDockedBefore(insetScratch, mine);
+        }
+
+        private static readonly List<(long Order, float Size)> insetScratch = new();
+
+        /// <summary>The arithmetic of <see cref="InsetBefore"/>: the total depth
+        /// of the docks that docked before <paramref name="mine"/>.</summary>
+        internal static float SumDockedBefore(IReadOnlyList<(long Order, float Size)> docks, long mine)
+        {
+            float sum = 0f;
+            foreach ((long order, float size) in docks)
+            {
+                if (order < mine)
+                {
+                    sum += size;
+                }
+            }
+
+            return sum;
+        }
+
+        /// <summary>Where a docked window sits: its index in its side's stack
+        /// and when it docked. Null when it is not docked.</summary>
+        internal static (int Index, long Order)? PlacementOf(ModalWindowElement modal)
+        {
+            if (modal == null || !dockedAt.TryGetValue(modal, out long order))
+            {
+                return null;
+            }
+
+            foreach (DockSide side in new[] { DockSide.Left, DockSide.Right, DockSide.Top, DockSide.Bottom })
+            {
+                int index = StackFor(side).IndexOf(modal);
+                if (index >= 0)
+                {
+                    return (index, order);
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Puts a window that has just re-docked back in the slot it held
+        /// before: the same place in its side's stack and the same docking
+        /// order, so it is beside the same panels and keeps the corners it
+        /// had. For a drag that is cancelled (#374): docking afresh would put
+        /// it at the inboard end, as the newest dock.
+        /// </summary>
+        internal static void RestorePlacement(ModalWindowElement modal, DockSide side, (int Index, long Order) placement)
+        {
+            List<ModalWindowElement> stack = StackFor(side);
+            if (stack == null || !stack.Remove(modal))
+            {
+                return;
+            }
+
+            stack.Insert(Math.Clamp(placement.Index, 0, stack.Count), modal);
+            dockedAt[modal] = placement.Order;
+        }
+
+        /// <summary>
+        /// The rectangle a docked panel occupies. Along its own edge it runs
+        /// from <paramref name="startInset"/> to <paramref name="endInset"/> (the
+        /// perpendicular docks that were there first, see
+        /// <see cref="InsetBefore"/>: the top and bottom ones for a side dock,
+        /// the left and right ones for a top or bottom dock). Across it, it is
+        /// <paramref name="thickness"/> deep and <paramref name="stackOffset"/>
+        /// in from the window's edge. <paramref name="chromeBottom"/> is the
+        /// app's own strip along the bottom (the status bar), which every dock
+        /// stops above.
+        /// </summary>
+        internal static (Vector2 Position, Vector2 Size) DockRect(DockSide side, Vector2 window,
+            float thickness, float stackOffset, float startInset, float endInset, float chromeBottom)
+        {
+            if (side == DockSide.Left || side == DockSide.Right)
+            {
+                float height = Math.Max(0f, window.Y - startInset - endInset - chromeBottom);
+                float x = side == DockSide.Left ? stackOffset : window.X - thickness - stackOffset;
+                return (new Vector2(x, startInset), new Vector2(thickness, height));
+            }
+
+            float width = Math.Max(0f, window.X - startInset - endInset);
+            float y = side == DockSide.Top ? stackOffset : window.Y - chromeBottom - thickness - stackOffset;
+            return (new Vector2(startInset, y), new Vector2(width, thickness));
         }
 
         internal static void Unregister(ModalWindowElement modal)
@@ -116,6 +254,8 @@ namespace GustUI.Managers
             rightStack.Remove(modal);
             topStack.Remove(modal);
             bottomStack.Remove(modal);
+
+            dockedAt.Remove(modal);
 
             // A panel that has left the dock keeps no claim on the boundary —
             // re-docking it later should start from its content size again.

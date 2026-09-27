@@ -1572,6 +1572,12 @@ namespace GustUI.Elements
                 // thrown away the next frame.
                 tabStrip.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>(HandleTitleBarRelease));
 
+                // And a drag from the strip cancelled by a waiting dialog puts
+                // the window back, as one from the title bar does (#374, #383).
+                // Without it the cancel fell back to the ordinary release above,
+                // which docks or merges wherever the drag was offering to.
+                tabStrip.AddTrait<OnPointerCaptureCancelled>().Set(new TVEvent<ClickEventArgs>(HandleTitleBarCancel));
+
                 AddChildElement(tabStrip);
 
                 foreach (Tab pending in tabs)
@@ -1816,6 +1822,7 @@ namespace GustUI.Elements
             // close or pop-out glyph (which starts no drag) arms nothing, so
             // it only ends a drag that never began.
             button.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>(HandleTitleBarRelease));
+            button.AddTrait<OnPointerCaptureCancelled>().Set(new TVEvent<ClickEventArgs>(HandleTitleBarCancel));
 
             entry.Button = button;
 
@@ -5214,46 +5221,33 @@ namespace GustUI.Elements
             Vector2 windowSize = Resources.StaticResources.RootWindow.GetSize().AsXna;
             float stackOffset = Managers.DockLayout.StackOffset(this, DockedSide);
 
-            if (DockedSide == DockSide.Left || DockedSide == DockSide.Right)
-            {
-                float top = TopLimit();
-                float height = Math.Max(0f, windowSize.Y - top - Managers.DockLayout.BottomInset - BottomInset);
-                float natural = Managers.DockLayout.NaturalSize(this, horizontal: true);
-                float width = Managers.DockLayout.EffectiveSize(this, DockedSide);
-                float x = DockedSide == DockSide.Left ? stackOffset : windowSize.X - width - stackOffset;
+            // Along its edge a dock stops only at the perpendicular docks that
+            // were there before it. Those keep the corner, and ones docked after
+            // it fit inside its span instead (#384). Each used to stop at ALL of
+            // the other's docks, so a side dock and a bottom dock both left their
+            // shared corner to the other and nothing filled it.
+            //
+            // A TOP dock's own position is its stack offset, NOT TopLimit(),
+            // which is DockLayout.TopInset and therefore includes this very
+            // panel's own reservation. That circularity put a top-docked panel
+            // below the space it was itself reserving, landing it on top of the
+            // window it was supposed to be making room beside. StackOffset
+            // excludes self by construction.
+            bool alongSide = DockedSide == DockSide.Left || DockedSide == DockSide.Right;
+            float natural = Managers.DockLayout.NaturalSize(this, alongSide);
+            float thickness = Managers.DockLayout.EffectiveSize(this, DockedSide);
+            float startInset = Managers.DockLayout.InsetBefore(this, alongSide ? DockSide.Top : DockSide.Left);
+            float endInset = Managers.DockLayout.InsetBefore(this, alongSide ? DockSide.Bottom : DockSide.Right);
+            (Vector2 dockPosition, Vector2 dockSize) = Managers.DockLayout.DockRect(
+                DockedSide, windowSize, thickness, stackOffset, startInset, endInset, BottomInset);
 
-                Set<PositionTrait>(new TVVector(x, top));
-                Set<SizeTrait>(new TVVector(width, height));
+            Set<PositionTrait>(new TVVector(dockPosition));
+            Set<SizeTrait>(new TVVector(dockSize));
 
-                // The clamp is what is drawn, not what is wanted (#379).
-                Managers.DockLayout.NoteDockedSize(this, natural, width);
-            }
-            else
-            {
-                float leftInset = Managers.DockLayout.LeftInset;
-                float width = Math.Max(0f, windowSize.X - leftInset - Managers.DockLayout.RightInset);
-                float natural = Managers.DockLayout.NaturalSize(this, horizontal: false);
-                float height = Managers.DockLayout.EffectiveSize(this, DockedSide);
-                // A TOP dock measures from the top of the window plus whatever
-                // is stacked above it — NOT from TopLimit(), which is
-                // DockLayout.TopInset and therefore includes this very panel's
-                // own reservation. That circularity put a top-docked panel
-                // below the space it was itself reserving, landing it on top of
-                // the window it was supposed to be making room beside.
-                // StackOffset is the right quantity because it excludes self by
-                // construction.
-                float y = DockedSide == DockSide.Top
-                    ? stackOffset
-                    : windowSize.Y - BottomInset - height - stackOffset;
-
-                Set<PositionTrait>(new TVVector(leftInset, y));
-                Set<SizeTrait>(new TVVector(width, height));
-
-                // The clamp is what is drawn, not what is wanted (#379): a
-                // window made smaller and then bigger again gets the panel's
-                // own height back rather than keeping the squeeze.
-                Managers.DockLayout.NoteDockedSize(this, natural, height);
-            }
+            // The clamp is what is drawn, not what is wanted (#379): a window
+            // made smaller and then bigger again gets the panel's own size back
+            // rather than keeping the squeeze.
+            Managers.DockLayout.NoteDockedSize(this, natural, thickness);
 
             // Docked content always spans the full authored width/height
             // flush under the title bar (and menu strip, if this modal has
@@ -5490,6 +5484,16 @@ namespace GustUI.Elements
         /// picks the modal up with no visible jump.</summary>
         internal void HandleTitleBarPress(TVEventArgs x)
         {
+            // One press, one drag (#383). GustUI hands a press to every element
+            // under the pointer, and a title bar, a tab strip and a tab can all
+            // be there at once. A second call for the same press would record
+            // where the window is AFTER the first call pulled it out of
+            // maximised, so a cancelled drag put it back un-maximised.
+            if (!StartsTitleDrag(BeingDragged, titleDragFrom.HasValue))
+            {
+                return;
+            }
+
             MouseState mouse = Resources.StaticResources.InputManager.CurrentMouseState;
             if (DockedSide != DockSide.None)
             {
@@ -5499,15 +5503,41 @@ namespace GustUI.Elements
             mergePressMouse = new Vector2(mouse.X, mouse.Y);
             mergeArmed = false;
 
-            // Where the window was, for a drag that is cancelled (#374).
+            // Where the window was, for a drag that is cancelled (#374): its
+            // place on its dock too, so it goes back beside the same panels
+            // and keeps the corners it had (#384).
             titleDragFrom = (ElementTrait<PositionTrait>().Value(), DockedSide, isFullScreen);
+            titleDragDockPlacement = Managers.DockLayout.PlacementOf(this);
+            titleDragRestoreBounds = isFullScreen ? FullScreenRestoreBounds : null;
+            titleDragWasFilling = FillsAvailableSpace;
 
             handleStartDrag(x);
         }
 
+        /// <summary>
+        /// Whether a press on a title bar starts a drag: not when this window
+        /// is already being dragged by the press that recorded where it began
+        /// (#383). The first call of a press is the one that knows whether
+        /// the window was maximised; by the second it has been restored.
+        /// </summary>
+        internal static bool StartsTitleDrag(bool beingDragged, bool originRecorded)
+            => !(beingDragged && originRecorded);
+
         /// <summary>Where a title-bar drag started: position, dock side and
         /// whether the window was maximised. Null when no drag is under way.</summary>
         private (TVVector Position, DockSide Side, bool Maximised)? titleDragFrom;
+
+        /// <summary>The dock slot a title-bar drag started from, when it
+        /// started docked (#384).</summary>
+        private (int Index, long Order)? titleDragDockPlacement;
+
+        /// <summary>Where a window maximised when its drag started restored
+        /// to, so a cancelled drag leaves that unchanged (#383).</summary>
+        private (TVVector Position, TVVector Size)? titleDragRestoreBounds;
+
+        /// <summary>Whether the window was filling the free space when its
+        /// drag started (#383).</summary>
+        private bool titleDragWasFilling;
 
         /// <summary>
         /// A title-bar drag cancelled rather than dropped (ezmuze #374, a
@@ -5539,6 +5569,10 @@ namespace GustUI.Elements
                     if (DockedSide == DockSide.None)
                     {
                         DockTo(from.Side);
+                        if (titleDragDockPlacement is { } placement && DockedSide == from.Side)
+                        {
+                            Managers.DockLayout.RestorePlacement(this, from.Side, placement);
+                        }
                     }
                 }
                 else if (from.Maximised)
@@ -5546,13 +5580,32 @@ namespace GustUI.Elements
                     if (!isFullScreen)
                     {
                         ToggleFullScreen();
+
+                        // Maximising again takes the window's CURRENT rect as
+                        // the one to restore to, which is wherever the drag had
+                        // carried it. Restore goes where it went before (#383).
+                        if (titleDragRestoreBounds is { } bounds)
+                        {
+                            FullScreenRestoreBounds = bounds;
+                        }
                     }
                 }
                 else if (DockedSide == DockSide.None && from.Position != null)
                 {
                     Set<PositionTrait>(new TVVector(from.Position.X, from.Position.Y));
                 }
+
+                // A window that was filling the free space stopped the moment
+                // it was picked up. Put down where it was, it fills again.
+                if (from.Side == DockSide.None && titleDragWasFilling)
+                {
+                    FillsAvailableSpace = true;
+                }
             }
+
+            titleDragDockPlacement = null;
+            titleDragRestoreBounds = null;
+            titleDragWasFilling = false;
         }
 
         /// <summary>Routed here (not straight to handleStopDrag) so a
@@ -5561,6 +5614,9 @@ namespace GustUI.Elements
         internal void HandleTitleBarRelease(TVEventArgs x)
         {
             titleDragFrom = null;
+            titleDragDockPlacement = null;
+            titleDragRestoreBounds = null;
+            titleDragWasFilling = false;
             handleStopDrag(x);
             dockPressMouse = null;
             mergePressMouse = null;

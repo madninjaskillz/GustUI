@@ -589,12 +589,15 @@ namespace GustUI.Elements
                     new TVText(Managers.StandardCursors.Move));
             }
 
+            // Moved to their final names, not added a second time (#383). Both
+            // constructors already added them through AddChildElement, and a
+            // child held twice gets every press twice.
             if (closable)
             {
-                this.AddChild(closeButton, "closeButton");
+                this.AddOrMoveChild(closeButton, "closeButton");
             }
 
-            this.AddChild(dragBarElement, "titleText");
+            this.AddOrMoveChild(dragBarElement, "titleText");
         }
     }
 }

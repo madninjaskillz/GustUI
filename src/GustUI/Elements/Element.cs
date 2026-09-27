@@ -509,6 +509,32 @@ public class Element : IDisposable
         Children.InvalidateSort();
     }
 
+    /// <summary>
+    /// Adds <paramref name="child"/> under <paramref name="name"/>, or, when it
+    /// is already a child, moves it to the end under that name. Never holds it
+    /// twice.
+    ///
+    /// A child held twice is hit twice: the input manager hands a press to
+    /// every element along every path under the pointer, so one click ran its
+    /// handler twice. A window title bar did exactly that (ezmuze #383): its
+    /// drag bar was added once when it was created and again under its final
+    /// name, so a press on a maximised window's title restored it on the first
+    /// call and recorded "not maximised" as where the drag began on the second.
+    /// </summary>
+    public void AddOrMoveChild(Element child, string name)
+    {
+        if (HasTrait<ChildrenTrait>())
+        {
+            TVElements children = Children;
+            while (children.Items.Contains(child))
+            {
+                children.Remove(child);
+            }
+        }
+
+        AddChild(child, name);
+    }
+
     public virtual void AddChild(Element child, string name)
     {
         child.ElementName = name;
