@@ -293,6 +293,29 @@ namespace GustUI
         // tuning (a module's own per-section accents, a specific knob's
         // hand-picked face color) is still fine to keep local to its view.
         public Color SurfaceBackdrop, SurfacePanel, SurfaceHeader, SurfaceRaised, SurfaceBorder, BodyText;
+
+        /// <summary>
+        /// Secondary / dim text — captions, hints, status lines, the "off"
+        /// label on an unlit toggle. DERIVED, not declared per palette: a lerp
+        /// from <see cref="SurfacePanel"/> toward <see cref="BodyText"/> by
+        /// <see cref="SecondaryTextAmount"/>, re-computed by ApplyPalette like
+        /// every other live token here.
+        ///
+        /// It replaced a hard-coded (150,150,165) that ~45 call sites carried
+        /// (ezmuze design-guide.md, "A theme colour is bound, not copied" and
+        /// the 2026-09-27 log entry): that grey was picked to sit between the
+        /// DARK panel and its text, and on the light palette it is a muddy grey
+        /// on white. Dimming is relative to what it sits on, so the rule is
+        /// the token — (147,147,153) in dark, (114,114,116) in light.
+        /// </summary>
+        public Color SecondaryText;
+
+        /// <summary>How far <see cref="SecondaryText"/> sits from the panel
+        /// toward the body text. 0.62 is what the welcome screen's secondary
+        /// text was already derived with, and lands within a few steps of the
+        /// old (150,150,165) in the dark palette.</summary>
+        public const float SecondaryTextAmount = 0.62f;
+
         public Color MeterWell;
         public Color MenuBarFillTop, MenuBarFillBottom, MenuHighlight;
         public Color AccentSelection, AccentLiveAutomation, AccentModPositive, AccentModNegative, AccentPlayhead, AccentMuteOn, AccentMuteOff, AccentWarning, AccentVolume, AccentPan;
@@ -376,6 +399,7 @@ namespace GustUI
             SurfaceRaised = p.SurfaceRaised;
             SurfaceBorder = p.SurfaceBorder;
             BodyText = p.BodyText;
+            SecondaryText = Color.Lerp(p.SurfacePanel, p.BodyText, SecondaryTextAmount);
             MeterWell = p.MeterWell;
 
             MenuBarFillTop = p.MenuBarFillTop;
