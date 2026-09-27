@@ -140,10 +140,20 @@ public class TooltipElement : Element
 
         var theme = Resources.StaticResources.Theme;
         var sdfFont = Resources.StaticResources.FontManager.LoadSdfFont(theme.UiFontSmall.Family);
-        Vector2 textSize = sdfFont.MeasureString(text, theme.UiFontSmall.Size);
+        // A tooltip may be several lines ("name - what it is", then a note
+        // under it). The SDF string drawer knows nothing of '\n' — it ran the
+        // lines together and measured them as one — so each line is measured
+        // and drawn on its own, a line height apart.
+        string[] lines = text.Replace("\r\n", "\n").Split('\n');
+        float lineHeight = sdfFont.MeasureString("Ag", theme.UiFontSmall.Size).Y;
+        float widest = 0f;
+        foreach (string line in lines)
+        {
+            widest = Math.Max(widest, sdfFont.MeasureString(line, theme.UiFontSmall.Size).X);
+        }
 
-        int w = (int)textSize.X + PadX * 2;
-        int h = (int)textSize.Y + PadY * 2;
+        int w = (int)widest + PadX * 2;
+        int h = (int)(lineHeight * lines.Length) + PadY * 2;
 
         // Clamp to the window so the label never renders off-screen.
         Vector2 windowSize = Resources.StaticResources.RootWindow.GetSize().AsXna;
@@ -158,7 +168,11 @@ public class TooltipElement : Element
         var manager = Resources.StaticResources.DrawManager;
         manager.DrawFilledRectangle(rect, theme.SurfaceHeader * 0.97f);
         manager.DrawRectangle(rect, theme.SurfaceBorder, 1);
-        manager.DrawSdfString(sdfFont, text, new Vector2(x + PadX, y + PadY), theme.UiFontSmall.Size, theme.BodyText);
+        for (int i = 0; i < lines.Length; i++)
+        {
+            manager.DrawSdfString(sdfFont, lines[i], new Vector2(x + PadX, y + PadY + (i * lineHeight)),
+                theme.UiFontSmall.Size, theme.BodyText);
+        }
 
         base.Draw();
     }
