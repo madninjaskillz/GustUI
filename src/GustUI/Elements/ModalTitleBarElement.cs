@@ -234,13 +234,14 @@ namespace GustUI.Elements
             closable = true;
             dragBarElement = AddChildElement<BasicButtonElement>("drag bar");
 
-            closeButton = AddChildElement<BasicButtonElement>("close button");
-            sizeButton = AddChildElement<BasicButtonElement>("size button");
+            // One of each (ezmuze #394): this used to create the size button
+            // twice, keeping only the second, and subscribe the close button
+            // twice.
+            closeButton = AddChildElement<BasicButtonElement>("closeButton");
             Sync(closeButton);
-            Sync(closeButton);
-            if (!((ModalWindowElement)Parent).FitModalToContent)
+            if (Parent is ModalWindowElement host && !host.FitModalToContent)
             {
-                sizeButton = AddChildElement<BasicButtonElement>("size button");
+                sizeButton = AddChildElement<BasicButtonElement>("sizeButton");
                 Sync(sizeButton);
             }
             Sync(dragBarElement);
@@ -276,7 +277,7 @@ namespace GustUI.Elements
             dragBarElement = AddChildElement<BasicButtonElement>("drag bar");
             if (closable)
             {
-                closeButton = AddChildElement<BasicButtonElement>("close button");
+                closeButton = AddChildElement<BasicButtonElement>("closeButton");
                 Sync(closeButton);
             }
 
@@ -284,13 +285,13 @@ namespace GustUI.Elements
 
             if (interactive && Parent is ModalWindowElement)
             {
-                pinButton = AddChildElement<BasicButtonElement>("pin button");
+                pinButton = AddChildElement<BasicButtonElement>("pinButton");
                 Sync(pinButton);
             }
 
             if (hasMaximimizeButton)
             {
-                sizeButton = AddChildElement<BasicButtonElement>("size button");
+                sizeButton = AddChildElement<BasicButtonElement>("sizeButton");
                 Sync(sizeButton);
             }
           
@@ -591,7 +592,9 @@ namespace GustUI.Elements
 
             // Moved to their final names, not added a second time (#383). Both
             // constructors already added them through AddChildElement, and a
-            // child held twice gets every press twice.
+            // child held twice gets every press twice. (Since #394 no element
+            // can hold a child twice at all -- TVElements.Add moves one it
+            // already has -- so this is belt and braces.)
             if (closable)
             {
                 this.AddOrMoveChild(closeButton, "closeButton");

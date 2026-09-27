@@ -336,9 +336,12 @@ public class Element : IDisposable
         var result = Activator.CreateInstance<T>();
         ((Element)result).Parent = this;
 
+        // The name was ignored until ezmuze #394, so every child created this
+        // way was held under its type name: a window title bar's pin and
+        // maximise buttons read as two unnamed buttons in /tree.
         if (this.HasTrait<ChildrenTrait>())
         {
-            this.AddChild(result, result.ElementName);
+            this.AddChild(result, name ?? result.ElementName);
         }
 
         return result as T;
@@ -349,7 +352,7 @@ public class Element : IDisposable
         element.Parent = this;
         if (this.HasTrait<ChildrenTrait>())
         {
-            this.AddChild(element, element.ElementName);
+            this.AddChild(element, overrideName ?? element.ElementName);
         }
     }
 

@@ -31,21 +31,56 @@ public class TVElements : TraitValue
         Version++;
     }
 
+    // Membership, so Add can tell a child it already holds without a scan.
+    private readonly HashSet<Element> members = new HashSet<Element>();
+
+    /// <summary>Adds <paramref name="item"/> under <paramref name="name"/>.
+    /// An element this already holds is MOVED to the end under the new name,
+    /// never held twice (ezmuze #394). A child held twice is drawn twice and
+    /// handed every press twice, and Remove only ever took one copy out, so a
+    /// killed child could stay on screen. Every button held its label twice
+    /// this way, and every window title bar its drag strip and close button
+    /// (#383), because a constructor added the child and a shared Setup added
+    /// it again under its final name.</summary>
     public void Add(Element item, string name)
     {
+        if (item != null && !members.Add(item))
+        {
+            namedItems.RemoveAll(x => x.Item1 == item);
+        }
+
         namedItems.Add(new(item, name));
         sortedCache = null;
         Version++;
     }
+
+    /// <summary>Whether <paramref name="item"/> is one of these children.</summary>
+    public bool Contains(Element item) => item != null && members.Contains(item);
+
+    /// <summary>How many entries this holds; each child is one, however it
+    /// was added.</summary>
+    public int Count => namedItems.Count;
+
     public void Remove(Element item)
     {
         namedItems.Remove(namedItems.Find(x => x.Item1 == item));
+        if (item != null)
+        {
+            members.Remove(item);
+        }
+
         sortedCache = null;
         Version++;
     }
     public void Remove(string name)
     {
-        namedItems.Remove(namedItems.Find(x => x.Item2 == name));
+        var entry = namedItems.Find(x => x.Item2 == name);
+        namedItems.Remove(entry);
+        if (entry?.Item1 != null)
+        {
+            members.Remove(entry.Item1);
+        }
+
         sortedCache = null;
         Version++;
     }

@@ -51,7 +51,8 @@ namespace GustUI.Elements
         /// rectangle itself is <see cref="Managers.DockLayout.PreviewRect(DockSide, float, float, float)"/>
         /// (#391): clamped as the dock will be, and inboard of every dock
         /// already on screen.</summary>
-        public static void Show(DockSide side, float size, float instanceBottomInset = 0f, float minAlong = 0f)
+        public static void Show(DockSide side, float size, float instanceBottomInset = 0f, float minAlong = 0f,
+            float minAcross = 0f, ModalWindowElement docking = null)
         {
             Ensure();
             overlay.Visible = true;
@@ -60,7 +61,7 @@ namespace GustUI.Elements
             // LayoutDocked, rather than a second copy of the geometry. The
             // copy that lived here put a bottom dock flush with the window's
             // bottom edge, over the status bar and any existing bottom docks.
-            (Vector2 position, Vector2 rectSize) = Managers.DockLayout.PreviewRect(side, size, instanceBottomInset, minAlong);
+            (Vector2 position, Vector2 rectSize) = Managers.DockLayout.PreviewRect(side, size, instanceBottomInset, minAlong, minAcross, docking);
 
             overlay.ElementTrait<PositionTrait>().Set(new TVVector(position));
             overlay.ElementTrait<SizeTrait>().Set(new TVVector(rectSize));

@@ -40,8 +40,11 @@ namespace GustUI.Managers
         private static readonly List<ModalWindowElement> topStack = new List<ModalWindowElement>();
         private static readonly List<ModalWindowElement> bottomStack = new List<ModalWindowElement>();
 
-        /// <summary>Every currently-open <see cref="ModalWindowElement.FillsAvailableSpace"/>
-        /// window (2026-08-17 — see <see cref="EffectiveSize"/>'s own doc
+        /// <summary>Every currently-open window the docks keep room for
+        /// (<see cref="ModalWindowElement.KeepsDockRoom"/>): every
+        /// <see cref="ModalWindowElement.FillsAvailableSpace"/> window, and one
+        /// that filled and has since been picked up (ezmuze #395)
+        /// (2026-08-17 — see <see cref="EffectiveSize"/>'s own doc
         /// comment for why this exists: a docked stack's reservation must
         /// leave room for whichever filler needs the most, or the filler's
         /// own MinSize floor and the dock's reservation can together exceed
@@ -310,6 +313,10 @@ namespace GustUI.Managers
             fillers.Remove(modal);
         }
 
+        /// <summary>Whether the docks keep room for <paramref name="modal"/>'s
+        /// minimum (<see cref="ModalWindowElement.KeepsDockRoom"/>).</summary>
+        internal static bool HoldsRoom(ModalWindowElement modal) => fillers.Contains(modal);
+
         private static List<ModalWindowElement> StackFor(DockSide side)
         {
             switch (side)
@@ -390,7 +397,85 @@ namespace GustUI.Managers
                 : NaturalSize(modal, horizontal);
 
             float floor = Math.Max(MaxFillerMinSize(horizontal), LaterCrossDockFloor(modal, horizontal));
-            return Clamp(natural, axisSize, floor, StackOffset(modal, side));
+            floor = Math.Max(floor, LaterOppositeDockFloor(modal, side));
+
+            // A top or bottom dock never runs into the app's bottom chrome.
+            // The filler floors already carry it; this only bites with no
+            // filler, which is when two opposite docks were overlapping.
+            if (!horizontal)
+            {
+                floor = Math.Max(floor, modal.BottomInset);
+            }
+
+            return Clamp(natural, axisSize, floor, StackOffset(modal, side) + OppositeDockedBefore(modal, side));
+        }
+
+        // ---- opposite docks share the axis (ezmuze #395) ------------------------
+        //
+        // A top dock and a bottom dock (or left and right) share one axis, and
+        // nothing kept them apart: each was clamped only against its own side's
+        // stack and the fillers. With the explorer docked along the bottom at
+        // its 50% cap (281.33 of 562.67) and the sequencer dragged to the top
+        // at its 260 minimum, the two overlapped by 2.67 px, the explorer's
+        // title bar under the sequencer. The #384/#390 rules now hold across the
+        // axis too: the dock that was there first keeps its size and the later
+        // one fits in what is left, and the later one's minimum holds the
+        // earlier one back.
+
+        private static DockSide Opposite(DockSide side) => side switch
+        {
+            DockSide.Left => DockSide.Right,
+            DockSide.Right => DockSide.Left,
+            DockSide.Top => DockSide.Bottom,
+            DockSide.Bottom => DockSide.Top,
+            _ => DockSide.None,
+        };
+
+        /// <summary>How deep the docks on the opposite side that docked BEFORE
+        /// <paramref name="modal"/> are: the later dock fits inside what they
+        /// leave. Recurses only into earlier docks, so it ends.</summary>
+        private static float OppositeDockedBefore(ModalWindowElement modal, DockSide side)
+        {
+            List<ModalWindowElement> stack = StackFor(Opposite(side));
+            if (stack == null || stack.Count == 0 || !dockedAt.TryGetValue(modal, out long mine))
+            {
+                return 0f;
+            }
+
+            float sum = 0f;
+            foreach (ModalWindowElement other in stack.ToArray())
+            {
+                if (dockedAt.TryGetValue(other, out long theirs) && theirs < mine)
+                {
+                    sum += EffectiveSize(other, Opposite(side));
+                }
+            }
+
+            return sum;
+        }
+
+        /// <summary>The most room any dock on the opposite side that docked
+        /// AFTER <paramref name="modal"/> needs along this axis: its MinSize,
+        /// plus the bottom chrome for a top or bottom dock.</summary>
+        private static float LaterOppositeDockFloor(ModalWindowElement modal, DockSide side)
+        {
+            List<ModalWindowElement> stack = StackFor(Opposite(side));
+            if (stack == null || stack.Count == 0 || !dockedAt.TryGetValue(modal, out long mine))
+            {
+                return 0f;
+            }
+
+            bool horizontal = side == DockSide.Left || side == DockSide.Right;
+            floorScratch.Clear();
+            foreach (ModalWindowElement other in stack)
+            {
+                if (dockedAt.TryGetValue(other, out long theirs))
+                {
+                    floorScratch.Add((theirs, horizontal ? other.MinSize.X : other.MinSize.Y + other.BottomInset));
+                }
+            }
+
+            return MaxFloorDockedAfter(floorScratch, mine);
         }
 
         // ---- a later side dock keeps its minimum (ezmuze #390) ------------------
@@ -464,17 +549,20 @@ namespace GustUI.Managers
         /// perpendicular docks already there give way to it (#390), so the
         /// preview shows that too.
         /// </summary>
-        internal static (Vector2 Position, Vector2 Size) PreviewRect(DockSide side, float natural, float chromeBottom, float minAlong)
+        internal static (Vector2 Position, Vector2 Size) PreviewRect(DockSide side, float natural, float chromeBottom, float minAlong,
+            float minAcross = 0f, ModalWindowElement docking = null)
         {
             Vector2 window = Resources.StaticResources.RootWindow.GetSize().AsXna;
             bool horizontal = side == DockSide.Left || side == DockSide.Right;
             return PreviewRect(side, window, natural,
                 Reserved(StackFor(side), side),
-                MaxFillerMinSize(horizontal),
+                MaxFillerMinSize(horizontal, docking),
                 horizontal ? TopInset : LeftInset,
                 horizontal ? BottomInset : RightInset,
                 chromeBottom,
-                minAlong);
+                minAlong,
+                Reserved(StackFor(Opposite(side)), Opposite(side)),
+                minAcross);
         }
 
         /// <summary>The arithmetic of <see cref="PreviewRect(DockSide, float, float, float)"/>,
@@ -482,10 +570,22 @@ namespace GustUI.Managers
         /// side already reserves, <paramref name="startInset"/> and
         /// <paramref name="endInset"/> what the two perpendicular sides do.</summary>
         internal static (Vector2 Position, Vector2 Size) PreviewRect(DockSide side, Vector2 window, float natural,
-            float sameSide, float fillerFloor, float startInset, float endInset, float chromeBottom, float minAlong = 0f)
+            float sameSide, float fillerFloor, float startInset, float endInset, float chromeBottom, float minAlong = 0f,
+            float opposite = 0f, float minAcross = 0f)
         {
             bool horizontal = side == DockSide.Left || side == DockSide.Right;
-            float thickness = Clamp(natural, horizontal ? window.X : window.Y, fillerFloor, sameSide);
+            float axis = horizontal ? window.X : window.Y;
+            float chrome = horizontal ? 0f : chromeBottom;
+
+            // The opposite side's docks were there first, so this one fits in
+            // what they leave, after they give way to its minimum (#395), as
+            // LaterOppositeDockFloor makes them do once it has docked.
+            if (opposite > 0f && minAcross > 0f)
+            {
+                opposite = Math.Min(opposite, Math.Max(0f, axis - minAcross - chrome));
+            }
+
+            float thickness = Clamp(natural, axis, Math.Max(fillerFloor, chrome), sameSide + opposite);
 
             // The end dock (bottom, or right) gives way to the new dock's
             // minimum, as LaterCrossDockFloor makes it do once it has docked.
@@ -564,18 +664,38 @@ namespace GustUI.Managers
         /// overlapped by exactly the height of the status bar — visible only
         /// once the window was small enough for the floor to bite.
         /// </summary>
-        private static float MaxFillerMinSize(bool horizontal)
+        private static float MaxFillerMinSize(bool horizontal, ModalWindowElement except = null)
         {
-            float max = 0f;
+            roomScratch.Clear();
             foreach (ModalWindowElement filler in fillers)
             {
-                float v = horizontal
-                    ? filler.MinSize.X
-                    : filler.MinSize.Y + filler.BottomInset;
+                // The window being docked holds no room against itself: once
+                // docked it sets no floor, so neither does its preview.
+                roomScratch.Add((
+                    filler.DockedSide != DockSide.None || filler == except,
+                    horizontal ? filler.MinSize.X : filler.MinSize.Y + filler.BottomInset));
+            }
 
-                if (v > max)
+            return MaxRoomFloor(roomScratch);
+        }
+
+        private static readonly List<(bool Docked, float Floor)> roomScratch = new();
+
+        /// <summary>The arithmetic of <see cref="MaxFillerMinSize"/>: the largest
+        /// floor among the windows the docks keep room for. A window that
+        /// filled the free space keeps its floor after it is picked up and
+        /// floats (ezmuze #395), so the docks do not grow under it; one that is
+        /// docked itself sets none here (a later dock's floor is
+        /// <see cref="LaterCrossDockFloor"/>'s business, and a dock's own
+        /// minimum must not cap its own side).</summary>
+        internal static float MaxRoomFloor(IReadOnlyList<(bool Docked, float Floor)> windows)
+        {
+            float max = 0f;
+            foreach ((bool docked, float floor) in windows)
+            {
+                if (!docked && floor > max)
                 {
-                    max = v;
+                    max = floor;
                 }
             }
 

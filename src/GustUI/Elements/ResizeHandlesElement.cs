@@ -205,40 +205,22 @@ namespace GustUI.Elements
         {
             base.Update(parent);
 
-            // Docked POSITION is owned entirely by DockTo/LayoutDocked
-            // (ModalWindowElement.cs, GustUI/Managers/DockLayout.cs) — the
-            // other 7 handles would just get overwritten again the very
-            // next frame (2026-08-17, user report against the docked-by-
-            // default loop browser/wave bank panels: "looks like the
-            // handles do nothing"), so those collapse to zero size while
-            // docked. The ONE edge facing the content area (the boundary
-            // between this panel and whatever's sharing space with it) is
-            // still live, though — the docking-reinforcement follow-up
-            // (2026-08-17): dragging it resizes ONLY this panel's own
-            // width/height along the dock axis (never its position — that's
-            // still LayoutDocked's job every frame), and DockLayout reads
-            // that size live, so the window(s) sharing space with it
-            // shrink/grow in the same frame with no extra plumbing.
+            // Docked, the window's geometry belongs to the dock, and the one
+            // edge that can still move -- the boundary with whatever shares the
+            // screen -- belongs to DockSplitterElement (ezmuze #393). This used
+            // to keep its own 6 px strip live on that edge, under the splitter's
+            // 10 px one: two drag targets on one line, both highlighting on
+            // hover, one setting the window's size and the other the dock's
+            // reservation. Every handle collapses while docked now.
             if (host.DockedSide != DockSide.None)
             {
-                UpdateDockedSplitter();
+                UpdateDocked();
                 return;
             }
 
             TVVector size = host.GetSize();
-            float w = size.X;
-            float h = size.Y;
-            Set<SizeTrait>(new TVVector(w, h));
-
-            PositionHandle(Handle.NW, 0, 0, CornerSize, CornerSize);
-            PositionHandle(Handle.NE, w - CornerSize, 0, CornerSize, CornerSize);
-            PositionHandle(Handle.SW, 0, h - CornerSize, CornerSize, CornerSize);
-            PositionHandle(Handle.SE, w - CornerSize, h - CornerSize, CornerSize, CornerSize);
-
-            PositionHandle(Handle.N, CornerSize, 0, w - CornerSize * 2, EdgeThickness);
-            PositionHandle(Handle.S, CornerSize, h - EdgeThickness, w - CornerSize * 2, EdgeThickness);
-            PositionHandle(Handle.W, 0, CornerSize, EdgeThickness, h - CornerSize * 2);
-            PositionHandle(Handle.E, w - EdgeThickness, CornerSize, EdgeThickness, h - CornerSize * 2);
+            Set<SizeTrait>(new TVVector(size.X, size.Y));
+            ApplyRects(HandleRects(size.AsXna, docked: false));
 
             // Unconditional per-frame poll — Element.cs's own BeingDragged
             // shape (see the class doc comment) — so the drag keeps
@@ -258,137 +240,64 @@ namespace GustUI.Elements
             }
         }
 
-        private void PositionHandle(Handle handle, float x, float y, float w, float h)
+        /// <summary>Where each of the 8 handles goes on a window of
+        /// <paramref name="size"/>, indexed by <see cref="Handle"/>: the four
+        /// corners and four edges when floating, and nothing at all when
+        /// docked, where <see cref="DockSplitterElement"/> owns the one edge
+        /// that moves (ezmuze #393).</summary>
+        internal static (Vector2 Position, Vector2 Size)[] HandleRects(Vector2 size, bool docked)
         {
-            Element element = handles[(int)handle];
-            element.Set<PositionTrait>(new TVVector(x, y));
-            element.Set<SizeTrait>(new TVVector(Math.Max(0f, w), Math.Max(0f, h)));
-        }
-
-        /// <summary>Which of the 8 handles sits on a docked panel's own
-        /// content-facing edge — e.g. a Left-docked panel's resize splitter
-        /// is its RIGHT edge (that's the boundary with whatever's sharing
-        /// space with it); a Bottom-docked panel's is its TOP edge.</summary>
-        private static Handle SplitterHandleFor(DockSide side)
-        {
-            switch (side)
+            var rects = new (Vector2 Position, Vector2 Size)[8];
+            if (docked)
             {
-                case DockSide.Left: return Handle.E;
-                case DockSide.Right: return Handle.W;
-                case DockSide.Top: return Handle.S;
-                default: return Handle.N; // Bottom
+                return rects;
             }
-        }
 
-        /// <summary>Docked counterpart to the floating branch below —
-        /// collapses every handle except the one on the content-facing
-        /// edge, spans that one the full length of the OTHER axis (a thin
-        /// strip the full height for Left/Right, full width for Top/
-        /// Bottom), and drives the SAME activeHandle/anchor drag machinery
-        /// the floating handles use, just routed to <see cref="ContinueDockedResize"/>
-        /// instead of the free-form edge math (this panel's position is
-        /// never touched — LayoutDocked owns that, every frame,
-        /// unconditionally).</summary>
-        private void UpdateDockedSplitter()
-        {
-            TVVector size = host.GetSize();
             float w = size.X;
             float h = size.Y;
-            Handle splitter = SplitterHandleFor(host.DockedSide);
+            rects[(int)Handle.NW] = Rect(0, 0, CornerSize, CornerSize);
+            rects[(int)Handle.NE] = Rect(w - CornerSize, 0, CornerSize, CornerSize);
+            rects[(int)Handle.SW] = Rect(0, h - CornerSize, CornerSize, CornerSize);
+            rects[(int)Handle.SE] = Rect(w - CornerSize, h - CornerSize, CornerSize, CornerSize);
 
-            // Track the docked window's own size, as the floating branch does.
-            // Returning before that write left this element at the size the
-            // window had when it docked, which is all /tree could report for it
-            // (#391). The collapsed handles go to the corner too, rather than
-            // keeping their floating positions at zero size.
-            TVVector own = this.GetSize();
-            if (own.X != w || own.Y != h)
-            {
-                Set<SizeTrait>(new TVVector(w, h));
-            }
+            rects[(int)Handle.N] = Rect(CornerSize, 0, w - CornerSize * 2, EdgeThickness);
+            rects[(int)Handle.S] = Rect(CornerSize, h - EdgeThickness, w - CornerSize * 2, EdgeThickness);
+            rects[(int)Handle.W] = Rect(0, CornerSize, EdgeThickness, h - CornerSize * 2);
+            rects[(int)Handle.E] = Rect(w - EdgeThickness, CornerSize, EdgeThickness, h - CornerSize * 2);
+            return rects;
+        }
 
+        private static (Vector2, Vector2) Rect(float x, float y, float w, float h)
+            => (new Vector2(x, y), new Vector2(Math.Max(0f, w), Math.Max(0f, h)));
+
+        private void ApplyRects((Vector2 Position, Vector2 Size)[] rects)
+        {
             for (int i = 0; i < handles.Length; i++)
             {
-                if ((Handle)i != splitter)
-                {
-                    PositionHandle((Handle)i, 0, 0, 0, 0);
-                }
+                handles[i].Set<PositionTrait>(new TVVector(rects[i].Position));
+                handles[i].Set<SizeTrait>(new TVVector(rects[i].Size));
+            }
+        }
+
+        /// <summary>Docked: every handle collapsed (see <see cref="HandleRects"/>),
+        /// and any resize that was under way when the window docked dropped.</summary>
+        private void UpdateDocked()
+        {
+            // Track the docked window's own size, as the floating branch does,
+            // so /tree reports it (#391).
+            TVVector size = host.GetSize();
+            TVVector own = this.GetSize();
+            if (own.X != size.X || own.Y != size.Y)
+            {
+                Set<SizeTrait>(new TVVector(size.X, size.Y));
             }
 
-            switch (splitter)
-            {
-                case Handle.E:
-                    PositionHandle(Handle.E, w - EdgeThickness, 0, EdgeThickness, h);
-                    break;
-                case Handle.W:
-                    PositionHandle(Handle.W, 0, 0, EdgeThickness, h);
-                    break;
-                case Handle.S:
-                    PositionHandle(Handle.S, 0, h - EdgeThickness, w, EdgeThickness);
-                    break;
-                default: // N
-                    PositionHandle(Handle.N, 0, 0, w, EdgeThickness);
-                    break;
-            }
-
-            // Drop a drag left mid-flight if this panel stopped being
-            // docked (or changed which side) out from under it — defensive,
-            // the only path into/out of docked state is the title bar's own
-            // drag/hold gesture, a different interaction from this one, so
-            // the two shouldn't normally overlap.
-            if (activeHandle != null && activeHandle != splitter)
-            {
-                EndResize();
-            }
+            ApplyRects(HandleRects(size.AsXna, docked: true));
 
             if (activeHandle != null)
             {
-                MouseState mouse = Resources.StaticResources.InputManager.CurrentMouseState;
-                if (mouse.LeftButton == ButtonState.Released)
-                {
-                    EndResize();
-                }
-                else
-                {
-                    ContinueDockedResize(new Vector2(mouse.X, mouse.Y));
-                }
+                EndResize();
             }
-        }
-
-        /// <summary>Resizes ONLY this panel's own width (Left/Right dock) or
-        /// height (Top/Bottom dock) from the drag delta along that one
-        /// axis — never its position. Clamped between <see cref="ModalWindowElement.MinSize"/>
-        /// and DockLayout's own 50%-of-window reservation cap (see its
-        /// class doc comment) so the splitter can't drag a panel past the
-        /// same ceiling <see cref="Managers.DockLayout"/> would clip it to
-        /// anyway — without this, dragging past the cap would look like it
-        /// worked (the panel itself grows) while the window(s) sharing
-        /// space with it stop shrinking to match, an inch-worm mismatch.</summary>
-        private void ContinueDockedResize(Vector2 currentMouse)
-        {
-            bool horizontal = host.DockedSide == DockSide.Left || host.DockedSide == DockSide.Right;
-            float delta = horizontal ? currentMouse.X - anchorMouse.X : currentMouse.Y - anchorMouse.Y;
-            if (host.DockedSide == DockSide.Right || host.DockedSide == DockSide.Bottom)
-            {
-                delta = -delta;
-            }
-
-            Vector2 windowSize = Resources.StaticResources.RootWindow.GetSize().AsXna;
-            float minDim = horizontal ? host.MinSize.X : host.MinSize.Y;
-            // Math.Max, not a bare 50%-of-window cap: a window narrower
-            // than 2x this panel's own MinSize would otherwise make
-            // max < min and Math.Clamp throw — MinSize wins in that squeeze
-            // (same "never below usable min" call FillsAvailableSpace's own
-            // clamp already makes), same as the free-floating resize handles'
-            // own min-size clamp already allows briefly exceeding a nominal
-            // ceiling rather than ever going unusable.
-            float cap = Math.Max(minDim, 0.5f * (horizontal ? windowSize.X : windowSize.Y));
-            float anchorDim = horizontal ? anchorSize.X : anchorSize.Y;
-            float newDim = Math.Clamp(anchorDim + delta, minDim, cap);
-
-            host.Set<SizeTrait>(horizontal
-                ? new TVVector(newDim, anchorSize.Y)
-                : new TVVector(anchorSize.X, newDim));
         }
 
         private void BeginResize(Handle handle, ClickEventArgs args)

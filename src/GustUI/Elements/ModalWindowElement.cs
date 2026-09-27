@@ -193,6 +193,39 @@ namespace GustUI.Elements
                 }
 
                 fillsAvailableSpace = value;
+
+                // Only ever ON here. A window that stops filling -- picked up
+                // by its title bar -- keeps its room (see KeepsDockRoom), so
+                // it is not unregistered until it closes.
+                if (value)
+                {
+                    KeepsDockRoom = true;
+                }
+            }
+        }
+
+        private bool fillsAvailableSpace;
+
+        /// <summary>
+        /// Whether the docks leave this window room for its <see cref="MinSize"/>
+        /// even while it floats (ezmuze #395). On from the moment it fills the
+        /// free space (<see cref="FillsAvailableSpace"/>), and it stays on after
+        /// the window is picked up, until it closes; it counts for nothing
+        /// while the window is itself docked.
+        ///
+        /// It used to go the moment a filling window was dragged. The docks
+        /// then took back the room its floor had held -- the explorer grew
+        /// 2.67 px under a sequencer that had not moved, and the two overlapped
+        /// -- and gave it up again when the window filled once more. Picking a
+        /// window up now leaves the docks where they are. A host that rebuilds
+        /// such a window floating (so never sets FillsAvailableSpace on the new
+        /// one) sets this instead.
+        /// </summary>
+        public bool KeepsDockRoom
+        {
+            get => Managers.DockLayout.HoldsRoom(this);
+            set
+            {
                 if (value)
                 {
                     Managers.DockLayout.RegisterFiller(this);
@@ -203,8 +236,6 @@ namespace GustUI.Elements
                 }
             }
         }
-
-        private bool fillsAvailableSpace;
 
         /// <summary>Opt-in (2026-08-17, tab-container feature): whether
         /// dragging this modal's title bar onto ANOTHER tabable modal's own
@@ -5315,7 +5346,8 @@ namespace GustUI.Elements
                     pendingDockSide = zone;
                     TVVector size = ElementTrait<SizeTrait>().Value();
                     bool horizontal = zone == DockSide.Left || zone == DockSide.Right;
-                    DockPreviewOverlay.Show(zone, horizontal ? size.X : size.Y, BottomInset, horizontal ? MinSize.Y : MinSize.X);
+                    DockPreviewOverlay.Show(zone, horizontal ? size.X : size.Y, BottomInset, horizontal ? MinSize.Y : MinSize.X,
+                        horizontal ? MinSize.X : MinSize.Y, this);
                 }
             }
         }

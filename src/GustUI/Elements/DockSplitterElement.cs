@@ -97,17 +97,39 @@ public class DockSplitterElement : Element
 
         Set<OnMouseRelease>(new TVEvent<ClickEventArgs>(_ => dragging = false));
 
-        AddTrait<OnEnterTrait>().Set(new TVEvent<ClickEventArgs>(_ =>
-            Set<BackgroundFillTrait>(new TVFillSolidColor(
-                Resources.StaticResources.Theme.AccentSelection))));
+        AddTrait<OnEnterTrait>().Set(new TVEvent<ClickEventArgs>(_ => hovered = true));
+        AddTrait<OnExitTrait>().Set(new TVEvent<ClickEventArgs>(_ => hovered = false));
+    }
 
-        AddTrait<OnExitTrait>().Set(new TVEvent<ClickEventArgs>(_ =>
+    private bool hovered;
+
+    /// <summary>The hover and drag highlight: the same wash the floating
+    /// resize handles use, so an edge that moves looks the same docked or not.</summary>
+    private static Color Highlight => Resources.StaticResources.Theme.AccentSelection * 0.55f;
+
+    /// <summary>
+    /// Paints the highlight while the strip is hovered or dragged.
+    ///
+    /// This used to set a BackgroundFillTrait, which a plain Element never
+    /// draws, so the splitter never lit up at all. The edge only looked live
+    /// because the window's own 6 px resize strip sat under it and lit up
+    /// instead -- the second drag target on this edge that ezmuze #393
+    /// removed. The splitter owns the edge, so it shows it.
+    /// </summary>
+    public override void Draw()
+    {
+        base.Draw();
+
+        if (!hovered && !dragging)
         {
-            if (!dragging)
-            {
-                Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
-            }
-        }));
+            return;
+        }
+
+        Vector2 position = this.GetActualXnaPosition();
+        Vector2 size = this.GetSize().AsXna;
+        Resources.StaticResources.DrawManager.DrawFilledRectangle(
+            new Rectangle((int)Math.Round(position.X), (int)Math.Round(position.Y), (int)Math.Round(size.X), (int)Math.Round(size.Y)),
+            Highlight);
     }
 
     /// <summary>True when the boundary runs vertically (a left/right dock),
