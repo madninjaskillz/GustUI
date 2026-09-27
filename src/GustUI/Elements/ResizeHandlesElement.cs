@@ -296,11 +296,22 @@ namespace GustUI.Elements
             float h = size.Y;
             Handle splitter = SplitterHandleFor(host.DockedSide);
 
+            // Track the docked window's own size, as the floating branch does.
+            // Returning before that write left this element at the size the
+            // window had when it docked, which is all /tree could report for it
+            // (#391). The collapsed handles go to the corner too, rather than
+            // keeping their floating positions at zero size.
+            TVVector own = this.GetSize();
+            if (own.X != w || own.Y != h)
+            {
+                Set<SizeTrait>(new TVVector(w, h));
+            }
+
             for (int i = 0; i < handles.Length; i++)
             {
                 if ((Handle)i != splitter)
                 {
-                    handles[i].Set<SizeTrait>(new TVVector(0, 0));
+                    PositionHandle((Handle)i, 0, 0, 0, 0);
                 }
             }
 

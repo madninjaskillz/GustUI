@@ -389,7 +389,115 @@ namespace GustUI.Managers
                 ? reserved
                 : NaturalSize(modal, horizontal);
 
-            return Clamp(natural, axisSize, MaxFillerMinSize(horizontal), StackOffset(modal, side));
+            float floor = Math.Max(MaxFillerMinSize(horizontal), LaterCrossDockFloor(modal, horizontal));
+            return Clamp(natural, axisSize, floor, StackOffset(modal, side));
+        }
+
+        // ---- a later side dock keeps its minimum (ezmuze #390) ------------------
+        //
+        // A dock that docked AFTER a perpendicular one fits inside it (#384), so
+        // its length along its edge is whatever the earlier one leaves. The
+        // floor above only counted FILLERS, and a sequencer docked to the side
+        // is not one any more: with the explorer docked along the bottom first,
+        // the explorer grew to its 50% cap the moment the sequencer docked left,
+        // leaving it 257 px of its 260 minimum. The later dock's minimum (plus
+        // the app's bottom chrome, which a side dock also stops above) is now a
+        // floor on the earlier one, exactly as a filler's is. A dock that was
+        // there FIRST runs past the corner and is not squeezed, so it sets none.
+
+        /// <summary>The most room any dock on a perpendicular side that docked
+        /// AFTER <paramref name="modal"/> needs along this axis: its MinSize, plus
+        /// the bottom chrome for a side dock measured vertically.</summary>
+        private static float LaterCrossDockFloor(ModalWindowElement modal, bool horizontal)
+        {
+            if (!dockedAt.TryGetValue(modal, out long mine))
+            {
+                return 0f;
+            }
+
+            floorScratch.Clear();
+            foreach (DockSide crossSide in horizontal ? new[] { DockSide.Top, DockSide.Bottom } : new[] { DockSide.Left, DockSide.Right })
+            {
+                foreach (ModalWindowElement other in StackFor(crossSide))
+                {
+                    if (dockedAt.TryGetValue(other, out long theirs))
+                    {
+                        floorScratch.Add((theirs, horizontal ? other.MinSize.X : other.MinSize.Y + other.BottomInset));
+                    }
+                }
+            }
+
+            return MaxFloorDockedAfter(floorScratch, mine);
+        }
+
+        private static readonly List<(long Order, float Floor)> floorScratch = new();
+
+        /// <summary>The arithmetic of <see cref="LaterCrossDockFloor"/>: the
+        /// largest floor among the docks that docked after <paramref name="mine"/>.</summary>
+        internal static float MaxFloorDockedAfter(IReadOnlyList<(long Order, float Floor)> docks, long mine)
+        {
+            float max = 0f;
+            foreach ((long order, float floor) in docks)
+            {
+                if (order > mine && floor > max)
+                {
+                    max = floor;
+                }
+            }
+
+            return max;
+        }
+
+        // ---- the dock preview (ezmuze #391) -------------------------------------
+
+        /// <summary>
+        /// Where a window that wants <paramref name="natural"/> along its dock
+        /// axis would land if it docked to <paramref name="side"/> now: the same
+        /// rectangle <see cref="ModalWindowElement.LayoutDocked"/> will give it.
+        /// It docks last, so it sits inboard of every panel already on that
+        /// side, inside the span of every perpendicular dock (#384), above the
+        /// app's bottom chrome, and at its clamped size (50% cap, filler
+        /// floors). The preview used to place a bottom dock flush with the
+        /// window's bottom edge, over the status bar and any bottom docks, and
+        /// drew a side dock at its unclamped width. <paramref name="minAlong"/>
+        /// is the window's own minimum along the edge: once it docks, the
+        /// perpendicular docks already there give way to it (#390), so the
+        /// preview shows that too.
+        /// </summary>
+        internal static (Vector2 Position, Vector2 Size) PreviewRect(DockSide side, float natural, float chromeBottom, float minAlong)
+        {
+            Vector2 window = Resources.StaticResources.RootWindow.GetSize().AsXna;
+            bool horizontal = side == DockSide.Left || side == DockSide.Right;
+            return PreviewRect(side, window, natural,
+                Reserved(StackFor(side), side),
+                MaxFillerMinSize(horizontal),
+                horizontal ? TopInset : LeftInset,
+                horizontal ? BottomInset : RightInset,
+                chromeBottom,
+                minAlong);
+        }
+
+        /// <summary>The arithmetic of <see cref="PreviewRect(DockSide, float, float, float)"/>,
+        /// with the layout read out: <paramref name="sameSide"/> is what that
+        /// side already reserves, <paramref name="startInset"/> and
+        /// <paramref name="endInset"/> what the two perpendicular sides do.</summary>
+        internal static (Vector2 Position, Vector2 Size) PreviewRect(DockSide side, Vector2 window, float natural,
+            float sameSide, float fillerFloor, float startInset, float endInset, float chromeBottom, float minAlong = 0f)
+        {
+            bool horizontal = side == DockSide.Left || side == DockSide.Right;
+            float thickness = Clamp(natural, horizontal ? window.X : window.Y, fillerFloor, sameSide);
+
+            // The end dock (bottom, or right) gives way to the new dock's
+            // minimum, as LaterCrossDockFloor makes it do once it has docked.
+            float along = horizontal
+                ? window.Y - startInset - endInset - chromeBottom
+                : window.X - startInset - endInset;
+            if (along < minAlong)
+            {
+                endInset = Math.Max(0f, endInset - (minAlong - along));
+            }
+
+            return DockRect(side, window, thickness, sameSide, startInset, endInset, chromeBottom);
         }
 
         /// <summary>The arithmetic of <see cref="EffectiveSize"/>, with the

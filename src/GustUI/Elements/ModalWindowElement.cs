@@ -5315,7 +5315,7 @@ namespace GustUI.Elements
                     pendingDockSide = zone;
                     TVVector size = ElementTrait<SizeTrait>().Value();
                     bool horizontal = zone == DockSide.Left || zone == DockSide.Right;
-                    DockPreviewOverlay.Show(zone, horizontal ? size.X : size.Y, BottomInset);
+                    DockPreviewOverlay.Show(zone, horizontal ? size.X : size.Y, BottomInset, horizontal ? MinSize.Y : MinSize.X);
                 }
             }
         }

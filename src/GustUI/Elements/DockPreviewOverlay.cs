@@ -47,42 +47,23 @@ namespace GustUI.Elements
         /// is the dragged modal's own <see cref="ModalWindowElement.BottomInset"/>
         /// (app-level chrome, e.g. a status bar) — matches the geometry
         /// <see cref="ModalWindowElement.LayoutDocked"/> actually lands the
-        /// panel at, rather than the preview overshooting past it.</summary>
-        public static void Show(DockSide side, float size, float instanceBottomInset = 0f)
+        /// panel at, rather than the preview overshooting past it. The
+        /// rectangle itself is <see cref="Managers.DockLayout.PreviewRect(DockSide, float, float, float)"/>
+        /// (#391): clamped as the dock will be, and inboard of every dock
+        /// already on screen.</summary>
+        public static void Show(DockSide side, float size, float instanceBottomInset = 0f, float minAlong = 0f)
         {
             Ensure();
             overlay.Visible = true;
 
-            Vector2 windowSize = Resources.StaticResources.RootWindow.GetSize().AsXna;
-            float top = Managers.DockLayout.TopInset;
-            float bottom = Managers.DockLayout.BottomInset + instanceBottomInset;
-            float left = Managers.DockLayout.LeftInset;
-            float right = Managers.DockLayout.RightInset;
+            // Exactly where the dock will land (#391): one rule, shared with
+            // LayoutDocked, rather than a second copy of the geometry. The
+            // copy that lived here put a bottom dock flush with the window's
+            // bottom edge, over the status bar and any existing bottom docks.
+            (Vector2 position, Vector2 rectSize) = Managers.DockLayout.PreviewRect(side, size, instanceBottomInset, minAlong);
 
-            TVVector position;
-            TVVector rectSize;
-            switch (side)
-            {
-                case DockSide.Left:
-                    position = new TVVector(0, top);
-                    rectSize = new TVVector(size, windowSize.Y - top - bottom);
-                    break;
-                case DockSide.Right:
-                    position = new TVVector(windowSize.X - size, top);
-                    rectSize = new TVVector(size, windowSize.Y - top - bottom);
-                    break;
-                case DockSide.Top:
-                    position = new TVVector(left, top);
-                    rectSize = new TVVector(windowSize.X - left - right, size);
-                    break;
-                default: // Bottom
-                    position = new TVVector(left, windowSize.Y - size);
-                    rectSize = new TVVector(windowSize.X - left - right, size);
-                    break;
-            }
-
-            overlay.ElementTrait<PositionTrait>().Set(position);
-            overlay.ElementTrait<SizeTrait>().Set(rectSize);
+            overlay.ElementTrait<PositionTrait>().Set(new TVVector(position));
+            overlay.ElementTrait<SizeTrait>().Set(new TVVector(rectSize));
         }
 
         public static void Hide()
