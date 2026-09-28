@@ -1137,11 +1137,20 @@ namespace GustUI.Managers
             LeftJustPressed = false;
             if (pointerEdges.Count > 0)
             {
+                // Divided by MouseScale exactly as the polled position is:
+                // an edge is a real platform event in the same units the poll
+                // reports (the web's DOM events and KNI's Blazor mouse are
+                // both CSS pixels). Replayed raw, a sub-frame click at any
+                // scale but 1 landed at the wrong logical position -- the
+                // pointer hovered the right button and the click missed it
+                // (ezmuze #487, the first time the web ran with MouseScale
+                // other than 1).
+                float edgeScale = MouseScale != 1f && MouseScale > 0f ? MouseScale : 1f;
                 for (int i = 0; i < pointerEdges.Count; i++)
                 {
                     PointerEdge edge = pointerEdges[i];
                     MouseState edgeState = new MouseState(
-                        edge.X, edge.Y, polledState.ScrollWheelValue,
+                        (int)(edge.X / edgeScale), (int)(edge.Y / edgeScale), polledState.ScrollWheelValue,
                         edge.Left ? ButtonState.Pressed : ButtonState.Released,
                         edge.Middle ? ButtonState.Pressed : ButtonState.Released,
                         edge.Right ? ButtonState.Pressed : ButtonState.Released,
