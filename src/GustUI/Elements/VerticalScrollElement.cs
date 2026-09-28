@@ -78,6 +78,20 @@ namespace GustUI.Elements
             });
         }
 
+        /// <summary>
+        /// Tells the rail how tall the content and the viewport are NOW, rather
+        /// than at the next <see cref="Update"/>. The rail clamps every scroll
+        /// to what it last heard, so a subclass that grows its content and
+        /// scrolls in the same frame (<see cref="VirtualListElement"/>'s
+        /// scroll-to-item) has to bring it up to date first or be clamped to
+        /// the old height.
+        /// </summary>
+        protected void SyncScrollExtent()
+        {
+            scrollBar.ContentSize = container.GetSize().Y;
+            scrollBar.ViewportSize = this.GetSize().Y;
+        }
+
         public override void Update(Element parent = null)
         {
             var thisSize = this.GetSize().AsXna;
