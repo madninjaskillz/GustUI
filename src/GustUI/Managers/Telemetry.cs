@@ -82,6 +82,57 @@ namespace GustUI.Managers
         private static List<StackFrame> Stack => threadStack ??= new List<StackFrame>();
 
         private static readonly object syncRoot = new object();
+
+        // PER-THREAD TOTALS (ezmuze #444). Every Begin/End used to add into
+        // the shared totals below under syncRoot, two or three times a pair.
+        // The audio engine makes a pair per graph node per 64-frame tick --
+        // about a million per 20 s of audio -- and with the UI instrumenting
+        // on the game thread at the same time, the two fought over that one
+        // lock: rendering took 33-51% longer (measured 2026-09-28, shipped
+        // demos, telemetry on). Now each thread adds into its OWN
+        // accumulator under its own lock, which only a reader ever contends
+        // for, about once a frame. Readers (EndFrame, GetAllStats, Reset)
+        // merge every thread's accumulator into the shared totals under
+        // syncRoot. Lock order is always syncRoot, then a thread's Gate --
+        // the hot path takes only its own Gate, never syncRoot.
+        private sealed class ThreadTotals
+        {
+            public readonly object Gate = new object();
+            public readonly Dictionary<string, (long ticks, long calls)> Totals = new();
+            public long FrameTicks;
+
+            // Weak, so a finished thread can be merged one last time and
+            // dropped rather than kept alive by the registry.
+            public readonly WeakReference<System.Threading.Thread> Owner =
+                new WeakReference<System.Threading.Thread>(System.Threading.Thread.CurrentThread);
+        }
+
+        [ThreadStatic]
+        private static ThreadTotals threadTotals;
+
+        /// <summary>Every thread that has recorded anything. Guarded by
+        /// syncRoot.</summary>
+        private static readonly List<ThreadTotals> allThreadTotals = new();
+
+        private static ThreadTotals MyTotals
+        {
+            get
+            {
+                ThreadTotals mine = threadTotals;
+                if (mine == null)
+                {
+                    mine = new ThreadTotals();
+                    threadTotals = mine;
+                    lock (syncRoot)
+                    {
+                        allThreadTotals.Add(mine);
+                    }
+                }
+
+                return mine;
+            }
+        }
+
         private static readonly Dictionary<string, (long ticks, long calls)> totals = new();
         private static readonly Stopwatch clock = Stopwatch.StartNew();
         private static long frameTicksAccum;
@@ -156,20 +207,55 @@ namespace GustUI.Managers
 
         private static void Accumulate(string tag, long addTicks, long addCalls)
         {
-            lock (syncRoot)
+            ThreadTotals mine = MyTotals;
+            lock (mine.Gate)
             {
-                if (totals.TryGetValue(tag, out (long ticks, long calls) t))
-                {
-                    totals[tag] = (t.ticks + addTicks, t.calls + addCalls);
-                }
-                else
-                {
-                    totals[tag] = (addTicks, addCalls);
-                }
-
+                AddTo(mine.Totals, tag, addTicks, addCalls);
                 if (addTicks > 0)
                 {
-                    frameTicksAccum += addTicks;
+                    mine.FrameTicks += addTicks;
+                }
+            }
+        }
+
+        private static void AddTo(Dictionary<string, (long ticks, long calls)> into, string tag, long addTicks, long addCalls)
+        {
+            if (into.TryGetValue(tag, out (long ticks, long calls) t))
+            {
+                into[tag] = (t.ticks + addTicks, t.calls + addCalls);
+            }
+            else
+            {
+                into[tag] = (addTicks, addCalls);
+            }
+        }
+
+        /// <summary>Folds every thread's accumulator into the shared totals
+        /// and frame accumulator, and empties them. Caller holds syncRoot. A
+        /// thread that has finished is merged one last time and dropped.
+        /// Its Dictionary keeps its capacity across the Clear, so a thread
+        /// that records the same tags every frame allocates nothing
+        /// here.</summary>
+        private static void DrainThreadTotalsLocked()
+        {
+            for (int i = allThreadTotals.Count - 1; i >= 0; i--)
+            {
+                ThreadTotals t = allThreadTotals[i];
+                lock (t.Gate)
+                {
+                    foreach (KeyValuePair<string, (long ticks, long calls)> kv in t.Totals)
+                    {
+                        AddTo(totals, kv.Key, kv.Value.ticks, kv.Value.calls);
+                    }
+
+                    t.Totals.Clear();
+                    frameTicksAccum += t.FrameTicks;
+                    t.FrameTicks = 0;
+                }
+
+                if (!t.Owner.TryGetTarget(out System.Threading.Thread owner) || !owner.IsAlive)
+                {
+                    allThreadTotals.RemoveAt(i);
                 }
             }
         }
@@ -190,6 +276,7 @@ namespace GustUI.Managers
             double now = clock.Elapsed.TotalSeconds;
             lock (syncRoot)
             {
+                DrainThreadTotalsLocked();
                 float ms = (float)(frameTicksAccum * 1000.0 / Stopwatch.Frequency);
                 history[historyHead] = new Sample { TimeSeconds = now, TotalMs = ms };
                 historyHead = (historyHead + 1) % HistoryCapacity;
@@ -208,8 +295,8 @@ namespace GustUI.Managers
             // render thread this is read from) history array without
             // holding the lock across the yield boundary: a lock held while
             // the caller controls how fast it drains the enumerator is a
-            // latent contention/deadlock risk against Accumulate's much
-            // hotter, cross-thread lock.
+            // latent contention/deadlock risk against the readers that
+            // drain every thread's totals under it.
             int head, n;
             lock (syncRoot)
             {
@@ -237,6 +324,7 @@ namespace GustUI.Managers
         {
             lock (syncRoot)
             {
+                DrainThreadTotalsLocked();
                 var list = new List<TagStats>(totals.Count);
                 foreach (KeyValuePair<string, (long ticks, long calls)> kv in totals)
                 {
@@ -258,6 +346,15 @@ namespace GustUI.Managers
         {
             lock (syncRoot)
             {
+                foreach (ThreadTotals t in allThreadTotals)
+                {
+                    lock (t.Gate)
+                    {
+                        t.Totals.Clear();
+                        t.FrameTicks = 0;
+                    }
+                }
+
                 totals.Clear();
                 historyHead = 0;
                 historyCount = 0;
