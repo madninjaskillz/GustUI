@@ -175,6 +175,19 @@ public class KnobElement : Element
     /// stream, which per-tick <see cref="OnValueChanged"/> cannot signal.</summary>
     public Action<float> OnDragCompleted;
 
+    /// <summary>
+    /// Raised by the second press of a double-click, INSTEAD of a drag. The
+    /// host's typed-value entry (ezmuze #499) hangs off this: a knob has no
+    /// keyboard focus of its own, so the double-click is the one gesture that
+    /// works on every knob, including one drawn without a readout. Null (the
+    /// default) keeps the second press an ordinary drag.
+    /// </summary>
+    public Action<ClickEventArgs> OnDoubleClick;
+
+    /// <summary>The press that opened a double-click owns no drag: the rest of
+    /// its gesture (held, release) is swallowed.</summary>
+    private bool pressWasDoubleClick;
+
     private float value;
     public float Value
     {
@@ -220,6 +233,13 @@ public class KnobElement : Element
 
         ElementTrait<OnMousePress>().Set(new TVEvent<ClickEventArgs>(args =>
         {
+            pressWasDoubleClick = args.ClickCount == 2 && OnDoubleClick != null;
+            if (pressWasDoubleClick)
+            {
+                OnDoubleClick(args);
+                return;
+            }
+
             // A press out on the rim of a MODULATED knob grabs the arc; a
             // press anywhere else — and every press on an unmodulated knob —
             // is the ordinary value drag, unchanged.
@@ -240,6 +260,11 @@ public class KnobElement : Element
 
         ElementTrait<OnMouseButtonHeldDown>().Set(new TVEvent<ClickEventArgs>(args =>
         {
+            if (pressWasDoubleClick)
+            {
+                return;
+            }
+
             if (draggingModArc)
             {
                 // RADIAL drag: the pointer's angle around the knob centre maps
@@ -264,6 +289,12 @@ public class KnobElement : Element
 
         ElementTrait<OnMouseRelease>().Set(new TVEvent<ClickEventArgs>(args =>
         {
+            if (pressWasDoubleClick)
+            {
+                pressWasDoubleClick = false;
+                return;
+            }
+
             if (draggingModArc)
             {
                 draggingModArc = false;

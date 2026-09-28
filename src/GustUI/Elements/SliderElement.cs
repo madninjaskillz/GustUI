@@ -81,6 +81,12 @@ public class SliderElement : Element
     /// value — the "commit" hook (see <see cref="KnobElement.OnDragCompleted"/>).</summary>
     public Action<float> OnDragCompleted;
 
+    /// <summary>Raised by the second press of a double-click, instead of a
+    /// jump-and-drag — see <see cref="KnobElement.OnDoubleClick"/>.</summary>
+    public Action<ClickEventArgs> OnDoubleClick;
+
+    private bool pressWasDoubleClick;
+
     private float value;
     public float Value
     {
@@ -103,17 +109,33 @@ public class SliderElement : Element
 
         ElementTrait<OnMousePress>().Set(new TVEvent<ClickEventArgs>(args =>
         {
+            pressWasDoubleClick = args.ClickCount == 2 && OnDoubleClick != null;
+            if (pressWasDoubleClick)
+            {
+                OnDoubleClick(args);
+                return;
+            }
+
             CapturePointer();
             Value = ValueAt(args.MouseState.X, args.MouseState.Y);
         }));
 
         ElementTrait<OnMouseButtonHeldDown>().Set(new TVEvent<ClickEventArgs>(args =>
         {
-            Value = ValueAt(args.MouseState.X, args.MouseState.Y);
+            if (!pressWasDoubleClick)
+            {
+                Value = ValueAt(args.MouseState.X, args.MouseState.Y);
+            }
         }));
 
         ElementTrait<OnMouseRelease>().Set(new TVEvent<ClickEventArgs>(args =>
         {
+            if (pressWasDoubleClick)
+            {
+                pressWasDoubleClick = false;
+                return;
+            }
+
             OnDragCompleted?.Invoke(value);
         }));
     }
