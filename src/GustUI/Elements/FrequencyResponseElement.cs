@@ -109,9 +109,28 @@ public class FrequencyResponseElement : Element
     /// right-click remove one (an EQ with spare bands; not a 3-band EQ).</summary>
     public bool CanAddNodes { get; set; }
 
+    /// <summary>
+    /// Whether the dB scale also holds the curve's own highest point, not
+    /// only the nodes' gains. For a picture of a filter (ezmuze #508 on),
+    /// where the resonant peak is the curve and its one point sits at the
+    /// cutoff rather than on top of the peak.
+    /// </summary>
+    public bool FitCurve { get; set; }
+
     /// <summary>The whole response in dB at a frequency. Null draws no
     /// curve.</summary>
     public Func<float, float> ResponseDb;
+
+    /// <summary>
+    /// Optional: the lowest and highest response in dB between two
+    /// frequencies. Given it, each column of the curve is drawn from the
+    /// span it covers, alternating the span's top and bottom, so detail finer
+    /// than a column (a comb's teeth, dense at the top of a log axis) draws
+    /// as the band it fills rather than as whichever tooth a column's centre
+    /// happened to land on. Where the detail is wider than a column the two
+    /// are equal and the curve is the plain one.
+    /// </summary>
+    public Func<float, float, (float Min, float Max)> ResponseRange;
 
     /// <summary>One node's own response in dB at a frequency, for the
     /// faint per-band curve. Null draws none.</summary>
@@ -467,12 +486,12 @@ public class FrequencyResponseElement : Element
 
         font ??= Resources.StaticResources.FontManager.LoadSdfFont(Resources.StaticResources.Theme.UiFontSmall.Family);
 
+        EnsureCurve((int)size.X);
         if (dragIndex < 0)
         {
-            DbRange = FrequencyResponseMath.ChooseRange(DbRanges, Nodes);
+            DbRange = FrequencyResponseMath.ChooseRange(DbRanges, Nodes, FitCurve ? curve : null);
         }
 
-        EnsureCurve((int)size.X);
         DrawGrid(manager, origin, size);
         DrawCurves(manager, origin, size);
         DrawNodes(manager, origin, size);
@@ -534,8 +553,17 @@ public class FrequencyResponseElement : Element
 
         for (int c = 0; c < columns; c++)
         {
-            float hz = HzAt(c * (width - 1f) / (columns - 1), width);
-            curve[c] = ResponseDb?.Invoke(hz) ?? 0f;
+            float x = c * (width - 1f) / (columns - 1);
+            if (ResponseRange != null)
+            {
+                float half = (width - 1f) / (columns - 1) / 2f;
+                (float lo, float hi) = ResponseRange(HzAt(Math.Max(0f, x - half), width), HzAt(Math.Min(width, x + half), width));
+                curve[c] = (c & 1) == 0 ? hi : lo;
+            }
+            else
+            {
+                curve[c] = ResponseDb?.Invoke(HzAt(x, width)) ?? 0f;
+            }
         }
 
         // The selected node's own shape, or the hovered one's while nothing
@@ -792,12 +820,33 @@ public static class FrequencyResponseMath
         return ((height / 2f) - y) / half * range;
     }
 
-    /// <summary>The smallest scale that holds every enabled gain node. A
+    /// <summary>The smallest scale that holds every enabled gain node (and,
+    /// given one, the curve's highest point: a cut going down to nothing
+    /// does not stretch the scale, a resonant peak does). A
     /// node on the outermost line is still clear of the frame: the lines sit
     /// an inset in from the edges.</summary>
-    public static float ChooseRange(float[] ranges, IReadOnlyList<ResponseNode> nodes)
+    public static float ChooseRange(float[] ranges, IReadOnlyList<ResponseNode> nodes, float[] curve = null)
     {
         float needed = 0f;
+        if (curve != null)
+        {
+            // The highest point, and the bottom of every DIP the curve climbs
+            // back out of (a comb's valleys), while it is above the largest
+            // scale's floor. A cut's slope is not a dip: it never comes back,
+            // so a low pass still draws on the scale its passband needs.
+            float floor = ranges.Length > 0 ? -ranges[^1] : -30f;
+            for (int c = 0; c < curve.Length; c++)
+            {
+                float db = curve[c];
+                needed = Math.Max(needed, db);
+                bool dip = c > 0 && c < curve.Length - 1 && db < curve[c - 1] && db < curve[c + 1];
+                if (dip && db > floor)
+                {
+                    needed = Math.Max(needed, -db);
+                }
+            }
+        }
+
         foreach (ResponseNode node in nodes)
         {
             if (node.Enabled && node.MovesY)

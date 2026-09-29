@@ -64,6 +64,18 @@ namespace GustUI.Tests
         }
 
         [Fact]
+        public void AFittedCurveStretchesTheScaleForItsPeak_NotForItsCut()
+        {
+            float[] ranges = { 12, 18, 24, 30 };
+            var nodes = new List<ResponseNode> { new() { Db = 3 } };
+            Assert.Equal(12f, FrequencyResponseMath.ChooseRange(ranges, nodes, new[] { 0f, -60f, -120f }));
+            Assert.Equal(24f, FrequencyResponseMath.ChooseRange(ranges, nodes, new[] { 0f, -21f, 0f }));
+            Assert.Equal(12f, FrequencyResponseMath.ChooseRange(ranges, nodes, new[] { 0f, -3f, -21f, -29f, -60f }));
+            Assert.Equal(18f, FrequencyResponseMath.ChooseRange(ranges, nodes, new[] { 0f, 16f, -60f }));
+            Assert.Equal(12f, FrequencyResponseMath.ChooseRange(ranges, nodes));
+        }
+
+        [Fact]
         public void DraggingANodeMovesItsFrequencyAndGain()
         {
             var node = new ResponseNode { Hz = 1000, Db = 0 };
