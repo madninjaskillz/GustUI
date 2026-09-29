@@ -298,13 +298,13 @@ namespace GustUI.Elements
             Sync(dragBarElement);
 
 
-            Set<BackgroundFillTrait>(new TVFillSimpleGradient(BarFillTop, BarFillBottom, Direction.Vertically));
+            Set<BackgroundFillTrait>(new TVFillSimpleGradient(() => BarFillTop, () => BarFillBottom, Direction.Vertically));
             Set<BorderSizeTrait>(new TVInt(0));
             Set<FontTrait>(Resources.StaticResources.Theme.UiFontSecondary);
             Set<PositionTrait>(position ?? new TVVector(0, 0));
             Set<SizeTrait>(size ?? new TVVector(0, 0));
 
-            accentUnderline = new FilledRectangleElement(0, (int)size.Y - 2, (int)size.X, 2, new TVFillSolidColor(AccentUnderline));
+            accentUnderline = new FilledRectangleElement(0, (int)size.Y - 2, (int)size.X, 2, new TVFillSolidColor(() => AccentUnderline));
             AddChild(accentUnderline, "accent-underline");
 
             // Not Sync()'d to anything, not synced FROM anything — see its
@@ -313,7 +313,7 @@ namespace GustUI.Elements
             // accentUnderline with no dependence on insertion-order
             // assumptions — this is the one element in this file that
             // genuinely needs to win every z-order tie.
-            inactiveOverlay = new FilledRectangleElement(0, 0, (int)size.X, (int)size.Y, new TVFillSolidColor(InactiveOverlayColor));
+            inactiveOverlay = new FilledRectangleElement(0, 0, (int)size.X, (int)size.Y, new TVFillSolidColor(() => InactiveOverlayColor));
             inactiveOverlay.Depth = 50;
             if (inactiveOverlay.ElementTrait<BackgroundFillTrait>().Value() is TVFill overlayFill)
             {
@@ -334,18 +334,18 @@ namespace GustUI.Elements
                 closeButton.Set<TextTrait>(Resources.StaticResources.Theme.Icons.CloseIcon.ToTextTrait());
                 closeButton.Set<FontTrait>(ButtonGlyphFont(Resources.StaticResources.Theme.AltSymbolFont));
                 closeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
-                closeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
+                closeButton.Set<ForegroundColorTrait>(new TVColor(() => CloseIdleForeground));
                 closeButton.Set<PositionTrait>(new TVVector(size.X - size.Y, 0));
                 closeButton.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => RequestClose()));
                 closeButton.Set<OnEnterTrait>(new TVEvent<ClickEventArgs>((x) =>
                 {
-                    closeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(CloseHoverFill));
+                    closeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(() => CloseHoverFill));
                     closeButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
                 }));
                 closeButton.Set<OnExitTrait>(new TVEvent<ClickEventArgs>((x) =>
                 {
                     closeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
-                    closeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
+                    closeButton.Set<ForegroundColorTrait>(new TVColor(() => CloseIdleForeground));
                 }));
             }
 
@@ -368,7 +368,7 @@ namespace GustUI.Elements
                 // than one working and the other silently blank.
                 sizeButton.Set<FontTrait>(ButtonGlyphFont(Resources.StaticResources.Theme.SymbolFont));
                 sizeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
-                sizeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
+                sizeButton.Set<ForegroundColorTrait>(new TVColor(() => CloseIdleForeground));
                 sizeButton.Set<PositionTrait>(new TVVector(size.X - CloseAndSizeWidth, 0));
                 sizeButton.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) =>
                 {
@@ -388,13 +388,13 @@ namespace GustUI.Elements
                 }));
                 sizeButton.Set<OnEnterTrait>(new TVEvent<ClickEventArgs>((x) =>
                 {
-                    sizeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(SizeHoverFill));
+                    sizeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(() => SizeHoverFill));
                     sizeButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
                 }));
                 sizeButton.Set<OnExitTrait>(new TVEvent<ClickEventArgs>((x) =>
                 {
                     sizeButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
-                    sizeButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
+                    sizeButton.Set<ForegroundColorTrait>(new TVColor(() => CloseIdleForeground));
                 }));
             }
 
@@ -408,7 +408,7 @@ namespace GustUI.Elements
             dragBarElement.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
             dragBarElement.Set<TextTrait>(new TVText(title));
             dragBarElement.Set<FontTrait>(Resources.StaticResources.Theme.UiFontSecondary);
-            dragBarElement.Set<ForegroundColorTrait>(new TVColor(TitleText));
+            dragBarElement.Set<ForegroundColorTrait>(new TVColor(() => TitleText));
 
             // Drag-to-move is a ModalWindowElement behavior; other hosts
             // (full-screen modals) get a static title strip. Routed through
@@ -537,13 +537,13 @@ namespace GustUI.Elements
             pinButton.Set<FontTrait>(ButtonGlyphFont(Resources.StaticResources.Theme.SymbolFont));
             pinButton.Set<TextTrait>(new TVText(UIFont.Symbol.Pin.Icon()));
             pinButton.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent));
-            pinButton.Set<ForegroundColorTrait>(new TVColor(CloseIdleForeground));
+            pinButton.Set<ForegroundColorTrait>(new TVColor(() => CloseIdleForeground));
             pinButton.Set<PositionTrait>(new TVVector(size.X - RightChromeWidth, 0));
             pinButton.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>(_ => host.ShowPinMenu(pinButton)));
             pinButton.Set<OnEnterTrait>(new TVEvent<ClickEventArgs>(_ =>
             {
                 pinHovered = true;
-                pinButton.Set<BackgroundFillTrait>(new TVFillSolidColor(SizeHoverFill));
+                pinButton.Set<BackgroundFillTrait>(new TVFillSolidColor(() => SizeHoverFill));
                 pinButton.Set<ForegroundColorTrait>(new TVColor(Color.White));
             }));
             pinButton.Set<OnExitTrait>(new TVEvent<ClickEventArgs>(_ =>

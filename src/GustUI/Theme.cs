@@ -459,33 +459,56 @@ namespace GustUI
             // (MenuBarFill), so a named backdrop colour here would be wrong
             // for one of them.
             Color menuHighlight = p.MenuHighlight;
-            FruitMenuItemStates = new ButtonStates
+            Refill(ref FruitMenuItemStates, new ButtonStates
             {
                 NormalFill = new TVFillSimpleGradient(Color.Transparent, Color.Transparent, Direction.Vertically),
                 HoveredFill = new TVFillSimpleGradient(menuHighlight, Shade(menuHighlight, 0.86f), Direction.Vertically),
                 PressedFill = new TVFillSimpleGradient(Shade(menuHighlight, 0.86f), Shade(menuHighlight, 0.72f), Direction.Vertically)
-            };
+            });
 
-            PositiveButtonStates = new ButtonStates
+            Refill(ref PositiveButtonStates, new ButtonStates
             {
                 NormalFill = new TVFillSimpleGradient(p.PositiveBase, p.PositiveBase * 0.75f, Direction.Vertically),
                 HoveredFill = new TVFillSimpleGradient(p.PositiveHover, p.PositiveHover * 0.75f, Direction.Vertically),
                 PressedFill = new TVFillSimpleGradient(p.PositivePress, p.PositivePress * 0.75f, Direction.Vertically)
-            };
+            });
 
-            NegativeButtonStates = new ButtonStates
+            Refill(ref NegativeButtonStates, new ButtonStates
             {
                 NormalFill = new TVFillSimpleGradient(p.NegativeBase, p.NegativeBase * 0.75f, Direction.Vertically),
                 HoveredFill = new TVFillSimpleGradient(p.NegativeHover, p.NegativeHover * 0.75f, Direction.Vertically),
                 PressedFill = new TVFillSimpleGradient(p.NegativePress, p.NegativePress * 0.75f, Direction.Vertically)
-            };
+            });
 
-            NeutralButtonStates = new ButtonStates
+            Refill(ref NeutralButtonStates, new ButtonStates
             {
                 NormalFill = new TVFillSimpleGradient(p.NeutralBase, p.NeutralBase * 0.75f, Direction.Vertically),
                 HoveredFill = new TVFillSimpleGradient(p.NeutralHover, p.NeutralHover * 0.75f, Direction.Vertically),
                 PressedFill = new TVFillSimpleGradient(p.NeutralPress, p.NeutralPress * 0.75f, Direction.Vertically)
-            };
+            });
+        }
+
+        /// <summary>
+        /// Points an existing <see cref="ButtonStates"/> at the new palette's
+        /// fills instead of replacing it (#565). Every button holds the SAME
+        /// instance it was built with (<c>new TVSmartFill{States=Theme.
+        /// NeutralButtonStates}</c>), and <see cref="TVSmartFill"/> reads its
+        /// fills every frame, so updating that instance in place is what makes
+        /// every existing button follow a live light/dark switch. Replacing it
+        /// left them all in the palette they were built under: the welcome
+        /// screen's Open and New project buttons stayed dark on a light window.
+        /// </summary>
+        private static void Refill(ref ButtonStates target, ButtonStates next)
+        {
+            if (target == null)
+            {
+                target = next;
+                return;
+            }
+
+            target.NormalFill = next.NormalFill;
+            target.HoveredFill = next.HoveredFill;
+            target.PressedFill = next.PressedFill;
         }
 
         /// <summary>Standard corner radius for interactive chips (toolbar

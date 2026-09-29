@@ -749,7 +749,7 @@ namespace GustUI.Elements.InputElements
                 lineSelections.Add(band);
 
                 var element = new TextElement { WordWrap = false };
-                element.Set<ForegroundColorTrait>(new TVColor(Resources.StaticResources.Theme.BodyText));
+                element.Set<ForegroundColorTrait>(new TVColor(() => Resources.StaticResources.Theme.BodyText));
                 element.Set<FontTrait>(Font);
                 element.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment() { Alignment = HorizontalAlignment.Left });
                 element.Set<TextTrait>(new TVText(""));

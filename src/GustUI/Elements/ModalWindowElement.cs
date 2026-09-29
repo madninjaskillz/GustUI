@@ -1670,7 +1670,7 @@ namespace GustUI.Elements
             if (tabStrip == null)
             {
                 tabStrip = new FilledRectangleElement(0, 0, 10, ModalTitleBarElement.BarHeight,
-                    new TVFillSolidColor(TabStripFill));
+                    new TVFillSolidColor(() => TabStripFill));
 
                 // Above the title bar it covers, and with its own press guard:
                 // GustUI gives the event to EVERY element whose rect contains
@@ -1730,7 +1730,7 @@ namespace GustUI.Elements
             tabStrip.Set<SizeTrait>(new TVVector(stripWidth, ModalTitleBarElement.BarHeight));
 
             bool active = IsActiveWindow(this);
-            tabStrip.Set<BackgroundFillTrait>(new TVFillSolidColor(active ? TabStripFill : Dim(TabStripFill)));
+            tabStrip.Set<BackgroundFillTrait>(new TVFillSolidColor(() => active ? TabStripFill : Dim(TabStripFill)));
 
             // Each tab is as wide as its caption and its glyphs (#341), up to
             // MaxTabWidth; when they do not all fit, the widest give way first,
@@ -1774,18 +1774,18 @@ namespace GustUI.Elements
                 bool isActive = i == activeIndex;
                 entry.Button.Set<BackgroundFillTrait>(isActive
                     ? new TVFillSimpleGradient(
-                        active ? TabActiveTop : Dim(TabActiveTop),
-                        active ? TabActiveBottom : Dim(TabActiveBottom),
+                        () => active ? TabActiveTop : Dim(TabActiveTop),
+                        () => active ? TabActiveBottom : Dim(TabActiveBottom),
                         Direction.Vertically)
-                    : new TVFillSolidColor(active ? TabInactiveFill : Dim(TabInactiveFill)));
+                    : new TVFillSolidColor(() => active ? TabInactiveFill : Dim(TabInactiveFill)));
 
                 // Full width and 3px: the one mark that says "this is the tab
                 // you are looking at" has to survive a glance (#341).
                 entry.Underline.Set<PositionTrait>(new TVVector(0, ModalTitleBarElement.BarHeight - TabUnderlineHeight));
                 entry.Underline.Set<SizeTrait>(new TVVector(isActive ? shared : 0f, TabUnderlineHeight));
-                entry.Underline.Set<BackgroundFillTrait>(new TVFillSolidColor(active ? TabAccent : Dim(TabAccent)));
+                entry.Underline.Set<BackgroundFillTrait>(new TVFillSolidColor(() => active ? TabAccent : Dim(TabAccent)));
 
-                entry.Label.Set<ForegroundColorTrait>(new TVColor(isActive ? TabCaptionActive : TabCaptionInactive));
+                entry.Label.Set<ForegroundColorTrait>(new TVColor(() => isActive ? TabCaptionActive : TabCaptionInactive));
 
                 float labelWidth = Math.Max(10f, shared - TabGlyphsWidth);
                 entry.Label.Set<SizeTrait>(new TVVector(labelWidth, ModalTitleBarElement.BarHeight));
@@ -1856,8 +1856,8 @@ namespace GustUI.Elements
             // running straight into the title bar beside it — the border is
             // what says "this is a tab" in both cases.
             var button = new FilledRectangleElement(0, 0, 100, ModalTitleBarElement.BarHeight,
-                new TVFillSolidColor(TabInactiveFill), 1,
-                Resources.StaticResources.Theme.SurfaceBorder);
+                new TVFillSolidColor(() => TabInactiveFill), 1,
+                () => Resources.StaticResources.Theme.SurfaceBorder);
 
             var label = new TextElement { WordWrap = false };
             label.Set<PositionTrait>(new TVVector(TabPaddingX, 0));
@@ -1870,7 +1870,7 @@ namespace GustUI.Elements
             entry.Label = label;
 
             entry.Underline = new FilledRectangleElement(0, ModalTitleBarElement.BarHeight - 2, 0, 2,
-                new TVFillSolidColor(TabAccent));
+                new TVFillSolidColor(() => TabAccent));
 
             button.AddChild(entry.Underline, "accent-underline");
 
@@ -1892,7 +1892,7 @@ namespace GustUI.Elements
             closeGlyph.Set<TextTrait>(Resources.StaticResources.Theme.Icons.CloseIcon.ToTextTrait());
             close.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>(_ => closeTabRequested = entry));
             close.AddTrait<OnEnterTrait>().Set(new TVEvent<ClickEventArgs>(_ =>
-                close.Set<BackgroundFillTrait>(new TVFillSolidColor(Resources.StaticResources.Theme.AccentMuteOn))));
+                close.Set<BackgroundFillTrait>(new TVFillSolidColor(() => Resources.StaticResources.Theme.AccentMuteOn))));
             close.Set<OnExitTrait>(new TVEvent<ClickEventArgs>(_ =>
                 close.Set<BackgroundFillTrait>(new TVFillSolidColor(Color.Transparent))));
 
@@ -3321,7 +3321,7 @@ namespace GustUI.Elements
             this.title = title;
             AutoCenter = position == null;
             Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
-            Set<ForegroundColorTrait>(new TVColor(BodyForeground));
+            Set<ForegroundColorTrait>(new TVColor(() => BodyForeground));
 
             Set<BodyTextTrait>(new TVText(body));
             Set<PositionTrait>(position ?? new TVVector(0, 0));
@@ -3351,7 +3351,7 @@ namespace GustUI.Elements
             content.Set<PositionTrait>(new TVVector(10, 50));
             content.Set<TextTrait>(new TVText(body));
             content.Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
-            content.Set<ForegroundColorTrait>(new TVColor(BodyForeground));
+            content.Set<ForegroundColorTrait>(new TVColor(() => BodyForeground));
             content.Set<SizeTrait>(new TVVector(size.X - 20, 0));
             content.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment() { Alignment = HorizontalAlignment.Left });
 
@@ -3394,7 +3394,7 @@ namespace GustUI.Elements
             FitModalToContent = fitToContent;
 
             Set<FontTrait>(Resources.StaticResources.Theme.UiFont);
-            Set<ForegroundColorTrait>(new TVColor(BodyForeground));
+            Set<ForegroundColorTrait>(new TVColor(() => BodyForeground));
 
             Set<PositionTrait>(position ?? new TVVector(0, 0));
             Set<SizeTrait>(new TVVector(content != null ? content.GetSize().X + 20 : size.X, size.Y) ?? new TVVector(0, 0));
@@ -4392,7 +4392,7 @@ namespace GustUI.Elements
             // this element from the automated Stage.Clear sweep.
             IsChrome = true;
 
-            Set<BackgroundFillTrait>(new TVFillSimpleGradient(BodyFillTop, BodyFillBottom, Direction.Vertically));
+            Set<BackgroundFillTrait>(new TVFillSimpleGradient(() => BodyFillTop, () => BodyFillBottom, Direction.Vertically));
             var size = this.GetSize();
             Set<BorderFillTrait>(new TVBorder9Grid());
             restPosition = ElementTrait<PositionTrait>().Value();
@@ -4439,7 +4439,7 @@ namespace GustUI.Elements
                 // the two sets of buttons interleave. Matches the depth the
                 // rest of this element's chrome already uses.
                 buttonBackgroundElement.Depth = 30;
-                buttonBackgroundElement.Set<BackgroundFillTrait>(new TVFillSimpleGradient(FooterFillTop, FooterFillBottom, Direction.Vertically));
+                buttonBackgroundElement.Set<BackgroundFillTrait>(new TVFillSimpleGradient(() => FooterFillTop, () => FooterFillBottom, Direction.Vertically));
                 float xPos = size.X - 20;
                 int i = 0;
                 foreach (var button in this.buttons)

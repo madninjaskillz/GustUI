@@ -126,7 +126,7 @@ namespace GustUI.Elements
                 // LoopBrowserPanel's own scroll lists already use for
                 // OnScrollWheelChanged.
                 handle.AddTrait<OnEnterTrait>().Set(new TVEvent<ClickEventArgs>(_ =>
-                    handle.Set<BackgroundFillTrait>(new TVFillSolidColor(HoverHighlight))));
+                    handle.Set<BackgroundFillTrait>(new TVFillSolidColor(() => HoverHighlight))));
                 handle.ElementTrait<OnExitTrait>().Set(new TVEvent<ClickEventArgs>(_ =>
                 {
                     if (activeHandle != captured)

@@ -156,8 +156,8 @@ namespace GustUI.Elements
             // from (design-guide.md §1.5) — was a flat, harsher near-white
             // independent of that bar's own (already-retinted) look.
             Set<BackgroundFillTrait>(new TVFillSimpleGradient(
-                Resources.StaticResources.Theme.MenuBarFillTop,
-                Resources.StaticResources.Theme.MenuBarFillBottom,
+                () => Resources.StaticResources.Theme.MenuBarFillTop,
+                () => Resources.StaticResources.Theme.MenuBarFillBottom,
                 Direction.Vertically));
 
             this.rowWidth = width;

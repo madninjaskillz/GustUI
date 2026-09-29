@@ -35,7 +35,7 @@ namespace GustUI.Elements
 
             overlay = new FilledRectangleElement(0, 0, 0, 0,
                 new TVFillSolidColor(() => Resources.StaticResources.Theme.AccentSelection * 0.25f),
-                2, Resources.StaticResources.Theme.AccentSelection);
+                2, () => Resources.StaticResources.Theme.AccentSelection);
             overlay.Depth = Depth;
             Resources.StaticResources.RootWindow.AddChild(overlay, "dock-preview");
         }

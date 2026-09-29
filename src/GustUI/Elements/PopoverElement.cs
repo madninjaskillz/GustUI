@@ -43,8 +43,8 @@ namespace GustUI.Elements
             Set<PositionTrait>(new TVVector(0, 0));
             // Same translucent chrome family FruitPopupMenu uses.
             Set<BackgroundFillTrait>(new TVFillSimpleGradient(
-                Resources.StaticResources.Theme.MenuBarFillTop,
-                Resources.StaticResources.Theme.MenuBarFillBottom,
+                () => Resources.StaticResources.Theme.MenuBarFillTop,
+                () => Resources.StaticResources.Theme.MenuBarFillBottom,
                 Direction.Vertically));
             Set<BorderFillTrait>(new TVBorder9Grid());
         }

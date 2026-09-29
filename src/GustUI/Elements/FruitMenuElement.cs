@@ -42,8 +42,8 @@ namespace GustUI.Elements
             // backdrop blur: nothing currently renders behind the bar (content
             // starts below MenuHeight, not underneath it).
             Set<BackgroundFillTrait>(new TVFillSimpleGradient(
-                Resources.StaticResources.Theme.MenuBarFillTop,
-                Resources.StaticResources.Theme.MenuBarFillBottom,
+                () => Resources.StaticResources.Theme.MenuBarFillTop,
+                () => Resources.StaticResources.Theme.MenuBarFillBottom,
                 Direction.Vertically));
 
 
