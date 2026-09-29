@@ -275,7 +275,7 @@ namespace GustUI.Elements.InputElements
             AddChild(selectionElement, "selection");
 
             textElement = new TextElement { WordWrap = false };
-            textElement.Set<ForegroundColorTrait>(new TVColor(theme.BodyText));
+            textElement.Set<ForegroundColorTrait>(new TVColor(() => theme.BodyText));
             textElement.Set<PositionTrait>(new TVVector(PadX, 4));
             textElement.Set<FontTrait>(theme.UiFont);
             textElement.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment() { Alignment = HorizontalAlignment.Left });
@@ -292,9 +292,9 @@ namespace GustUI.Elements.InputElements
             // Themed idle state (design-guide.md §1) — was hardcoded
             // Color.Gray/Color.Black regardless of app theme, which read as a
             // stray light-mode control inside an otherwise dark app.
-            this.Set<BorderFillTrait>(new TVBorderColorFill(theme.SurfaceBorder));
+            this.Set<BorderFillTrait>(new TVBorderColorFill(() => theme.SurfaceBorder));
             this.Set<BorderSizeTrait>(new TVInt(1));
-            this.Set<BackgroundFillTrait>(new TVFillSolidColor(theme.SurfaceRaised));
+            this.Set<BackgroundFillTrait>(new TVFillSolidColor(() => theme.SurfaceRaised));
 
             this.Set<OnFocused>(new TVEvent<TVEventArgs>(x => OnFocusedHandler(x)));
             this.Set<OnUnfocused>(new TVEvent<TVEventArgs>(x => OnUnfocusedHandler(x)));
@@ -388,14 +388,14 @@ namespace GustUI.Elements.InputElements
 
             if (focused)
             {
-                this.Set<BackgroundFillTrait>(new TVFillSolidColor(surfaceFocused ?? surface ?? theme.SurfaceHeader));
-                this.Set<BorderFillTrait>(new TVBorderColorFill(borderFocusedColour ?? theme.AccentSelection));
+                this.Set<BackgroundFillTrait>(new TVFillSolidColor(() => surfaceFocused ?? surface ?? theme.SurfaceHeader));
+                this.Set<BorderFillTrait>(new TVBorderColorFill(() => borderFocusedColour ?? theme.AccentSelection));
                 this.Set<BorderSizeTrait>(new TVInt(2));
                 return;
             }
 
-            this.Set<BackgroundFillTrait>(new TVFillSolidColor(surface ?? theme.SurfaceRaised));
-            this.Set<BorderFillTrait>(new TVBorderColorFill(borderColour ?? theme.SurfaceBorder));
+            this.Set<BackgroundFillTrait>(new TVFillSolidColor(() => surface ?? theme.SurfaceRaised));
+            this.Set<BorderFillTrait>(new TVBorderColorFill(() => borderColour ?? theme.SurfaceBorder));
             this.Set<BorderSizeTrait>(new TVInt(1));
         }
 
