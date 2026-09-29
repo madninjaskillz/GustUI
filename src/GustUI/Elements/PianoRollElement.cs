@@ -410,10 +410,12 @@ namespace GustUI.Elements
                     return;
                 }
 
-                var rect = new Rectangle(left, top + 1, noteW, rowH);
+                // Velocity is the note's HEIGHT, centred on its row
+                // (ezmuze #586): full height at 100%, a 2 px line at 0%.
+                int noteH = VelocityHeight(rowH, note.Velocity);
+                var rect = new Rectangle(left, top + 1 + (rowH - noteH) / 2, noteW, noteH);
                 manager.DrawFilledRectangle(rect, body);
                 manager.DrawRectangle(rect, border);
-                DrawVelocityShade(manager, rect, note.Velocity, alpha);
             }
             else
             {
@@ -446,10 +448,12 @@ namespace GustUI.Elements
             float leftF = x0 + XForBeat(note.StartBeats, width);
             float rightF = x0 + XForBeat(note.StartBeats + note.LengthBeats, width);
 
-            // top(p) = y0 + YTopForPitch(p) + 1 = y0 + (TopPitch - p) * RowHeight + 1
+            // top(p) = y0 + YTopForPitch(p) + 1 = y0 + (TopPitch - p) * RowHeight + 1,
+            // then centred at the velocity's height, as a straight note is.
+            int noteH = VelocityHeight(rowH, note.Velocity);
             Rendering.BendBand.Append(bendBatch, note.BendOffsets, note.Pitch,
                 leftF, rightF, Math.Max(leftF, gridX), Math.Min(rightF, x0 + width),
-                y0 + TopPitch * RowHeight + 1f, -RowHeight, rowH,
+                y0 + TopPitch * RowHeight + 1f + (rowH - noteH) / 2, -RowHeight, noteH,
                 body, border, y0, y0 + height);
         }
 
@@ -500,14 +504,26 @@ namespace GustUI.Elements
             }
         }
 
-        private static void DrawVelocityShade(Managers.DrawManager manager, Rectangle rect, float velocity, float alpha)
+        /// <summary>A 0% note's drawn height, in pixels.</summary>
+        public const float MinVelocityHeight = 2f;
+
+        /// <summary>
+        /// The drawn height of a note of <paramref name="velocity"/> in a slot
+        /// <paramref name="fullHeight"/> pixels tall: full height at 1, a
+        /// <see cref="MinVelocityHeight"/> line at 0, linear between. Mirrors
+        /// ezmuze's NoteVelocityMath.DrawnHeight, which owns the gesture that
+        /// sets it (the PianoRollViewMath division: the host keeps the logic,
+        /// the element mirrors the mapping it draws with).
+        /// </summary>
+        public static int VelocityHeight(int fullHeight, float velocity)
         {
-            // Quieter notes dim: a translucent dark overlay scaled by 1−velocity.
-            float dim = 1f - MathHelper.Clamp(velocity, 0f, 1f);
-            if (dim > 0.05f)
+            if (fullHeight <= MinVelocityHeight)
             {
-                manager.DrawFilledRectangle(rect, new Color(0, 0, 0) * (0.5f * dim * alpha));
+                return Math.Max(1, fullHeight);
             }
+
+            float v = float.IsNaN(velocity) ? 1f : MathHelper.Clamp(velocity, 0f, 1f);
+            return Math.Max(1, (int)Math.Round(MinVelocityHeight + (fullHeight - MinVelocityHeight) * v));
         }
 
         /// <summary>Linear interpolation over the host-sampled bend offsets
