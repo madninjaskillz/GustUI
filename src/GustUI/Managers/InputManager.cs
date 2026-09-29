@@ -887,6 +887,64 @@ namespace GustUI.Managers
                && (keys.IsKeyDown(Keys.LeftAlt) || keys.IsKeyDown(Keys.RightAlt))
                && keys.IsKeyDown(Keys.U);
 
+        /// <summary>
+        /// The pointer state one frame dispatches with, in the tree's own
+        /// (MouseScale-divided) space.
+        ///
+        /// Synthetic state is used as given: it is already authored in that
+        /// space. Real state is divided by <paramref name="scale"/>, because it
+        /// arrives in physical OS pixels. And while real input does not reach
+        /// the tree (an inactive window, or real input locked out), the pointer
+        /// is FROZEN where it was last processed, with the buttons up and no
+        /// scroll.
+        ///
+        /// That frozen state is the previous frame's, which is already in the
+        /// divided space, so it is NOT divided again (ezmuze #563). It used to
+        /// be: at 150 % display scaling every inactive frame moved it to two
+        /// thirds of the way to the corner, so within a second of the window
+        /// losing focus the pointer sat at (0,0) and hovered whatever was
+        /// there (the sequencer's top-left resize handle, drawn lit, in about
+        /// half of all screenshots taken while it ran unfocused).
+        /// </summary>
+        internal static MouseState PointerForFrame(
+            MouseState? synthetic, MouseState real, bool realInputReaches,
+            MouseState previous, int previousScrollWheelValue, float scale)
+        {
+            if (synthetic.HasValue)
+            {
+                return synthetic.Value;
+            }
+
+            if (!realInputReaches)
+            {
+                // Inactive window: nothing the real mouse does reaches the
+                // tree (see WindowActive). Position is frozen at the last
+                // processed position so hover state doesn't churn either.
+                return new MouseState(
+                    previous.X, previous.Y,
+                    previousScrollWheelValue, 0, 0, 0,
+                    ButtonState.Released, ButtonState.Released, ButtonState.Released,
+                    ButtonState.Released, ButtonState.Released);
+            }
+
+            if (scale != 1f && scale > 0f)
+            {
+                // Scale correction only makes sense for real, physical-pixel
+                // OS coordinates — synthetic state is already authored in
+                // the same (divided) space element bounds live in.
+                return new MouseState(
+                    (int)(real.X / scale),
+                    (int)(real.Y / scale),
+                    real.ScrollWheelValue,
+                    real.HorizontalScrollWheelValue,
+                    real.RawX, real.RawY,
+                    real.LeftButton, real.MiddleButton, real.RightButton,
+                    real.XButton1, real.XButton2);
+            }
+
+            return real;
+        }
+
         public void Update()
         {
             // Read the real keyboard before the gate, so the way out of a lock
@@ -899,32 +957,9 @@ namespace GustUI.Managers
 
             bool realInputReaches = WindowActive && AcceptsRealInput;
 
-            MouseState polledState = syntheticMouseState ?? Mouse.GetState();
-            if (!syntheticMouseState.HasValue && !realInputReaches)
-            {
-                // Inactive window: nothing the real mouse does reaches the
-                // tree (see WindowActive). Position is frozen at the last
-                // processed position so hover state doesn't churn either.
-                polledState = new MouseState(
-                    previousMouseState.X, previousMouseState.Y,
-                    previousScrollWheelValue, 0, 0, 0,
-                    ButtonState.Released, ButtonState.Released, ButtonState.Released,
-                    ButtonState.Released, ButtonState.Released);
-            }
-            if (!syntheticMouseState.HasValue && MouseScale != 1f && MouseScale > 0f)
-            {
-                // Scale correction only makes sense for real, physical-pixel
-                // OS coordinates — synthetic state is already authored in
-                // the same (divided) space element bounds live in.
-                polledState = new MouseState(
-                    (int)(polledState.X / MouseScale),
-                    (int)(polledState.Y / MouseScale),
-                    polledState.ScrollWheelValue,
-                    polledState.HorizontalScrollWheelValue,
-                    polledState.RawX, polledState.RawY,
-                    polledState.LeftButton, polledState.MiddleButton, polledState.RightButton,
-                    polledState.XButton1, polledState.XButton2);
-            }
+            MouseState polledState = PointerForFrame(
+                syntheticMouseState, syntheticMouseState.HasValue ? default : Mouse.GetState(),
+                realInputReaches, previousMouseState, previousScrollWheelValue, MouseScale);
 
             KeyboardState keyboardState = syntheticKeyboardState ?? (realInputReaches ? Keyboard.GetState() : default(KeyboardState));
             CurrentKeyboardState = keyboardState;
