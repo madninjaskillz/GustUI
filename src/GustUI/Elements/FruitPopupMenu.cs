@@ -466,7 +466,57 @@ namespace GustUI.Elements
                 return;
             }
 
+            CloseSubmenuOnSiblingHover();
             eligibleToAutoClose = true;
+        }
+
+        /// <summary>The row of this level the pointer was on last update, for
+        /// <see cref="CloseSubmenuOnSiblingHover"/>'s edge.</summary>
+        private FruitMenuItem pointerRow;
+
+        /// <summary>
+        /// Closes this level's open submenu when the pointer ARRIVES on
+        /// another row of this level (ezmuze #561), the job the row's own
+        /// exit used to do. An arrival, not a state: a submenu opened from the
+        /// keyboard or the control API while the pointer happens to rest on a
+        /// sibling stays open, as it did when an exit was what closed it.
+        /// Moving off the menu altogether leaves it open; so does passing
+        /// over the submenu itself on the way anywhere.
+        /// </summary>
+        private void CloseSubmenuOnSiblingHover()
+        {
+            FruitMenuItem now = null;
+            if (IsMouseOver() && !SubmenuChainHovered())
+            {
+                foreach ((FruitMenuItem row, float _) in itemRows)
+                {
+                    if (row.Visible && row.IsMouseOver())
+                    {
+                        now = row;
+                        break;
+                    }
+                }
+            }
+
+            bool arrived = now != null && !ReferenceEquals(now, pointerRow);
+            pointerRow = now;
+            if (arrived && submenu != null && !ReferenceEquals(now, submenuOwner))
+            {
+                CloseSubmenu();
+            }
+        }
+
+        private bool SubmenuChainHovered()
+        {
+            for (FruitPopupMenu level = submenu; level != null; level = level.submenu)
+            {
+                if (level.Parent != null && level.IsMouseOver())
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -636,6 +686,149 @@ namespace GustUI.Elements
 
         /// <summary>Whether any menu is open on screen.</summary>
         public static bool AnyOpen => Deepest() != null;
+
+        /// <summary>One row of an open menu level, as <see cref="OpenLevels"/>
+        /// reports it.</summary>
+        public sealed record RowInfo(string Text, bool Enabled, bool HasSubmenu, bool SubmenuOpen);
+
+        /// <summary>
+        /// The open menu, outermost level first, following each level's open
+        /// submenu down (ezmuze #561): what a script or the control API needs
+        /// to name a path for <see cref="OpenPath"/>. Separators are left
+        /// out. Empty when no menu is open.
+        /// </summary>
+        public static IReadOnlyList<IReadOnlyList<RowInfo>> OpenLevels()
+        {
+            var levels = new List<IReadOnlyList<RowInfo>>();
+            for (FruitPopupMenu level = Outermost(); level != null && level.Parent != null; level = level.submenu)
+            {
+                var rows = new List<RowInfo>();
+                foreach ((FruitMenuItem row, float _) in level.itemRows)
+                {
+                    if (row.Model == null || string.IsNullOrEmpty(row.Model.Text))
+                    {
+                        continue;
+                    }
+
+                    rows.Add(new RowInfo(row.Model.Text, row.Selectable, row.HasSubmenu,
+                        ReferenceEquals(level.submenuOwner, row) && level.submenu != null));
+                }
+
+                levels.Add(rows);
+            }
+
+            return levels;
+        }
+
+        /// <summary>
+        /// Walks the open menu by row text (ezmuze #561), from its outermost
+        /// level: every step but the last must be a submenu row, and is
+        /// opened exactly as the right arrow opens it. With
+        /// <paramref name="choose"/> the last step is RUN, as a click on it
+        /// would (it must be an enabled row without a submenu); without, it
+        /// is opened if it is a submenu and highlighted either way, and the
+        /// menu stays up for whatever looks at it next. Text matches whole,
+        /// ignoring case and surrounding spaces. Returns null on success, or
+        /// what stopped it.
+        /// </summary>
+        public static string OpenPath(IReadOnlyList<string> path, bool choose)
+        {
+            FruitPopupMenu level = Outermost();
+            if (level == null)
+            {
+                return "no menu is open";
+            }
+
+            if (path == null || path.Count == 0)
+            {
+                return "empty path";
+            }
+
+            for (int step = 0; step < path.Count; step++)
+            {
+                string want = (path[step] ?? "").Trim();
+                int index = level.RowIndex(want);
+                if (index < 0)
+                {
+                    var names = new List<string>();
+                    foreach ((FruitMenuItem r, float _) in level.itemRows)
+                    {
+                        if (!string.IsNullOrEmpty(r.Model?.Text))
+                        {
+                            names.Add(r.Model.Text);
+                        }
+                    }
+
+                    return "no row \"" + want + "\" at level " + (step + 1) + " (it has: " + string.Join(", ", names) + ")";
+                }
+
+                FruitMenuItem row = level.itemRows[index].Item;
+                level.SetHighlight(index);
+                bool last = step == path.Count - 1;
+
+                if (last && choose)
+                {
+                    if (row.HasSubmenu)
+                    {
+                        return "\"" + want + "\" opens a submenu; choose a row inside it";
+                    }
+
+                    if (!row.Selectable)
+                    {
+                        return "\"" + want + "\" is disabled";
+                    }
+
+                    row.Activate();
+                    return null;
+                }
+
+                if (!row.HasSubmenu)
+                {
+                    return last ? null : "\"" + want + "\" has no submenu";
+                }
+
+                FruitPopupMenu opened = row.OpenSubmenuFromKeyboard();
+                if (opened == null)
+                {
+                    return "\"" + want + "\" did not open";
+                }
+
+                level = opened;
+            }
+
+            return null;
+        }
+
+        private int RowIndex(string text)
+        {
+            for (int i = 0; i < itemRows.Count; i++)
+            {
+                string rowText = itemRows[i].Item.Model?.Text;
+                if (!string.IsNullOrEmpty(rowText)
+                    && string.Equals(rowText.Trim(), text, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        /// <summary>The newest top-level popup still on screen: the level a
+        /// path starts from.</summary>
+        private static FruitPopupMenu Outermost()
+        {
+            for (int i = Live.Count - 1; i >= 0; i--)
+            {
+                FruitPopupMenu menu = Live[i];
+                if (menu.Parent != null && menu.openedFrom == null)
+                {
+                    return menu;
+                }
+            }
+
+            return null;
+        }
 
         /// <summary>The innermost open level: the newest live popup that is
         /// on screen, followed down its open submenus.</summary>

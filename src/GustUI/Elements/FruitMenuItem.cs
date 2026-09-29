@@ -244,31 +244,19 @@ namespace GustUI.Elements
 
 
                     Set<OnMouseRelease>(new TVEvent<ClickEventArgs>((x) => clickMore(x, menuItem.SubItems)));
-                    // Leaving the item closes its submenu — UNLESS the
-                    // pointer is already over the submenu, which is what
-                    // moving diagonally into it looks like. That decision is
-                    // final: OnExitTrait is an edge, so nothing re-asks once
-                    // the pointer leaves the submenu again. The level's own
-                    // ownership (FruitPopupMenu.OpenSubmenu) is what closes
-                    // it in that case, when a sibling opens its own.
-                    Set<OnExitTrait>(new TVEvent<ClickEventArgs>((x) =>
-                    {
-                        if (popup != null && !popup.IsMouseOver())
-                        {
-                            if (OwningPopup != null)
-                            {
-                                // Goes through the level so its record of
-                                // "what is open here" clears too; that call
-                                // is what nulls `popup`, via ForgetSubmenu.
-                                OwningPopup.CloseSubmenu();
-                            }
-                            else
-                            {
-                                popup.Kill();
-                                popup = null;
-                            }
-                        }
-                    }));
+
+                    // LEAVING the row does not close its submenu (ezmuze
+                    // #561). It used to, on OnExitTrait, unless the pointer
+                    // had already reached the submenu, and that made a
+                    // submenu something only a pointer resting on the row
+                    // could keep: the control API's /move and /click hand
+                    // the pointer back afterwards, which read as an exit
+                    // and shut what they had just opened, and a person
+                    // drifting off the menu lost it too. The level closes
+                    // it instead, when the pointer ARRIVES on another of its
+                    // rows (FruitPopupMenu.CloseSubmenuOnSiblingHover); a
+                    // press outside the menus, Escape, Left and the popup
+                    // closing still close it as before.
 
                     Set<OnHoverTrait>(new TVEvent<ClickEventArgs>((x) =>
                     {
