@@ -336,6 +336,27 @@ namespace GustUI.Managers
         /// hooks forever otherwise).</summary>
         public void ClearFocus() => SetFocus(null);
 
+        /// <summary>Whether <paramref name="element"/> still hangs off the root
+        /// window: a killed element, or one inside a killed window, does not.</summary>
+        internal static bool IsInTree(Element element)
+        {
+            Element root = Resources.StaticResources.RootWindow;
+            if (root == null)
+            {
+                return true;
+            }
+
+            for (Element at = element; at != null; at = at.Parent)
+            {
+                if (at == root)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         public void ReleasePointer(Element element)
         {
             if (CapturedPointerElement == element)
@@ -969,6 +990,17 @@ namespace GustUI.Managers
             // box that had focus when the question arrived would otherwise
             // keep taking every keystroke behind it.
             if (CurrentlyFocused != null && Elements.ModalWindowElement.InputBlocked(CurrentlyFocused))
+            {
+                SetFocus(null);
+            }
+
+            // A field that has left the tree cannot be typed into, and must
+            // not go on holding the keyboard (ezmuze #590). A dialog's field
+            // takes focus when it opens; when the dialog closes from its own
+            // button, nothing focusable is under that press, so focus stayed
+            // on the dead field and every shortcut hook in the app slept until
+            // some other text field was clicked.
+            if (CurrentlyFocused != null && !IsInTree(CurrentlyFocused))
             {
                 SetFocus(null);
             }
