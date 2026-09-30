@@ -34,6 +34,23 @@ namespace GustUI.Elements
         /// (<see cref="PianoRollElement.BendEditMode"/>); null when the
         /// note has no bend.</summary>
         public List<PianoRollBendPointView> BendPoints;
+
+        /// <summary>
+        /// The note's own rendered waveform (ezmuze #602): interleaved min,
+        /// max per column, already on the scale the host wants drawn (-1..1
+        /// fills the row). Null draws none. Drawn against the ROW's height,
+        /// not the velocity-sized body: a quiet note already rendered small,
+        /// and shrinking it again by its velocity would count the loudness
+        /// twice.
+        /// </summary>
+        public float[] Waveform;
+
+        /// <summary>Where column 0 of <see cref="Waveform"/> starts, in
+        /// pattern beats.</summary>
+        public double WaveformStartBeats;
+
+        /// <summary>How many beats one column of <see cref="Waveform"/> spans.</summary>
+        public double WaveformColumnBeats;
     }
 
     /// <summary>One bend vertex as the roll draws it (a display view of the
@@ -137,6 +154,14 @@ namespace GustUI.Elements
         public Color NoteSelectedColor = new Color(170, 195, 255);
         public Color NoteBorderColor = new Color(16, 20, 40);
         public Color BendHandleColor = new Color(255, 210, 120);
+
+        /// <summary>A note's own waveform (ezmuze #602): a dark ink on the
+        /// light note, drawn only within the note's body.</summary>
+        public Color NoteWaveformColor = new Color(16, 20, 40) * 0.7f;
+
+        /// <summary>Rows shorter than this draw no waveforms: at a few pixels
+        /// a waveform is a smudge that hides the note under it.</summary>
+        public const float MinRowHeightForWaveforms = 8f;
         public Color PlayheadColor = new Color(255, 90, 90);
         public Color PatternEndDimColor = new Color(0, 0, 0) * 0.45f;
         public Color KeyWhiteColor = new Color(214, 214, 220);
@@ -416,6 +441,7 @@ namespace GustUI.Elements
                 var rect = new Rectangle(left, top + 1 + (rowH - noteH) / 2, noteW, noteH);
                 manager.DrawFilledRectangle(rect, body);
                 manager.DrawRectangle(rect, border);
+                DrawNoteWaveform(manager, note, x0, width, left, noteW, top + 1, rowH, rect.Top, rect.Bottom, alpha);
             }
             else
             {
@@ -427,6 +453,80 @@ namespace GustUI.Elements
                 // targets run without MSAA and a hard 1px edge on a slope
                 // would still staircase.
                 AppendBendBody(note, x0, y0, width, height, gridX, rowH, body, border);
+            }
+        }
+
+        /// <summary>
+        /// A note's own waveform (ezmuze #602), one pixel column at a time
+        /// across the note's body: the min/max of the columns under each
+        /// pixel, centred on the row and scaled to the ROW's height (see
+        /// <see cref="PianoRollNoteView.Waveform"/> for why not the body's).
+        /// Drawn only where the note is: inside its length (its release rings
+        /// on past the note, but drawn there it would lie over the next note in
+        /// the row) and inside its body, so a quiet note's waveform is cut at
+        /// its edges rather than spilling onto the row.
+        /// </summary>
+        private void DrawNoteWaveform(Managers.DrawManager manager, PianoRollNoteView note,
+            int x0, int width, int left, int noteW, int rowTop, int rowH, int bodyTop, int bodyBottom, float alpha)
+        {
+            float[] wave = note.Waveform;
+            if (wave == null || wave.Length < 2 || note.WaveformColumnBeats <= 0 || rowH < MinRowHeightForWaveforms)
+            {
+                return;
+            }
+
+            float ppb = EffectivePixelsPerBeat(width);
+            if (ppb <= 0f)
+            {
+                return;
+            }
+
+            int columns = wave.Length / 2;
+            float centre = rowTop + (rowH / 2f);
+            float half = (rowH / 2f) - 1f;
+            Color ink = NoteWaveformColor * alpha;
+            double beatsPerPixel = 1.0 / ppb;
+            double firstBeat = FirstBeat + ((left - x0 - KeyboardWidth) * beatsPerPixel);
+            for (int px = 0; px < noteW; px++)
+            {
+                double from = (firstBeat + (px * beatsPerPixel) - note.WaveformStartBeats) / note.WaveformColumnBeats;
+                double to = (firstBeat + ((px + 1) * beatsPerPixel) - note.WaveformStartBeats) / note.WaveformColumnBeats;
+                int c0 = (int)Math.Floor(from);
+                int c1 = Math.Max(c0, (int)Math.Ceiling(to) - 1);
+                if (c1 < 0 || c0 >= columns)
+                {
+                    continue;
+                }
+
+                c0 = Math.Max(0, c0);
+                c1 = Math.Min(columns - 1, c1);
+                float min = 0f;
+                float max = 0f;
+                for (int c = c0; c <= c1; c++)
+                {
+                    min = Math.Min(min, wave[c * 2]);
+                    max = Math.Max(max, wave[(c * 2) + 1]);
+                }
+
+                // Silence draws nothing, rather than a line along the middle
+                // of every note that has finished ringing.
+                if ((max - min) * half < 0.75f)
+                {
+                    continue;
+                }
+
+                int yTop = (int)MathF.Floor(centre - (Math.Clamp(max, 0f, 1f) * half));
+                int yBottom = (int)MathF.Ceiling(centre - (Math.Clamp(min, -1f, 0f) * half));
+
+                // Only where the note is: clipped to its body, so a quiet
+                // note's waveform stops at its own edges rather than spilling
+                // onto the row.
+                yTop = Math.Max(yTop, bodyTop);
+                yBottom = Math.Min(Math.Max(yBottom, yTop + 1), bodyBottom);
+                if (yBottom > yTop)
+                {
+                    manager.DrawFilledRectangle(new Rectangle(left + px, yTop, 1, yBottom - yTop), ink);
+                }
             }
         }
 
