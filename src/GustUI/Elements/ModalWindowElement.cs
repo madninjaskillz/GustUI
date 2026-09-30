@@ -3477,7 +3477,7 @@ namespace GustUI.Elements
             buttonBackgroundElement = this.AddChildElement<FilledRectangleElement>();
 
             Setup();
-            LiveDialogs.Add(this);
+            RegisterLiveDialog(this);
         }
         public ModalWindowElement(string title, string body, List<BasicButtonElement> buttons = null, TVVector position = null, TVVector size = null)
         {
@@ -3529,7 +3529,7 @@ namespace GustUI.Elements
             }
 
             Setup();
-            LiveDialogs.Add(this);
+            RegisterLiveDialog(this);
         }
 
         public ModalWindowElement(string title, Element body, List<BasicButtonElement> buttons = null, TVVector position = null, TVVector size = null, bool fitToContent = true, bool resizable = false, bool closable = true, Vector2? minSize = null, bool pushHookScope = false, bool interactiveTitleBar = true)
@@ -3642,7 +3642,7 @@ namespace GustUI.Elements
             }
 
             Setup();
-            LiveDialogs.Add(this);
+            RegisterLiveDialog(this);
         }
 
         // Themed body/footer fill (was a near-white gradient — a bright
@@ -3728,7 +3728,28 @@ namespace GustUI.Elements
         // Instead InputManager gives dialogs FIRST REFUSAL, ahead of both the
         // typing gate and the hook loop, and skips the rest of that key when
         // a dialog takes it.
-        private static readonly List<ModalWindowElement> LiveDialogs = new List<ModalWindowElement>();
+        //
+        // WEAK references (ezmuze #604). Every window joins this list in its
+        // constructor, and only Kill() takes it out again. A window that is
+        // built but never shown (the pattern explorer builds its window
+        // eagerly and shows it on demand), or one dropped from the tree
+        // without Kill(), was therefore held here for the life of the process,
+        // and through its content everything its owner could reach: the
+        // explorer's closures hold the sequencer model, and so the whole
+        // previous song. Every song open added one, about 10 MB of managed
+        // heap each, and an hour of use took a Debug build past 6 GB.
+        // Holding the windows weakly keeps the registry's meaning -- every
+        // window that exists -- without it being the thing that keeps them
+        // existing. Every reader already skips windows out of the tree.
+        private static readonly Managers.WeakRegistry<ModalWindowElement> LiveDialogs = new Managers.WeakRegistry<ModalWindowElement>();
+
+        private static void RegisterLiveDialog(ModalWindowElement window) => LiveDialogs.Add(window);
+
+        private static void UnregisterLiveDialog(ModalWindowElement window) => LiveDialogs.Remove(window);
+
+        /// <summary>The windows still alive in the registry, oldest first. A
+        /// snapshot, so a caller may open or close windows while walking it.</summary>
+        internal static List<ModalWindowElement> LiveDialogWindows() => LiveDialogs.Alive();
 
         /// <summary>
         /// Whether this window takes part at all. True by default, but see the
@@ -3793,10 +3814,11 @@ namespace GustUI.Elements
             // lit title bar says, so Preferences opened from a panel pinned to
             // the front takes Escape although the panel is drawn over it.
             Element root = Resources.StaticResources?.RootWindow;
-            var windows = new List<Element>(LiveDialogs.Count);
-            for (int i = 0; i < LiveDialogs.Count; i++)
+            List<ModalWindowElement> live = LiveDialogWindows();
+            var windows = new List<Element>(live.Count);
+            for (int i = 0; i < live.Count; i++)
             {
-                ModalWindowElement window = LiveDialogs[i];
+                ModalWindowElement window = live[i];
                 if (window.Parent != null && window.Visible && (root == null || ReferenceEquals(window.Parent, root)))
                 {
                     windows.Add(window);
@@ -3824,7 +3846,7 @@ namespace GustUI.Elements
         public static List<ModalWindowElement> OpenDialogs()
         {
             var open = new List<ModalWindowElement>();
-            foreach (ModalWindowElement window in LiveDialogs)
+            foreach (ModalWindowElement window in LiveDialogWindows())
             {
                 if (window.Parent != null && window.keyboardDismiss && window.buttons.Count > 0)
                 {
@@ -3968,9 +3990,10 @@ namespace GustUI.Elements
             ModalWindowElement front = null;
             MenuItemModel item = null;
 
-            for (int i = 0; i < LiveDialogs.Count; i++)
+            List<ModalWindowElement> live = LiveDialogWindows();
+            for (int i = 0; i < live.Count; i++)
             {
-                ModalWindowElement window = LiveDialogs[i];
+                ModalWindowElement window = live[i];
                 if (window.menuBar == null || window.Parent == null
                     || window.MenuHookScope != activeScope || (front != null && window.FrontSequence <= front.FrontSequence))
                 {
@@ -4007,9 +4030,10 @@ namespace GustUI.Elements
         {
             var found = new List<(string Section, MenuItemModel Item)>();
             ModalWindowElement front = null;
-            for (int i = 0; i < LiveDialogs.Count; i++)
+            List<ModalWindowElement> live = LiveDialogWindows();
+            for (int i = 0; i < live.Count; i++)
             {
-                ModalWindowElement window = LiveDialogs[i];
+                ModalWindowElement window = live[i];
                 if (window.menuBar != null && window.Parent != null && window.MenuHookScope == activeScope
                     && (front == null || window.FrontSequence > front.FrontSequence))
                 {
@@ -4468,7 +4492,7 @@ namespace GustUI.Elements
             // out must stop taking Escape immediately, or a second press
             // during the close animation reaches a window the user has
             // already dismissed.
-            LiveDialogs.Remove(this);
+            UnregisterLiveDialog(this);
 
             if (closing)
             {
