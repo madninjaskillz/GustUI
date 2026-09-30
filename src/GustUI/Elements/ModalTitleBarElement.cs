@@ -159,6 +159,11 @@ namespace GustUI.Elements
         public System.Action OnCloseRequested;
 
         private BasicButtonElement dragBarElement;
+
+        /// <summary>The bar a title-bar drag is pressed on and captured by --
+        /// for handing a drag to a window mid-gesture, as a torn-off tab's
+        /// new window takes it over (#597).</summary>
+        internal Element DragBar => dragBarElement;
         private BasicButtonElement closeButton;
         private BasicButtonElement sizeButton;
         private bool hasMaximimizeButton;

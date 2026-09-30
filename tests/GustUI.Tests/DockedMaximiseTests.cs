@@ -27,19 +27,6 @@ namespace GustUI.Tests
         }
 
         [Fact]
-        public void OnlyTheActiveTabOfAFloatingWindowDrawsMaximise()
-        {
-            Assert.True(ModalWindowElement.TabShowsMaximise(isActive: true, DockSide.None));
-            Assert.False(ModalWindowElement.TabShowsMaximise(isActive: false, DockSide.None));
-
-            foreach (DockSide side in Docks)
-            {
-                Assert.False(ModalWindowElement.TabShowsMaximise(isActive: true, side));
-                Assert.False(ModalWindowElement.TabShowsMaximise(isActive: false, side));
-            }
-        }
-
-        [Fact]
         public void AHiddenMaximiseGivesItsSquareBackToTheTitleBar()
         {
             float bar = ModalTitleBarElement.BarHeight;

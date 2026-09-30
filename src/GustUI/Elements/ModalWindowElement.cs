@@ -805,11 +805,6 @@ namespace GustUI.Elements
         /// docked to <paramref name="docked"/> (or floating, at None).</summary>
         internal static bool OffersMaximise(DockSide docked) => docked == DockSide.None;
 
-        /// <summary>Whether a tab draws the maximise glyph: only the ACTIVE tab
-        /// (maximise belongs to the window), and only while the window
-        /// offers it at all. Every tab keeps the slot regardless.</summary>
-        internal static bool TabShowsMaximise(bool isActive, DockSide docked) => isActive && OffersMaximise(docked);
-
         /// <summary>Whether the maximise square shows its restore glyph:
         /// maximised, or filling the free space (ezmuze #401). A window that
         /// fills the space beside the docks is maximised within them, so it
@@ -1563,10 +1558,10 @@ namespace GustUI.Elements
             => Color.Lerp(Resources.StaticResources.Theme.BodyText, Resources.StaticResources.Theme.SurfaceHeader, 0.45f);
 
         /// <summary>
-        /// A tab's width for a caption this wide: padding, the caption, and room
-        /// for the four glyph slots (close, pop-out, maximise, pin). Every tab
-        /// keeps the maximise and pin slots, though only the active one shows
-        /// them, so a tab does not change width when it is activated.
+        /// A tab's width for a caption this wide: padding, the caption, and its
+        /// close. Pin, maximise and close-all are the window's, at the far
+        /// right of the strip, and taking a tab out is a drag (#597), so a
+        /// close is the only glyph a tab carries.
         /// </summary>
         /// <remarks>Rounded up with a pixel to spare: the label gets back
         /// <c>width - TabGlyphsWidth</c>, and a float round trip a hair short
@@ -1574,7 +1569,7 @@ namespace GustUI.Elements
         internal static float TabWidthFor(float captionWidth) => MathF.Ceiling(captionWidth) + 1f + TabGlyphsWidth;
 
         /// <summary>Everything on a tab but its caption.</summary>
-        private const float TabGlyphsWidth = TabPaddingX + ((TabCloseSize + 4) * 4) + 6 + 4;
+        private const float TabGlyphsWidth = TabPaddingX + (TabCloseSize + 4) + 6 + 4;
 
         /// <summary>
         /// Fits tabs of these natural widths into <paramref name="available"/>
@@ -1709,20 +1704,24 @@ namespace GustUI.Elements
 
             TVVector size = ElementTrait<SizeTrait>().Value();
 
-            // The strip spans the FULL width. A tabbed window has no separate
-            // title bar and no chrome of its own: every tab carries its own
-            // close and pop-out, the active one carries maximise, and dragging
-            // any of them moves the window. The tabs themselves are sized to
-            // their captions (#341); the trough after them is still the title
-            // bar, and dragging it moves, docks and merges the window.
-            float stripWidth = Math.Max(MinTabWidth, size.X);
+            // The strip runs up to the window's own buttons (#597): pin,
+            // maximise/restore and a close that closes every tab sit at the
+            // far right, exactly where a single window has them, so the title
+            // bar's chrome stays on show and the strip stops short of it. The
+            // tabs are sized to their captions (#341); the trough after them
+            // is still the title bar, and dragging it moves, docks and merges
+            // the window. Dragging a tab reorders it, or tears it off.
+            float chromeWidth = 0f;
             if (titleBarElement != null)
             {
-                // Reserved across the WHOLE bar: the strip covers it, and its
-                // close/maximise would otherwise sit under the tabs, still
-                // taking clicks.
+                titleBarElement.ChromeHidden = false;
+                chromeWidth = titleBarElement.RightChromeWidth;
+            }
+
+            float stripWidth = Math.Max(MinTabWidth, size.X - chromeWidth);
+            if (titleBarElement != null)
+            {
                 titleBarElement.LeftReserved = stripWidth;
-                titleBarElement.ChromeHidden = true;
             }
 
             Title = string.Empty;
@@ -1750,7 +1749,8 @@ namespace GustUI.Elements
                 natural[i] = TabWidthFor(entry.CaptionWidth);
             }
 
-            float[] widths = FitTabWidths(natural, stripWidth - TabTrailingGap, TabGap, MinTabWidth, MaxTabWidth);
+            float[] widths = FitTabWidths(natural, stripWidth - TabDragGap, TabGap, MinTabWidth, MaxTabWidth);
+            ApplyTabReorder(widths, stripWidth);
 
             float x = 0f;
             for (int i = 0; i < tabs.Count; i++)
@@ -1767,8 +1767,12 @@ namespace GustUI.Elements
                 // Always ABOVE the strip, which is an opaque fill: this line
                 // used to reset the depth set at build time, dropping every
                 // idle tab underneath its own background.
-                entry.Button.Depth = 11;
-                entry.Button.Set<PositionTrait>(new TVVector(x, 0));
+                // The tab being dragged sideways rides the pointer, above its
+                // neighbours; the rest keep their slots, the dragged tab's
+                // included, which is where it lands on release.
+                bool riding = tabDragReordering && ReferenceEquals(entry, draggingTab);
+                entry.Button.Depth = riding ? 12 : 11;
+                entry.Button.Set<PositionTrait>(new TVVector(riding ? TabDragLeft(shared, stripWidth) : x, 0));
                 entry.Button.Set<SizeTrait>(new TVVector(shared, ModalTitleBarElement.BarHeight));
 
                 bool isActive = i == activeIndex;
@@ -1794,42 +1798,6 @@ namespace GustUI.Elements
                 float slotY = (ModalTitleBarElement.BarHeight - TabCloseSize) / 2f;
                 float slot = shared - TabCloseSize - 6;
                 entry.CloseX.Set<PositionTrait>(new TVVector(slot, slotY));
-
-                slot -= TabCloseSize + 4;
-                entry.PopOut.Set<PositionTrait>(new TVVector(slot, slotY));
-                entry.PopOut.Set<SizeTrait>(new TVVector(TabCloseSize, TabCloseSize));
-
-                // Blanked rather than resized to nothing: a zero-sized text
-                // element still draws its glyph, so sizing was never going to
-                // hide it.
-                entry.PopOut.Set<TextTrait>(new TVText(tabs.Count > 1 ? UIFont.Symbol.NewWindow.Icon() : string.Empty));
-
-                // Maximise belongs to the WINDOW, so it rides on whichever tab
-                // is showing rather than being repeated on every one -- and,
-                // like the pin, not at all while docked (#366). The slot stays
-                // either way, so the tab keeps its width.
-                slot -= TabCloseSize + 4;
-                entry.Maximise.Set<PositionTrait>(new TVVector(slot, slotY));
-                entry.Maximise.Set<SizeTrait>(new TVVector(TabCloseSize, TabCloseSize));
-                entry.Maximise.Set<TextTrait>(new TVText(!TabShowsMaximise(isActive, DockedSide)
-                    ? string.Empty
-                    : ShowsRestore
-                        ? Resources.StaticResources.Theme.Icons.MinimizeIcon
-                        : Resources.StaticResources.Theme.Icons.MaximizeIcon));
-
-                // So does the pin: the window's place in the stack, on the
-                // active tab, hidden while docked like the title bar's.
-                slot -= TabCloseSize + 4;
-                bool pinHere = isActive && ShowsPin;
-                var pinLook = PinLook(Pin, Resources.StaticResources.Theme.BodyText);
-                entry.PinGlyph.Set<PositionTrait>(new TVVector(slot, slotY));
-                entry.PinGlyph.Set<SizeTrait>(new TVVector(TabCloseSize, TabCloseSize));
-                entry.PinGlyph.Set<TextTrait>(new TVText(pinHere ? UIFont.Symbol.Pin.Icon() : string.Empty));
-                entry.PinGlyph.Set<ForegroundColorTrait>(new TVColor(pinLook.Colour));
-                entry.PinMark.Set<PositionTrait>(new TVVector(slot + TabCloseSize - 3,
-                    Pin == WindowPin.Back ? slotY + TabCloseSize - 5 : slotY - 3));
-                entry.PinMark.Set<TextTrait>(new TVText(pinHere ? pinLook.Mark : string.Empty));
-                entry.PinMark.Set<ForegroundColorTrait>(new TVColor(pinLook.Colour));
 
                 x += shared + TabGap;
             }
@@ -1899,45 +1867,13 @@ namespace GustUI.Elements
             button.AddChild(close, "close");
             entry.CloseX = close;
 
-            entry.PopOut = TabGlyph(button, "popout",
-                new TVText(UIFont.Symbol.NewWindow.Icon()),
-                () => "Move this tab into its own window",
-                () => popOutRequested = entry);
-
-            entry.PinGlyph = TabGlyph(button, "pin",
-                new TVText(string.Empty),
-                () => PinLabel(Pin) + " - click to change",
-                () => ShowPinMenu(entry.PinGlyph));
-
-            entry.PinMark = new TextElement { WordWrap = false };
-            entry.PinMark.Set<SizeTrait>(new TVVector(8, 8));
-            entry.PinMark.Set<FontTrait>(new TVFont
-            {
-                Family = Resources.StaticResources.Theme.SymbolFont.Family,
-                Size = 8,
-                Border = 0,
-            });
-            entry.PinMark.Set<TextTrait>(new TVText(string.Empty));
-            button.AddChild(entry.PinMark, "pin-mark");
-
-            entry.Maximise = TabGlyph(button, "maximise",
-                new TVText(Resources.StaticResources.Theme.Icons.MaximizeIcon),
-                () => !ShowsMaximise ? string.Empty : ShowsRestore ? "Restore this window" : "Maximise this window",
-                ToggleMaximise);
-
+            // A press on a tab picks it up (#597): dragged sideways it
+            // reorders, dragged 2x its height up or down it tears off into a
+            // window of its own. It no longer moves the window -- the trough
+            // beside the window buttons does that.
             button.Set<OnMousePress>(new TVEvent<ClickEventArgs>(args => BeginTabDrag(entry, args)));
-
-            // Dragging a tab IS dragging the title bar, so its release commits
-            // what the drag armed (#296): merging into the window it was
-            // dropped on, or docking at the edge it was held at. The drag
-            // captures the pointer to this button, so nothing else receives
-            // the release -- without this the merge target was discarded and
-            // the window was left wherever it was dropped, usually behind the
-            // window it was meant to join. A release after a press on the
-            // close or pop-out glyph (which starts no drag) arms nothing, so
-            // it only ends a drag that never began.
-            button.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>(HandleTitleBarRelease));
-            button.AddTrait<OnPointerCaptureCancelled>().Set(new TVEvent<ClickEventArgs>(HandleTitleBarCancel));
+            button.Set<OnMouseRelease>(new TVEvent<ClickEventArgs>(_ => EndTabDrag()));
+            button.AddTrait<OnPointerCaptureCancelled>().Set(new TVEvent<ClickEventArgs>(_ => EndTabDrag()));
 
             entry.Button = button;
 
@@ -1947,31 +1883,6 @@ namespace GustUI.Elements
             // for the same reason.
             button.Depth = 11;
             AddChild(button, "tab");
-        }
-
-        /// <summary>One of a tab's own little glyph buttons.</summary>
-        private TextElement TabGlyph(Element parent, string name, TVText glyph, Func<string> tooltip, Action onClick)
-        {
-            var element = new TextElement { WordWrap = false };
-            element.Set<SizeTrait>(new TVVector(TabCloseSize, TabCloseSize));
-            element.Set<FontTrait>(new TVFont
-            {
-                Family = Resources.StaticResources.Theme.SymbolFont.Family,
-                Size = TabCloseSize * 0.7f,
-                Border = 0,
-            });
-
-            element.Set<ForegroundColorTrait>(new TVColor(() => Resources.StaticResources.Theme.BodyText));
-            element.Set<HorizontalAlignmentTrait>(new TVHorizontalAlignment { Alignment = HorizontalAlignment.Center });
-            element.Set<VerticalAlignmentTrait>(new TVVerticalAlignment { Alignment = VerticalAlignment.Center });
-            element.Set<TextTrait>(glyph);
-
-            // AddTrait, not Set: a TextElement does not DECLARE this trait, and
-            // Set on a trait an element never declared throws.
-            element.AddTrait<OnMouseRelease>().Set(new TVEvent<ClickEventArgs>(_ => onClick()));
-            TooltipElement.Attach(element, tooltip);
-            parent.AddChild(element, name);
-            return element;
         }
 
         private bool IsOverTab(Vector2 mouse)
@@ -1996,15 +1907,18 @@ namespace GustUI.Elements
         }
 
         /// <summary>
-        /// A press on a tab: activate it, then hand the gesture to the window
-        /// drag, because a tab strip IS this window's title bar and dragging a
-        /// title bar moves the window.
+        /// A press on a tab: activate it and pick it up (#597). What the drag
+        /// becomes is decided as it moves (<see cref="ClassifyTabDrag"/>):
+        /// sideways it reorders the tabs, up or down by
+        /// <see cref="TearOffTabHeights"/> tab heights it tears the tab off
+        /// into its own window, which carries on following the pointer.
         ///
-        /// There is no drag-to-tear-off and no drag-to-reorder. Both were
-        /// gestures layered onto the same drag, which meant every tab press had
-        /// to guess which of three things the user meant, and a tab could
-        /// silently leave its window on a slightly clumsy click. Taking a tab
-        /// out is a button on the tab instead: it says what it does.
+        /// This reverses 2026-08-26's "taking a tab out is a button, not a
+        /// drag". The worry then was one drag guessing between moving,
+        /// reordering and tearing off; moving has left the tabs for the
+        /// reserved trough (<see cref="TabDragGap"/>), and the other two are
+        /// told apart by direction, with a tear-off needing a deliberate
+        /// 2x-tab-height pull, so a clumsy click cannot take a tab out.
         /// </summary>
         private void BeginTabDrag(Tab entry, ClickEventArgs args)
         {
@@ -2015,8 +1929,7 @@ namespace GustUI.Elements
             }
 
             Vector2 mouse = args.GlobalMousePosition.AsXna;
-            if (OverElement(entry.CloseX, mouse) || OverElement(entry.PopOut, mouse)
-                || OverElement(entry.Maximise, mouse) || OverElement(entry.PinGlyph, mouse))
+            if (OverElement(entry.CloseX, mouse))
             {
                 return;
             }
@@ -2026,7 +1939,16 @@ namespace GustUI.Elements
                 ActivateTab(index);
             }
 
-            HandleTitleBarPress(args);
+            MoveToFront();
+            draggingTab = entry;
+            tabDragPress = mouse;
+            tabDragGrabX = mouse.X - this.GetActualXnaPosition().X;
+            tabDragGrabInTab = entry.Button != null ? mouse.X - entry.Button.GetActualXnaPosition().X : 0f;
+            tabDragReordering = false;
+
+            // The release has to come back here wherever the pointer goes,
+            // or a tab dropped off the strip would stay picked up.
+            entry.Button?.CapturePointer();
         }
 
         private static bool OverElement(Element element, Vector2 point)
@@ -2042,37 +1964,181 @@ namespace GustUI.Elements
                 && point.Y >= pos.Y && point.Y <= pos.Y + size.Y;
         }
 
-        /// <summary>How far down and right of the window it left a popped-out
-        /// tab lands (ezmuze #346): one title bar, as cascading windows do.</summary>
-        public const float PopOutOffset = ModalTitleBarElement.BarHeight;
-
-        /// <summary>Where a popped-out tab's new window goes.</summary>
-        internal readonly record struct PopOutPlacement(Vector2 Position, Vector2 Size, bool Maximised);
-
-        /// <summary>
-        /// Where a tab popped out of a window at <paramref name="sourcePosition"/>
-        /// (<paramref name="sourceSize"/>) lands (ezmuze #346). A floating
-        /// window's tab arrives <see cref="PopOutOffset"/> down and right of
-        /// it, the same size. A maximised window's tab arrives maximised, over
-        /// it. A docked window's tab arrives floating, offset from the corner
-        /// of the rectangle it was docked in. The screen clamp in Update keeps
-        /// whatever this returns on screen.
-        /// </summary>
-        internal static PopOutPlacement PlacePoppedOut(Vector2 sourcePosition, Vector2 sourceSize, bool maximised, bool docked)
+        private void EndTabDrag()
         {
-            if (maximised && !docked)
-            {
-                return new PopOutPlacement(sourcePosition, sourceSize, true);
-            }
+            draggingTab = null;
+            tabDragReordering = false;
+        }
 
-            return new PopOutPlacement(sourcePosition + new Vector2(PopOutOffset, PopOutOffset), sourceSize, false);
+        /// <summary>What a tab drag has become.</summary>
+        internal enum TabDragIntent
+        {
+            /// <summary>Not far enough to be anything yet: a click.</summary>
+            None,
+
+            /// <summary>Sideways past the drag threshold: reorder.</summary>
+            Reorder,
+
+            /// <summary>Up or down by <see cref="TearOffTabHeights"/> tab
+            /// heights: out into a window of its own.</summary>
+            TearOff,
         }
 
         /// <summary>
-        /// Takes a tab out into its own window — the explicit version of what
-        /// dragging one off the strip used to do by accident.
+        /// The rule behind a tab drag (#597). A vertical pull of
+        /// <see cref="TearOffTabHeights"/> tab heights tears off, whether or
+        /// not the tab was already being reordered, as a browser tab does. A
+        /// sideways move past the ordinary drag threshold reorders, and stays
+        /// a reorder until release, so wobbling back under the threshold does
+        /// not drop it. Only a tab with a window to leave behind tears off.
         /// </summary>
-        private void PopOutTab(Tab entry)
+        internal static TabDragIntent ClassifyTabDrag(Vector2 fromPress, bool reordering, float tabHeight, int tabCount)
+        {
+            if (tabCount > 1 && Math.Abs(fromPress.Y) >= TearOffTabHeights * tabHeight)
+            {
+                return TabDragIntent.TearOff;
+            }
+
+            if (reordering || Math.Abs(fromPress.X) >= UndockDragThresholdPixels)
+            {
+                return TabDragIntent.Reorder;
+            }
+
+            return TabDragIntent.None;
+        }
+
+        /// <summary>
+        /// Where the tab at <paramref name="from"/> belongs with its centre
+        /// dragged to <paramref name="draggedCentre"/> (#597): after every
+        /// other tab whose laid-out centre it has passed. Measured against the
+        /// current layout, so a tab moves one slot as it crosses a neighbour's
+        /// middle and then sits still, rather than flickering at the boundary.
+        /// </summary>
+        internal static int ReorderTarget(IReadOnlyList<float> widths, float gap, int from, float draggedCentre)
+        {
+            int target = 0;
+            float x = 0f;
+            for (int i = 0; i < widths.Count; i++)
+            {
+                if (i != from && x + (widths[i] / 2f) < draggedCentre)
+                {
+                    target++;
+                }
+
+                x += widths[i] + gap;
+            }
+
+            return target;
+        }
+
+        /// <summary>The dragged tab's left edge while it rides the pointer,
+        /// kept on the strip.</summary>
+        private float TabDragLeft(float width, float stripWidth)
+        {
+            MouseState mouse = Resources.StaticResources.InputManager.CurrentMouseState;
+            float left = mouse.X - this.GetActualXnaPosition().X - tabDragGrabInTab;
+            return Math.Clamp(left, 0f, Math.Max(0f, stripWidth - width));
+        }
+
+        /// <summary>Moves the dragged tab to the slot its pointer has reached,
+        /// before the strip is laid out. The dragged tab is the active one
+        /// (the press activated it), so the active index follows it.</summary>
+        private void ApplyTabReorder(float[] widths, float stripWidth)
+        {
+            if (!tabDragReordering || draggingTab == null)
+            {
+                return;
+            }
+
+            int from = tabs.IndexOf(draggingTab);
+            if (from < 0)
+            {
+                return;
+            }
+
+            float centre = TabDragLeft(widths[from], stripWidth) + (widths[from] / 2f);
+            int to = ReorderTarget(widths, TabGap, from, centre);
+            if (to == from)
+            {
+                return;
+            }
+
+            tabs.RemoveAt(from);
+            tabs.Insert(to, draggingTab);
+            float moved = widths[from];
+            var list = new List<float>(widths);
+            list.RemoveAt(from);
+            list.Insert(to, moved);
+            list.CopyTo(widths);
+            activeIndex = to;
+        }
+
+        /// <summary>
+        /// Per-frame half of a tab drag: decide what it has become, and act on
+        /// a tear-off. The reorder itself is applied by the strip's layout.
+        /// </summary>
+        private void UpdateTabDrag()
+        {
+            if (draggingTab == null)
+            {
+                return;
+            }
+
+            MouseState mouse = Resources.StaticResources.InputManager.CurrentMouseState;
+            if (mouse.LeftButton == ButtonState.Released || !tabs.Contains(draggingTab))
+            {
+                EndTabDrag();
+                return;
+            }
+
+            var pointer = new Vector2(mouse.X, mouse.Y);
+            switch (ClassifyTabDrag(pointer - tabDragPress, tabDragReordering, ModalTitleBarElement.BarHeight, tabs.Count))
+            {
+                case TabDragIntent.TearOff:
+                    Tab torn = draggingTab;
+                    EndTabDrag();
+                    TearOffTab(torn, pointer, mouse);
+                    break;
+
+                case TabDragIntent.Reorder:
+                    tabDragReordering = true;
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Where a torn-off tab's window goes (#597): under the pointer, with
+        /// the pointer as far along its title bar as it was along the strip it
+        /// left -- kept clear of both ends so it is over the title bar and not
+        /// the window buttons -- and half a bar down, so it is holding the
+        /// bar. A floating window's tab keeps that window's size. A maximised,
+        /// docked or filling one's has no size of its own worth keeping, so it
+        /// takes the size the window would restore to -- but never more than
+        /// 70% of the window it leaves, or a tab torn out of a window filling
+        /// the screen arrived just as big, with nowhere to be dragged to.
+        /// </summary>
+        internal static (Vector2 Position, Vector2 Size) PlaceTornOff(
+            Vector2 pointer, float grabX, Vector2 sourceSize, Vector2? restoreSize, bool maximisedOrDocked)
+        {
+            Vector2 size = sourceSize;
+            if (maximisedOrDocked)
+            {
+                Vector2 cap = sourceSize * 0.7f;
+                size = restoreSize is { } restore ? Vector2.Min(restore, cap) : cap;
+            }
+
+            float room = Math.Max(ModalTitleBarElement.BarHeight, size.X - (ModalTitleBarElement.BarHeight * 4));
+            float along = Math.Clamp(grabX, ModalTitleBarElement.BarHeight, room);
+            return (pointer - new Vector2(along, ModalTitleBarElement.BarHeight / 2f), size);
+        }
+
+        /// <summary>
+        /// Takes a tab out into its own window mid-drag (#597) and hands the
+        /// drag to that window's title bar, so it goes on following the
+        /// pointer and can be dropped anywhere, docked at an edge or merged
+        /// straight into another window -- one gesture, as with a browser tab.
+        /// </summary>
+        private void TearOffTab(Tab entry, Vector2 pointer, MouseState mouseState)
         {
             int index = tabs.IndexOf(entry);
             if (index < 0 || tabs.Count < 2)
@@ -2082,18 +2148,13 @@ namespace GustUI.Elements
 
             TVVector size = ElementTrait<SizeTrait>().Value();
             int bottomInset = BottomInset;
-
-            // Where it lands comes from the window it leaves, not the pointer
-            // (ezmuze #346): one title bar down and right of it, so it arrives
-            // on top of that window with both title bars still showing. It
-            // used to be centred on the pointer, which put it wherever along
-            // the strip the pop-out glyph happened to be.
-            PopOutPlacement placement = PlacePoppedOut(
-                this.GetActualXnaPosition(), size.AsXna, IsFullScreen, DockedSide != DockSide.None);
-            (TVVector restorePosition, TVVector restoreSize) = FullScreenRestoreBounds;
+            (TVVector _, TVVector restoreSize) = FullScreenRestoreBounds;
+            (Vector2 position, Vector2 newSize) = PlaceTornOff(
+                pointer, tabDragGrabX, size.AsXna, restoreSize?.AsXna,
+                IsFullScreen || FillsAvailableSpace || DockedSide != DockSide.None);
 
             // Named after the view it will hold, read before the tab leaves
-            // (#288): a sequencer popped out of its window used to leave that
+            // (#288): a sequencer taken out of its window used to leave that
             // window called sequencer-modal and arrive as tab-popped-<guid>.
             string poppedName = NameOf(entry) ?? "tab-popped-" + Guid.NewGuid();
             Tab moved = DetachTab(index);
@@ -2101,29 +2162,14 @@ namespace GustUI.Elements
             HandOverOwnScope(moved);
 
             var modal = new ModalWindowElement(moved.Title, moved.Content,
-                position: new TVVector(placement.Position),
-                size: new TVVector(placement.Size), fitToContent: false, resizable: true, closable: true,
+                position: new TVVector(position),
+                size: new TVVector(newSize), fitToContent: false, resizable: true, closable: true,
                 minSize: new Vector2(MinSize.X, MinSize.Y))
             {
                 Tabable = true,
                 BottomInset = bottomInset,
                 ListTitle = moved.ListTitle,
             };
-
-            if (placement.Maximised)
-            {
-                // A maximised window's tab pops out maximised, exactly over
-                // it. Restoring it goes to where the window it left would
-                // restore to, offset the same as any pop-out, rather than to
-                // the generic 70% fallback.
-                modal.IsFullScreen = true;
-                if (restorePosition != null && restoreSize != null)
-                {
-                    modal.FullScreenRestoreBounds = (
-                        new TVVector(restorePosition.AsXna + new Vector2(PopOutOffset, PopOutOffset)),
-                        restoreSize);
-                }
-            }
 
             Action<ModalWindowElement> rehost = RehostOf(moved);
             if (moved.CloseOverride != null)
@@ -2156,6 +2202,20 @@ namespace GustUI.Elements
             modal.WearChromeOf(moved);
             rehost?.Invoke(modal);
             Resources.StaticResources.RootWindow.AddChild(modal, poppedName);
+
+            // The drag carries on as the new window's: pressed on its title
+            // bar, where the pointer already is, and captured there, so the
+            // release commits whatever it offers (a dock, a merge) as any
+            // title-bar drag's does (#296).
+            if (modal.titleBarElement?.DragBar is { } bar)
+            {
+                modal.HandleTitleBarPress(new ClickEventArgs
+                {
+                    GlobalMousePosition = new TVVector(pointer),
+                    MouseState = mouseState,
+                    Element = bar,
+                });
+            }
         }
 
         /// <summary>Per-frame tab upkeep, called from Update.</summary>
@@ -2168,7 +2228,10 @@ namespace GustUI.Elements
                 // A view that asks before it goes (a CloseOverride) is asked,
                 // and keeps its tab -- and so the window -- if it declines;
                 // everything else is removed and told, as by its own X.
-                foreach (Tab entry in new List<Tab>(tabs))
+                // The window's own view goes last (#597): closing it can
+                // close the window it lives in, which must not happen while
+                // the other tabs are still waiting their turn.
+                foreach (Tab entry in tabs.OrderBy(IsOwnTab).ToList())
                 {
                     if (!tabs.Contains(entry))
                     {
@@ -2205,13 +2268,7 @@ namespace GustUI.Elements
                 return;
             }
 
-            if (popOutRequested != null)
-            {
-                Tab entry = popOutRequested;
-                popOutRequested = null;
-                PopOutTab(entry);
-                return;
-            }
+            UpdateTabDrag();
 
             if (tabs.Count > 1)
             {
@@ -2483,10 +2540,12 @@ namespace GustUI.Elements
                 return;
             }
 
-            // Its own view gone and SEVERAL others left in it (ezmuze #287):
-            // the departed owner's close has nothing left to close here, so
-            // the X closes what is here, each tab the way its own X would.
-            if (tabs.Count > 1 && !tabs.Exists(IsOwnTab))
+            // A tabbed window's X closes every tab (#597), each the way its own
+            // X would -- the window's own view among them, last. It used to
+            // close the window's own view alone, which was never what an X at
+            // the far right of a row of tabs looks like it does. (Its own view
+            // gone, #287, is the same case: nothing here is the owner's.)
+            if (tabs.Count > 1)
             {
                 closeAllTabsRequested = true;
                 return;
@@ -3247,14 +3306,6 @@ namespace GustUI.Elements
             internal TextElement Label;
             internal FilledRectangleElement Underline;
             internal FilledRectangleElement CloseX;
-            internal TextElement PopOut;
-            internal TextElement Maximise;
-
-            /// <summary>The window's pin, shown on the active tab only.</summary>
-            internal TextElement PinGlyph;
-
-            /// <summary>The pin's small up / down mark.</summary>
-            internal TextElement PinMark;
             internal float Width;
 
             /// <summary>The caption <see cref="CaptionWidth"/> was measured
@@ -3277,7 +3328,25 @@ namespace GustUI.Elements
         private FilledRectangleElement tabStrip;
         private Tab closeTabRequested;
         private bool closeAllTabsRequested;
-        private Tab popOutRequested;
+
+        /// <summary>The tab being dragged by its caption (#597), or null.</summary>
+        private Tab draggingTab;
+
+        /// <summary>Where that drag was pressed.</summary>
+        private Vector2 tabDragPress;
+
+        /// <summary>The pointer's distance from this window's left edge at
+        /// the press, so a torn-off tab's window arrives with the pointer in
+        /// the same place along its title bar.</summary>
+        private float tabDragGrabX;
+
+        /// <summary>The pointer's distance from the dragged tab's own left
+        /// edge, so the tab follows the pointer without jumping.</summary>
+        private float tabDragGrabInTab;
+
+        /// <summary>Whether the drag has become a reorder (moved far enough
+        /// sideways). Once it has, it stays one until release or tear-off.</summary>
+        private bool tabDragReordering;
 
 
         private const int TabPaddingX = 12;
@@ -3290,12 +3359,16 @@ namespace GustUI.Elements
 
         private const int TabUnderlineHeight = 3;
 
-        /// <summary>Grab area kept clear beside the window buttons, so a tabbed
-        /// window can still be moved and docked.</summary>
-        private const int TabDragGap = 44;
+        /// <summary>Title bar kept clear between the last tab and the window
+        /// buttons (#597): with tab drags reordering and tearing off, the
+        /// trough is the only thing left to move, dock and merge a tabbed
+        /// window by, so it is reserved rather than left to what the tabs
+        /// happen not to use.</summary>
+        internal const int TabDragGap = 44;
 
-        /// <summary>Trough left between the last tab and the window chrome.</summary>
-        private const int TabTrailingGap = 10;
+        /// <summary>How far a tab is dragged vertically, in tab heights,
+        /// before it tears off into its own window (#597).</summary>
+        internal const float TearOffTabHeights = 2f;
 
         /// <summary>How many views this window hosts. One is an ordinary
         /// window; the strip only appears at two or more.</summary>
