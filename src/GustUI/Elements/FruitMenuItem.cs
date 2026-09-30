@@ -144,12 +144,34 @@ namespace GustUI.Elements
 
             if (item.Shortcut != null)
             {
-                // The chips start 22 + 26 per modifier in from the edge.
-                right = Math.Max(right, 30f + (item.Shortcut.Modifiers.Count * 26f));
+                // The chips and the key name, plus the gap before the label.
+                right = Math.Max(right, ShortcutWidth(item.Shortcut) + 8f);
             }
 
             return LabelLeft + (float)Math.Ceiling(text) + right;
         }
+
+        /// <summary>Width of a modifier chip, and the gap after each.</summary>
+        private const float ChipWidth = 26f;
+
+        private const float ChipGap = 2f;
+
+        /// <summary>The key name's width: measured, because a key spelled out
+        /// ("Delete", "Escape", "PageDown") is several letters where a chord's
+        /// key is one. It had a fixed 22 px, so those names wrapped onto a
+        /// second line over the next row (ezmuze #605). Never under 22, so a
+        /// single-letter key sits where it always did.</summary>
+        private static float KeyWidth(InputManager.KeyboardShortcut shortcut)
+        {
+            float text = Resources.StaticResources.FontManager
+                .MeasureSdfText(Resources.StaticResources.Theme.MenuFont, shortcut.Key.ToString()).X;
+            return Math.Max(22f, (float)Math.Ceiling(text) + 4f);
+        }
+
+        /// <summary>Everything a shortcut takes at the row's right edge:
+        /// its chips and its key name.</summary>
+        private static float ShortcutWidth(InputManager.KeyboardShortcut shortcut)
+            => (shortcut.Modifiers.Count * (ChipWidth + ChipGap)) + KeyWidth(shortcut);
 
         /// <summary>The label's own inset from the top of the row. The icon
         /// takes the same one, so glyph and text sit on one line rather than
@@ -168,6 +190,7 @@ namespace GustUI.Elements
         public FruitMenuItem(MenuItemModel menuItem, Action<ClickEventArgs> actionOverride = null, int width = 300, bool hideMore = false)
         {
             _menuItem = menuItem;
+            float shortcutLeft = 0f;
 
             // Asked ONCE, now (#411): a row is built when its menu opens, so
             // this is the moment a live EnabledWhen/TextWhen is answered. The
@@ -270,10 +293,12 @@ namespace GustUI.Elements
                 {
                     // Centred in the row, not a number left over from when the
                     // row was 40 tall.
-                    float iconSize = 26;
+                    float iconSize = ChipWidth;
                     float iconHeight = 16;
                     float height = (RowHeight - iconHeight) / 2f;
-                    float ps = width - (22 + (menuItem.Shortcut.Modifiers.Count * iconSize));
+                    float keyWidth = KeyWidth(menuItem.Shortcut);
+                    float ps = width - ShortcutWidth(menuItem.Shortcut);
+                    shortcutLeft = ps;
                     foreach (var mod in menuItem.Shortcut.Modifiers)
                     {
                         var modElement = this.AddChildElement<FilledRectangleElement>();
@@ -281,11 +306,12 @@ namespace GustUI.Elements
                         modElement.Set<SizeTrait>(new TVVector(iconSize, iconHeight));
                         modElement.Set<BackgroundFillTrait>(Resources.StaticResources.Theme.KBModifiers[mod].SetOpacity(enabled ? 1 : 0.5f));
 
-                        ps += iconSize + 2;
+                        ps += iconSize + ChipGap;
                     }
                     var keyElement = this.AddChildElement<TextElement>();
                     keyElement.Set<PositionTrait>(new TVVector(ps, height));
-                    keyElement.Set<SizeTrait>(new TVVector(22, iconHeight));
+                    keyElement.WordWrap = false;
+                    keyElement.Set<SizeTrait>(new TVVector(keyWidth, iconHeight));
                     keyElement.Set<FontTrait>(Resources.StaticResources.Theme.MenuFont);
                     keyElement.Set<ForegroundColorTrait>(Ink(Color.Black, enabled ? 1f : 0.5f));
                     keyElement.Set<TextTrait>(new TVText(menuItem.Shortcut.Key.ToString()));
@@ -300,6 +326,12 @@ namespace GustUI.Elements
             // available to a caller that wants it in a tooltip.
             TVFont labelFont = Resources.StaticResources.Theme.MenuFont;
             float labelWidth = width - 54;
+            if (shortcutLeft > 0)
+            {
+                // Never under the shortcut: a long key name takes room from
+                // the label, not the other way round.
+                labelWidth = Math.Min(labelWidth, shortcutLeft - LabelLeft - 8);
+            }
 
             textElement = this.AddChildElement<TextElement>();
             textElement.WordWrap = false;
