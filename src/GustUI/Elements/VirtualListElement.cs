@@ -36,6 +36,12 @@ namespace GustUI.Elements
     ///
     /// Rows that leave the window are taken out of the tree, not hidden, so
     /// <c>/tree</c> and hit testing only ever see the rows in the window.
+    ///
+    /// A GRID is the same list with more than one item per line
+    /// (<see cref="SetLayout"/>): items fill a line left to right, lines are
+    /// <see cref="RowHeight"/> apart, and the window is whole lines — so a
+    /// tile view of thousands of items costs the tiles on screen, exactly as
+    /// the list view does (ezmuze #624).
     /// </summary>
     public class VirtualListElement : VerticalScrollElement
     {
@@ -85,8 +91,43 @@ namespace GustUI.Elements
             AddChild(spacer, "virtual-spacer");
         }
 
-        /// <summary>The row pitch.</summary>
-        public float RowHeight { get; }
+        /// <summary>The row pitch — in a grid, the LINE pitch.</summary>
+        public float RowHeight { get; private set; }
+
+        /// <summary>Items per line: 1 (the default) is a list; more is a
+        /// grid, filled left to right and then down (ezmuze #624). Set with
+        /// <see cref="SetLayout"/>.</summary>
+        public int Columns { get; private set; } = 1;
+
+        /// <summary>How far apart the columns are, left edge to left edge.
+        /// Unused with one column.</summary>
+        public float ColumnPitch { get; private set; }
+
+        /// <summary>
+        /// Switches between a list and a grid, or re-flows a grid for a new
+        /// width: the line pitch, items per line and column pitch. Every row
+        /// in the window is placed and bound again; the scroll is kept,
+        /// clamped to the new height. The host lays its row out for the new
+        /// shape in its bind, since the same pooled rows serve both.
+        /// </summary>
+        public void SetLayout(float rowHeight, int columns = 1, float columnPitch = 0f)
+        {
+            if (rowHeight <= 0f)
+            {
+                throw new ArgumentOutOfRangeException(nameof(rowHeight), "A virtual list needs a positive row height.");
+            }
+
+            columns = Math.Max(1, columns);
+            if (rowHeight == RowHeight && columns == Columns && columnPitch == ColumnPitch)
+            {
+                return;
+            }
+
+            RowHeight = rowHeight;
+            Columns = columns;
+            ColumnPitch = Math.Max(0f, columnPitch);
+            rebindAll = true;
+        }
 
         /// <summary>Rows built beyond each edge of the viewport, so a wheel
         /// notch shows rows that already exist.</summary>
@@ -212,7 +253,8 @@ namespace GustUI.Elements
         /// </summary>
         internal void Reconcile()
         {
-            float contentHeight = VirtualListWindow.ContentHeight(count, RowHeight, headerHeight);
+            int lines = VirtualListWindow.Lines(count, Columns);
+            float contentHeight = VirtualListWindow.ContentHeight(lines, RowHeight, headerHeight);
             if (spacer.GetSize().Y != contentHeight)
             {
                 spacer.Set<SizeTrait>(new TVVector(1, contentHeight));
@@ -222,7 +264,7 @@ namespace GustUI.Elements
             ApplyPendingReveal();
 
             float viewport = this.GetSize().Y;
-            (int first, int end) = VirtualListWindow.Range(ScrollPosition, viewport, RowHeight, headerHeight, count, Overscan);
+            (int first, int end) = VirtualListWindow.GridRange(ScrollPosition, viewport, RowHeight, headerHeight, count, Columns, Overscan);
 
             if (rebindAll)
             {
@@ -260,14 +302,18 @@ namespace GustUI.Elements
                 return;
             }
 
+            // A grid scrolls by LINES: bring the item's line into view.
+            int line = index / Columns;
+            int lines = VirtualListWindow.Lines(count, Columns);
             ScrollPosition = centre
-                ? VirtualListWindow.Centre(index, viewport, RowHeight, headerHeight, count)
-                : VirtualListWindow.Reveal(index, ScrollPosition, viewport, RowHeight, headerHeight, count);
+                ? VirtualListWindow.Centre(line, viewport, RowHeight, headerHeight, lines)
+                : VirtualListWindow.Reveal(line, ScrollPosition, viewport, RowHeight, headerHeight, lines);
         }
 
         private void BindInPlace(Element row, int index)
         {
-            row.Set<PositionTrait>(new TVVector(0, VirtualListWindow.RowTop(index, RowHeight, headerHeight)));
+            (float x, float y) = VirtualListWindow.CellOrigin(index, Columns, ColumnPitch, RowHeight, headerHeight);
+            row.Set<PositionTrait>(new TVVector(x, y));
             string name = RowName?.Invoke(index) ?? "row-" + index;
             if (row.Parent == null)
             {

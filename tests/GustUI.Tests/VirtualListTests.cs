@@ -366,5 +366,99 @@ namespace GustUI.Tests
             Assert.Equal(0f, list.ScrollPosition);
             Assert.Equal(1, list.ContentChildren.Count);
         }
+
+        // ------------------------------------------------------ the grid (#624)
+
+        [Fact]
+        public void AGridsLinesRoundUp()
+        {
+            Assert.Equal(0, VirtualListWindow.Lines(0, 5));
+            Assert.Equal(1, VirtualListWindow.Lines(5, 5));
+            Assert.Equal(2, VirtualListWindow.Lines(6, 5));
+            Assert.Equal(7, VirtualListWindow.Lines(7, 0)); // no columns is one
+        }
+
+        [Fact]
+        public void ColumnsForFitsWholeCellsAndNeverFewerThanOne()
+        {
+            // 200px cells, 8px gaps: 3 fit in 616 (3*200 + 2*8) exactly, not in 615.
+            Assert.Equal(3, VirtualListWindow.ColumnsFor(616f, 200f, 8f));
+            Assert.Equal(2, VirtualListWindow.ColumnsFor(615f, 200f, 8f));
+            Assert.Equal(1, VirtualListWindow.ColumnsFor(50f, 200f, 8f));
+        }
+
+        [Fact]
+        public void AtTheTopTheGridWindowIsWholeLinesInViewPlusOverscan()
+        {
+            // 100px lines of 4 in a 250px viewport: lines 0-2 are in view,
+            // plus one line of overscan below, so items 0..15.
+            Assert.Equal((0, 16), VirtualListWindow.GridRange(0f, 250f, 100f, 0f, 2000, 4, 1));
+        }
+
+        [Fact]
+        public void MidGridTheWindowStartsOnALineBoundary()
+        {
+            // Scrolled 1050px: line 10 (1000..1100) is the first in view, line
+            // 12 (1200..1300) the last; one line of overscan each side is
+            // lines 9..13, items 36..55.
+            Assert.Equal((36, 56), VirtualListWindow.GridRange(1050f, 250f, 100f, 0f, 2000, 4, 1));
+        }
+
+        [Fact]
+        public void AShortLastLineIsNotPaddedWithItemsThatDoNotExist()
+        {
+            // 10 items at 4 a line: the last line holds items 8 and 9 only.
+            Assert.Equal((0, 10), VirtualListWindow.GridRange(0f, 1000f, 100f, 0f, 10, 4, 3));
+        }
+
+        [Fact]
+        public void OneColumnIsExactlyTheList()
+        {
+            Assert.Equal(VirtualListWindow.Range(1000f, 100f, 24f, 60f, 2000, 3),
+                VirtualListWindow.GridRange(1000f, 100f, 24f, 60f, 2000, 1, 3));
+        }
+
+        [Fact]
+        public void ACellSitsAtItsColumnAndItsLine()
+        {
+            Assert.Equal((0f, 40f), VirtualListWindow.CellOrigin(0, 4, 208f, 100f, 40f));
+            Assert.Equal((624f, 40f), VirtualListWindow.CellOrigin(3, 4, 208f, 100f, 40f));
+            Assert.Equal((208f, 240f), VirtualListWindow.CellOrigin(9, 4, 208f, 100f, 40f));
+        }
+
+        [Fact]
+        public void TheElementAsAGridBuildsOnlyTheLinesInView()
+        {
+            var bound = new List<int>();
+            VirtualListElement list = List(2000, 100f, bound, out List<Element> made);
+            list.SetLayout(50f, 5, 120f);
+            list.Reconcile();
+
+            // 100px viewport of 50px lines: lines 0-1 in view, 3 overscan
+            // below, so lines 0..4 — 25 cells, not 2,000.
+            Assert.Equal(25, list.EndRealised - list.FirstRealised);
+            Assert.Equal(1 + 25, list.ContentChildren.Count);
+            Assert.Equal(360f, list.RowAt(8).GetRelativePosition().X);
+            Assert.Equal(50f, list.RowAt(8).GetRelativePosition().Y);
+
+            // The content is as tall as every LINE, not every item.
+            Assert.Equal(400 * 50f, list.ContentChildren.Items.Max(c => c.GetRelativePosition().Y + c.GetSize().Y));
+        }
+
+        [Fact]
+        public void ScrollToIndexInAGridBringsTheItemsLineIntoView()
+        {
+            var bound = new List<int>();
+            VirtualListElement list = List(2000, 100f, bound, out _);
+            list.SetLayout(50f, 5, 120f);
+            list.Reconcile();
+
+            list.ScrollToIndex(1003, centre: true);
+            list.Reconcile();
+
+            // Item 1003 is on line 200 (10000..10050); centred in 100px.
+            Assert.Equal(10000f + 25f - 50f, list.ScrollPosition);
+            Assert.NotNull(list.RowAt(1003));
+        }
     }
 }

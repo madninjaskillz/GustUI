@@ -41,6 +41,57 @@ namespace GustUI.Elements
             return (first, end);
         }
 
+        // ------------------------------------------------------ the grid
+        //
+        // A grid is a list of LINES: item i sits on line i / columns, in
+        // column i % columns, so every question about a grid is the list
+        // question asked of its lines (ezmuze #624, the Samples tile view).
+
+        /// <summary>How many lines <paramref name="count"/> items fill at
+        /// <paramref name="columns"/> a line (the last may be short).</summary>
+        public static int Lines(int count, int columns) =>
+            count <= 0 ? 0 : (count + Math.Max(1, columns) - 1) / Math.Max(1, columns);
+
+        /// <summary>How many cells of <paramref name="cellWidth"/>, with
+        /// <paramref name="gap"/> between them, fit across
+        /// <paramref name="width"/>: never fewer than one.</summary>
+        public static int ColumnsFor(float width, float cellWidth, float gap = 0f)
+        {
+            if (cellWidth <= 0f)
+            {
+                return 1;
+            }
+
+            return Math.Max(1, (int)Math.Floor((width + Math.Max(0f, gap)) / (cellWidth + Math.Max(0f, gap))));
+        }
+
+        /// <summary>
+        /// The ITEMS to materialise for a grid scrolled to
+        /// <paramref name="scroll"/>: every item on a line that overlaps the
+        /// viewport, plus <paramref name="overscan"/> whole lines each side.
+        /// <c>End</c> is exclusive and never past <paramref name="count"/>, so
+        /// a short last line is not padded out with items that do not exist.
+        /// With one column this is exactly <see cref="Range"/>.
+        /// </summary>
+        public static (int First, int End) GridRange(float scroll, float viewport, float rowHeight, float top,
+            int count, int columns, int overscan)
+        {
+            columns = Math.Max(1, columns);
+            (int firstLine, int endLine) = Range(scroll, viewport, rowHeight, top, Lines(count, columns), overscan);
+            int first = Math.Min(firstLine * columns, Math.Max(0, count));
+            int end = Math.Clamp(endLine * columns, first, Math.Max(0, count));
+            return (first, end);
+        }
+
+        /// <summary>Content position of item <paramref name="index"/>'s cell:
+        /// its column times <paramref name="columnPitch"/> across, its line's
+        /// top down.</summary>
+        public static (float X, float Y) CellOrigin(int index, int columns, float columnPitch, float rowHeight, float top)
+        {
+            columns = Math.Max(1, columns);
+            return ((index % columns) * columnPitch, RowTop(index / columns, rowHeight, top));
+        }
+
         /// <summary>Content y of row <paramref name="index"/>'s top.</summary>
         public static float RowTop(int index, float rowHeight, float top) => top + (index * rowHeight);
 
