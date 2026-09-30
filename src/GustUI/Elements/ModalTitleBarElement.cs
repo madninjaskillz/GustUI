@@ -74,8 +74,8 @@ namespace GustUI.Elements
             Border = family.Border,
         };
 
-        private static Color BarFillTop => Color.Lerp(Resources.StaticResources.Theme.SurfaceRaised, Resources.StaticResources.Theme.AccentSelection, 0.18f);
-        private static Color BarFillBottom => Color.Lerp(Resources.StaticResources.Theme.SurfaceHeader, Resources.StaticResources.Theme.AccentSelection, 0.05f);
+        internal static Color BarFillTop => Color.Lerp(Resources.StaticResources.Theme.SurfaceRaised, Resources.StaticResources.Theme.AccentSelection, 0.18f);
+        internal static Color BarFillBottom => Color.Lerp(Resources.StaticResources.Theme.SurfaceHeader, Resources.StaticResources.Theme.AccentSelection, 0.05f);
         private static Color AccentUnderline => Resources.StaticResources.Theme.AccentSelection;
         private static Color TitleText => Resources.StaticResources.Theme.BodyText;
         private static Color CloseHoverFill => Resources.StaticResources.Theme.AccentMuteOn;
@@ -199,6 +199,21 @@ namespace GustUI.Elements
         /// covers the bar and carries those actions itself.</summary>
         internal bool ChromeHidden { get; set; }
 
+        /// <summary>Set while a tab strip covers the bar (ezmuze #597). The
+        /// accent underline goes: it belongs to the active TAB then, and drawn
+        /// under the window buttons it made them look like one more tab.</summary>
+        internal bool Tabbed { get; set; }
+
+        /// <summary>
+        /// A tabbed window's blank title bar (#597 follow-up): the trough the
+        /// tabs sit in and the window buttons beside them. Flat and neutral --
+        /// no accent wash, which is the active tab's -- a step down from the
+        /// header toward the backdrop, so it reads as its own thing, quieter
+        /// than any tab, and a grip in the reserved gap says it is dragged.
+        /// </summary>
+        internal static Color TroughFill
+            => Color.Lerp(Resources.StaticResources.Theme.SurfaceHeader, Resources.StaticResources.Theme.SurfaceBackdrop, 0.3f);
+
         /// <summary>Width of the close and, while it shows, maximise squares
         /// at the right.</summary>
         private float CloseAndSizeWidth => CloseAndSizeWidthFor(closable, MaximiseShowing);
@@ -303,7 +318,10 @@ namespace GustUI.Elements
             Sync(dragBarElement);
 
 
-            Set<BackgroundFillTrait>(new TVFillSimpleGradient(() => BarFillTop, () => BarFillBottom, Direction.Vertically));
+            Set<BackgroundFillTrait>(new TVFillSimpleGradient(
+                () => Tabbed ? TroughFill : BarFillTop,
+                () => Tabbed ? TroughFill : BarFillBottom,
+                Direction.Vertically));
             Set<BorderSizeTrait>(new TVInt(0));
             Set<FontTrait>(Resources.StaticResources.Theme.UiFontSecondary);
             Set<PositionTrait>(position ?? new TVVector(0, 0));
@@ -479,6 +497,11 @@ namespace GustUI.Elements
                 flashOverlay.Opacity = flash * FlashPeakOpacity;
                 flashOverlay.Set<SizeTrait>(new TVVector(size.X, BarHeight));
                 flashOverlay.Set<PositionTrait>(new TVVector(0, 0));
+            }
+
+            if (accentUnderline != null)
+            {
+                accentUnderline.Visible = !Tabbed;
             }
 
             accentUnderline?.Set<SizeTrait>(new TVVector(size.X, 2));

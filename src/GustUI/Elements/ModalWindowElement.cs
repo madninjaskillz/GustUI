@@ -1531,12 +1531,32 @@ namespace GustUI.Elements
         /// </summary>
         private static Color TabStripFill => Resources.StaticResources.Theme.SurfaceBackdrop;
 
+        /// <summary>The strip's blank area: see
+        /// <see cref="ModalTitleBarElement.TroughFill"/> (#597 follow-up).</summary>
+        private static Color TabTrough => ModalTitleBarElement.TroughFill;
+
+        /// <summary>The grip's dots: body text, faded well into the trough,
+        /// so it is found when looked for and otherwise stays out of the way.</summary>
+        private static Color TabGripDot
+            => Color.Lerp(Resources.StaticResources.Theme.BodyText, TabTrough, 0.6f);
+
+        /// <summary>How far an inactive tab's gradient is dimmed toward the
+        /// backdrop from the active tab's (#597 follow-up).</summary>
+        private const float InactiveTabDim = 0.45f;
+
         /// <summary>
         /// An inactive tab: dimmed, a step down from the header fill toward the
         /// trough, so it still reads as a tab but plainly recedes (#341).
         /// </summary>
         private static Color TabInactiveFill
             => Color.Lerp(Resources.StaticResources.Theme.SurfaceHeader, Resources.StaticResources.Theme.SurfaceBackdrop, 0.35f);
+
+        /// <summary>An inactive tab wears the active tab's gradient, a fair
+        /// bit dimmer (#597 follow-up), rather than a flat fill: the same kind
+        /// of thing, plainly not the one you are looking at.</summary>
+        private static Color TabInactiveTop => Color.Lerp(TabActiveTop, TabStripFill, InactiveTabDim);
+
+        private static Color TabInactiveBottom => Color.Lerp(TabActiveBottom, TabStripFill, InactiveTabDim);
 
         /// <summary>
         /// The active tab: the title bar's accent wash, but stronger (#341).
@@ -1647,10 +1667,12 @@ namespace GustUI.Elements
 
                 tabStrip?.Kill();
                 tabStrip = null;
+                tabGrip = null;
                 if (titleBarElement != null)
                 {
                     titleBarElement.LeftReserved = 0f;
                     titleBarElement.ChromeHidden = false;
+                    titleBarElement.Tabbed = false;
                 }
 
                 if (tabs.Count == 1)
@@ -1694,6 +1716,13 @@ namespace GustUI.Elements
                 // which docks or merges wherever the drag was offering to.
                 tabStrip.AddTrait<OnPointerCaptureCancelled>().Set(new TVEvent<ClickEventArgs>(HandleTitleBarCancel));
 
+                // Dragging the trough moves the window, as a title bar does:
+                // same cursor.
+                tabStrip.AddTrait<CursorTrait>().Set(new TVText(Managers.StandardCursors.Move));
+
+                tabGrip = BuildTabGrip();
+                tabStrip.AddChild(tabGrip, "grip");
+
                 AddChildElement(tabStrip);
 
                 foreach (Tab pending in tabs)
@@ -1715,6 +1744,7 @@ namespace GustUI.Elements
             if (titleBarElement != null)
             {
                 titleBarElement.ChromeHidden = false;
+                titleBarElement.Tabbed = true;
                 chromeWidth = titleBarElement.RightChromeWidth;
             }
 
@@ -1729,7 +1759,14 @@ namespace GustUI.Elements
             tabStrip.Set<SizeTrait>(new TVVector(stripWidth, ModalTitleBarElement.BarHeight));
 
             bool active = IsActiveWindow(this);
-            tabStrip.Set<BackgroundFillTrait>(new TVFillSolidColor(() => active ? TabStripFill : Dim(TabStripFill)));
+            tabStrip.Set<BackgroundFillTrait>(new TVFillSolidColor(() => active ? TabTrough : Dim(TabTrough)));
+
+            // The grip sits in the middle of the reserved gap, just left of
+            // the window buttons: the one part of the trough the tabs never
+            // take, so the handle is always where it says.
+            tabGrip.Set<PositionTrait>(new TVVector(
+                stripWidth - (TabDragGap / 2f) - (TabGripWidth / 2f),
+                (ModalTitleBarElement.BarHeight - TabGripHeight) / 2f));
 
             // Each tab is as wide as its caption and its glyphs (#341), up to
             // MaxTabWidth; when they do not all fit, the widest give way first,
@@ -1781,7 +1818,19 @@ namespace GustUI.Elements
                         () => active ? TabActiveTop : Dim(TabActiveTop),
                         () => active ? TabActiveBottom : Dim(TabActiveBottom),
                         Direction.Vertically)
-                    : new TVFillSolidColor(() => active ? TabInactiveFill : Dim(TabInactiveFill)));
+                    : new TVFillSimpleGradient(
+                        () => active ? TabInactiveTop : Dim(TabInactiveTop),
+                        () => active ? TabInactiveBottom : Dim(TabInactiveBottom),
+                        Direction.Vertically));
+
+                // Left, top and right edges only (#597 follow-up): a bottom
+                // edge under an inactive tab ruled a line across the strip,
+                // and the active one has its underline there instead.
+                float bh = ModalTitleBarElement.BarHeight;
+                entry.EdgeLeft.Set<SizeTrait>(new TVVector(1, bh));
+                entry.EdgeTop.Set<SizeTrait>(new TVVector(shared, 1));
+                entry.EdgeRight.Set<PositionTrait>(new TVVector(shared - 1, 0));
+                entry.EdgeRight.Set<SizeTrait>(new TVVector(1, bh));
 
                 // Full width and 3px: the one mark that says "this is the tab
                 // you are looking at" has to survive a glance (#341).
@@ -1824,8 +1873,11 @@ namespace GustUI.Elements
             // running straight into the title bar beside it — the border is
             // what says "this is a tab" in both cases.
             var button = new FilledRectangleElement(0, 0, 100, ModalTitleBarElement.BarHeight,
-                new TVFillSolidColor(() => TabInactiveFill), 1,
-                () => Resources.StaticResources.Theme.SurfaceBorder);
+                new TVFillSolidColor(() => TabInactiveFill));
+
+            entry.EdgeLeft = TabEdge(button, "edge-left");
+            entry.EdgeTop = TabEdge(button, "edge-top");
+            entry.EdgeRight = TabEdge(button, "edge-right");
 
             var label = new TextElement { WordWrap = false };
             label.Set<PositionTrait>(new TVVector(TabPaddingX, 0));
@@ -1949,6 +2001,43 @@ namespace GustUI.Elements
             // The release has to come back here wherever the pointer goes,
             // or a tab dropped off the strip would stay picked up.
             entry.Button?.CapturePointer();
+        }
+
+        private const int TabGripColumns = 2;
+        private const int TabGripRows = 3;
+        private const int TabGripDotSize = 2;
+        private const int TabGripPitch = 4;
+        private const float TabGripWidth = ((TabGripColumns - 1) * TabGripPitch) + TabGripDotSize;
+        private const float TabGripHeight = ((TabGripRows - 1) * TabGripPitch) + TabGripDotSize;
+
+        /// <summary>
+        /// A 2x3 dot grip (#597 follow-up), the usual "this can be picked up"
+        /// mark, for the trough: once tabs reorder and tear off, the trough is
+        /// what moves the window, and a blank bar did not say so.
+        /// </summary>
+        private static Element BuildTabGrip()
+        {
+            var grip = new FilledRectangleElement(0, 0, (int)TabGripWidth, (int)TabGripHeight,
+                new TVFillSolidColor(Color.Transparent));
+            for (int row = 0; row < TabGripRows; row++)
+            {
+                for (int col = 0; col < TabGripColumns; col++)
+                {
+                    grip.AddChild(new FilledRectangleElement(col * TabGripPitch, row * TabGripPitch,
+                        TabGripDotSize, TabGripDotSize, new TVFillSolidColor(() => TabGripDot)), $"dot-{row}-{col}");
+                }
+            }
+
+            return grip;
+        }
+
+        /// <summary>One drawn edge of a tab, a 1px <c>SurfaceBorder</c> line.</summary>
+        private static FilledRectangleElement TabEdge(Element button, string name)
+        {
+            var edge = new FilledRectangleElement(0, 0, 1, 1,
+                new TVFillSolidColor(() => Resources.StaticResources.Theme.SurfaceBorder));
+            button.AddChild(edge, name);
+            return edge;
         }
 
         private static bool OverElement(Element element, Vector2 point)
@@ -3306,6 +3395,11 @@ namespace GustUI.Elements
             internal TextElement Label;
             internal FilledRectangleElement Underline;
             internal FilledRectangleElement CloseX;
+
+            /// <summary>A tab's drawn edges: left, top and right, no bottom.</summary>
+            internal FilledRectangleElement EdgeLeft;
+            internal FilledRectangleElement EdgeTop;
+            internal FilledRectangleElement EdgeRight;
             internal float Width;
 
             /// <summary>The caption <see cref="CaptionWidth"/> was measured
@@ -3326,6 +3420,7 @@ namespace GustUI.Elements
         private readonly List<(Element Item, string Name)> untabbedToolbarItems
             = new List<(Element, string)>();
         private FilledRectangleElement tabStrip;
+        private Element tabGrip;
         private Tab closeTabRequested;
         private bool closeAllTabsRequested;
 
