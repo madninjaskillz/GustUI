@@ -164,7 +164,7 @@ namespace GustUI.Elements
         private static float KeyWidth(InputManager.KeyboardShortcut shortcut)
         {
             float text = Resources.StaticResources.FontManager
-                .MeasureSdfText(Resources.StaticResources.Theme.MenuFont, shortcut.Key.ToString()).X;
+                .MeasureSdfText(Resources.StaticResources.Theme.MenuFont, KeyNames.Display(shortcut.Key)).X;
             return Math.Max(22f, (float)Math.Ceiling(text) + 4f);
         }
 
@@ -314,7 +314,7 @@ namespace GustUI.Elements
                     keyElement.Set<SizeTrait>(new TVVector(keyWidth, iconHeight));
                     keyElement.Set<FontTrait>(Resources.StaticResources.Theme.MenuFont);
                     keyElement.Set<ForegroundColorTrait>(Ink(Color.Black, enabled ? 1f : 0.5f));
-                    keyElement.Set<TextTrait>(new TVText(menuItem.Shortcut.Key.ToString()));
+                    keyElement.Set<TextTrait>(new TVText(KeyNames.Display(menuItem.Shortcut.Key)));
                 }
             }
 
