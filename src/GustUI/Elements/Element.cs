@@ -699,19 +699,32 @@ public class Element : IDisposable
     // cached — falls back to a fresh scan every frame, same as before this
     // existed. That's cheap in practice: it's always a small, static child
     // set (VerticalScrollElement's is exactly 2 items).
+    //
+    // AND THIS ELEMENT'S OWN SCREEN POSITION (ezmuze #652). A child's bounds
+    // are absolute -- this element's position plus the child's own -- so the
+    // answer goes stale when THIS element (or any ancestor) moves, and that
+    // marks nothing here: moving a row dirties its PARENT's cache, not the
+    // row's. A scrolled list whose rows keep their children cached showed a
+    // row that had been half outside the viewport with only the children
+    // that were visible then -- a name and a waveform, no buttons, no detail
+    // line -- for as long as nothing else changed. Keyed on the origin, the
+    // cache now misses exactly when the absolute bounds could have changed.
     private List<Element> cachedVisibleChildren;
     private Rectangle cachedVisibleClip;
+    private Vector2 cachedVisibleOrigin;
     private int cachedChildrenVersion = -1;
     private bool childCullDirty = true;
 
     internal void MarkChildCullDirty() => childCullDirty = true;
 
-    private List<Element> GetVisibleChildren(List<Element> items, Rectangle activeClip, int childrenVersion)
+    internal List<Element> GetVisibleChildren(List<Element> items, Rectangle activeClip, int childrenVersion)
     {
+        Vector2 origin = this.GetActualXnaPosition();
         if (!childCullDirty
             && cachedVisibleChildren != null
             && cachedChildrenVersion == childrenVersion
-            && cachedVisibleClip == activeClip)
+            && cachedVisibleClip == activeClip
+            && cachedVisibleOrigin == origin)
         {
             return cachedVisibleChildren;
         }
@@ -736,6 +749,7 @@ public class Element : IDisposable
         {
             cachedVisibleChildren = visible;
             cachedVisibleClip = activeClip;
+            cachedVisibleOrigin = origin;
             cachedChildrenVersion = childrenVersion;
             childCullDirty = false;
         }
