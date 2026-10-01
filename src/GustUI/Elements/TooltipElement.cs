@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using GustUI.Extensions;
 using GustUI.Traits;
 using GustUI.TraitValues;
@@ -27,7 +28,17 @@ public class TooltipElement : Element
     private static TooltipElement shared;
 
     private string text = "";
-    private Vector2 anchor;
+    private Vector2 cursor;
+    private Element owner;
+
+    // The wrapped lines for the current text at the current window width and
+    // font size. Wrapping measures word by word, so it is redone only when
+    // one of those changes, not every frame the label is up.
+    private List<string> layoutLines;
+    private string layoutText;
+    private Vector2 layoutWindow;
+    private float layoutFontSize;
+    private float layoutWidest;
     private bool visible;
     private long shownAtMs;
     private Rectangle drawnBounds;
@@ -70,8 +81,8 @@ public class TooltipElement : Element
     /// </summary>
     public static void Attach(Element target, string text)
     {
-        Chain(target.AddTrait<OnEnterTrait>(), args => Show(text, args.GlobalMousePosition.AsXna));
-        Chain(target.AddTrait<OnExitTrait>(), _ => Hide());
+        Chain(target.AddTrait<OnEnterTrait>(), args => ShowFor(target, text, args.GlobalMousePosition.AsXna));
+        Chain(target.AddTrait<OnExitTrait>(), _ => HideFor(target));
     }
 
     /// <summary>
@@ -82,8 +93,28 @@ public class TooltipElement : Element
     /// </summary>
     public static void Attach(Element target, Func<string> text)
     {
-        Chain(target.AddTrait<OnEnterTrait>(), args => Show(text(), args.GlobalMousePosition.AsXna));
-        Chain(target.AddTrait<OnExitTrait>(), _ => Hide());
+        Chain(target.AddTrait<OnEnterTrait>(), args => ShowFor(target, text(), args.GlobalMousePosition.AsXna));
+        Chain(target.AddTrait<OnExitTrait>(), _ => HideFor(target));
+    }
+
+    // GustUI fires a frame's ENTERS before its EXITS (InputManager.
+    // UpdateHoverTransitions), so moving straight from one attached element
+    // to another in a single frame - adjacent toolbar buttons, store tiles,
+    // or any jump of the pointer - showed the new label and then let the old
+    // element's exit hide it again: the second tooltip never appeared. An
+    // exit now hides only the label its own element put up.
+    private static void ShowFor(Element target, string text, Vector2 nearScreenPosition)
+    {
+        Show(text, nearScreenPosition);
+        shared.owner = target;
+    }
+
+    private static void HideFor(Element target)
+    {
+        if (shared != null && (shared.owner == null || ReferenceEquals(shared.owner, target)))
+        {
+            Hide();
+        }
     }
 
     /// <summary>Appends <paramref name="handler"/> to a trait's existing
@@ -115,8 +146,9 @@ public class TooltipElement : Element
         }
 
         shared.text = text ?? "";
-        shared.anchor = nearScreenPosition + new Vector2(14, 20);
+        shared.cursor = nearScreenPosition;
         shared.visible = true;
+        shared.owner = null;
         shared.shownAtMs = Environment.TickCount64;
     }
 
@@ -140,35 +172,48 @@ public class TooltipElement : Element
 
         var theme = Resources.StaticResources.Theme;
         var sdfFont = Resources.StaticResources.FontManager.LoadSdfFont(theme.UiFontSmall.Family);
-        // A tooltip may be several lines ("name - what it is", then a note
-        // under it). The SDF string drawer knows nothing of '\n' — it ran the
-        // lines together and measured them as one — so each line is measured
-        // and drawn on its own, a line height apart.
-        string[] lines = text.Replace("\r\n", "\n").Split('\n');
-        float lineHeight = sdfFont.MeasureString("Ag", theme.UiFontSmall.Size).Y;
-        float widest = 0f;
-        foreach (string line in lines)
+        float fontSize = theme.UiFontSmall.Size;
+        float lineHeight = sdfFont.MeasureString("Ag", fontSize).Y;
+        Vector2 windowSize = Resources.StaticResources.RootWindow.GetSize().AsXna;
+
+        // Wrapped to a reading measure and cut at half the window's height
+        // (TooltipLayout). The SDF string drawer knows nothing of '\n', so
+        // each line is measured and drawn on its own, a line height apart.
+        if (layoutLines == null || layoutText != text || layoutWindow != windowSize || layoutFontSize != fontSize)
         {
-            widest = Math.Max(widest, sdfFont.MeasureString(line, theme.UiFontSmall.Size).X);
+            Func<string, float> measure = s => sdfFont.MeasureString(s, fontSize).X;
+            float wrapWidth = TooltipLayout.MaxBoxWidthFor(windowSize.X) - (PadX * 2);
+            layoutLines = TooltipLayout.Lines(text, measure, wrapWidth,
+                TooltipLayout.MaxLinesFor(windowSize.Y, lineHeight, PadY));
+            layoutWidest = 0f;
+            foreach (string line in layoutLines)
+            {
+                layoutWidest = Math.Max(layoutWidest, measure(line));
+            }
+
+            layoutText = text;
+            layoutWindow = windowSize;
+            layoutFontSize = fontSize;
         }
 
-        int w = (int)widest + PadX * 2;
-        int h = (int)(lineHeight * lines.Length) + PadY * 2;
+        List<string> lines = layoutLines;
+        int w = (int)layoutWidest + PadX * 2;
+        int h = (int)(lineHeight * lines.Count) + PadY * 2;
 
-        // Clamp to the window so the label never renders off-screen.
-        Vector2 windowSize = Resources.StaticResources.RootWindow.GetSize().AsXna;
-        float x = MathHelper.Clamp(anchor.X, 0, Math.Max(0, windowSize.X - w));
-        float y = MathHelper.Clamp(anchor.Y, 0, Math.Max(0, windowSize.Y - h));
+        // Below-right of the pointer, flipped left/up at the window's edges,
+        // and always wholly on screen.
+        Vector2 at = TooltipLayout.Place(cursor, new Vector2(w, h), windowSize);
+        float x = at.X;
+        float y = at.Y;
         var rect = new Rectangle((int)x, (int)y, w, h);
         drawnBounds = rect;
-
 
         // design-guide.md §9: one standard tooltip style everywhere —
         // SurfaceHeader-family background, SurfaceBorder outline, BodyText.
         var manager = Resources.StaticResources.DrawManager;
         manager.DrawFilledRectangle(rect, theme.SurfaceHeader * 0.97f);
         manager.DrawRectangle(rect, theme.SurfaceBorder, 1);
-        for (int i = 0; i < lines.Length; i++)
+        for (int i = 0; i < lines.Count; i++)
         {
             manager.DrawSdfString(sdfFont, lines[i], new Vector2(x + PadX, y + PadY + (i * lineHeight)),
                 theme.UiFontSmall.Size, theme.BodyText);

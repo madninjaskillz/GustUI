@@ -176,7 +176,7 @@ namespace GustUI.Elements
         /// widest line, which is not something this wrap should rely on either
         /// way.
         /// </summary>
-        private static string WrapText(string text, Func<string, float> measureWidth, float wrapWidth)
+        internal static string WrapText(string text, Func<string, float> measureWidth, float wrapWidth)
         {
             if (string.IsNullOrEmpty(text))
             {
