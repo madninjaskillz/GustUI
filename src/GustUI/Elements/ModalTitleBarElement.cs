@@ -129,6 +129,37 @@ namespace GustUI.Elements
         /// <summary>Starts (or restarts) the title-bar pulse.</summary>
         public void Flash() => flashStartSeconds = flashClock.Elapsed.TotalSeconds;
 
+        private FilledRectangleElement pinFlashOverlay;
+        private double pinFlashStartSeconds = double.NegativeInfinity;
+
+        /// <summary>How many times the pin square lights up when a window
+        /// chosen from View is left behind this front-pinned one (ezmuze
+        /// #647). More than the bar's two: it has to be found, not just
+        /// noticed.</summary>
+        internal const int PinFlashPulses = 3;
+
+        /// <summary>The pin square's flash level <paramref name="elapsed"/>
+        /// seconds after it started, 0..1: <see cref="PinFlashPulses"/> of the
+        /// bar's own pulses.</summary>
+        internal static float PinFlashLevel(double elapsed)
+            => elapsed < 0 || elapsed >= PinFlashPulses * 2 * FlashStepSeconds
+                ? 0f
+                : FlashLevel(elapsed % (2 * FlashStepSeconds));
+
+        /// <summary>Pulses the pin square; the whole bar when the square is
+        /// not showing (tabbed or chrome hidden).</summary>
+        public void FlashPin()
+        {
+            if (PinShowing)
+            {
+                pinFlashStartSeconds = flashClock.Elapsed.TotalSeconds;
+            }
+            else
+            {
+                Flash();
+            }
+        }
+
         /// <summary>
         /// The pulse's strength <paramref name="elapsed"/> seconds after a
         /// flash started, 0..1: <see cref="FlashPulses"/> pulses, each an
@@ -351,6 +382,12 @@ namespace GustUI.Elements
             flashOverlay.Visible = false;
             AddChild(flashOverlay, "flash-overlay");
 
+            pinFlashOverlay = new FilledRectangleElement(0, 0, 0, 0,
+                new TVFillSolidColor(() => Resources.StaticResources.Theme.AccentSelection));
+            pinFlashOverlay.Depth = 52;
+            pinFlashOverlay.Visible = false;
+            AddChild(pinFlashOverlay, "pin-flash");
+
             if (closable)
             {
                 closeButton.Set<SizeTrait>(new TVVector(size.Y, size.Y));
@@ -545,6 +582,15 @@ namespace GustUI.Elements
                 // bottom for back.
                 bool back = ((ModalWindowElement)Parent).Pin == ModalWindowElement.WindowPin.Back;
                 pinMark.Set<PositionTrait>(new TVVector(pinX + BarHeight - PinMarkSize - 1, back ? BarHeight - PinMarkSize - 1 : 1));
+            }
+
+            if (pinFlashOverlay != null)
+            {
+                float pulse = PinFlashLevel(flashClock.Elapsed.TotalSeconds - pinFlashStartSeconds);
+                pinFlashOverlay.Visible = pulse > 0f && PinShowing;
+                pinFlashOverlay.Opacity = pulse * FlashPeakOpacity;
+                pinFlashOverlay.Set<SizeTrait>(new TVVector(BarHeight, BarHeight));
+                pinFlashOverlay.Set<PositionTrait>(new TVVector(size.X - RightChromeWidth, 0));
             }
 
             dragBarElement.Set<SizeTrait>(new TVVector(System.Math.Max(0f, size.X - RightChromeWidth - LeftReserved), BarHeight));

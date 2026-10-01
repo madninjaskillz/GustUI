@@ -2530,12 +2530,119 @@ namespace GustUI.Elements
                         // stays hidden behind a maximised one.
                         target.Window.Pin = PinWhenChosenFromList(target.Window.Pin);
                         target.Window.BringToTop(target.Tab);
+                        NoticeIfBehindPinned(target.Window, target.Title);
                     },
                 });
             }
 
             return rows;
         }
+
+        /// <summary>
+        /// Where a window chosen from the View list that is still covered by a
+        /// FRONT-pinned window says so (ezmuze #647): the app shows the text on
+        /// its status bar. Null (the default) says nothing; the covering
+        /// window's pin square flashes either way.
+        /// </summary>
+        public static Action<string> BehindPinnedNotice { get; set; }
+
+        /// <summary>How much of a chosen window a front-pinned one has to
+        /// cover before it counts as hidden behind it: half. A pinned palette
+        /// clipping a corner is not worth a message; a maximised pinned
+        /// sequencer over the whole thing is.</summary>
+        internal const float CoveredFraction = 0.5f;
+
+        /// <summary>
+        /// Which of <paramref name="others"/> (front-most LAST, as the root's
+        /// children are) is a front-pinned window covering at least
+        /// <see cref="CoveredFraction"/> of a window with pin
+        /// <paramref name="chosenPin"/> at <paramref name="chosen"/>, or -1.
+        /// A front-pinned window is never covered by another pin: the rule
+        /// (design-guide "Pinned stays on top", 2026-10-01) only ever puts a
+        /// NORMAL window under a front-pinned one.
+        /// </summary>
+        internal static int CoveringPinned(WindowPin chosenPin, (float X, float Y, float W, float H) chosen,
+            IReadOnlyList<(WindowPin Pin, (float X, float Y, float W, float H) Rect)> others)
+        {
+            if (chosenPin == WindowPin.Front || chosen.W <= 0 || chosen.H <= 0)
+            {
+                return -1;
+            }
+
+            float area = chosen.W * chosen.H;
+            for (int i = others.Count - 1; i >= 0; i--)
+            {
+                if (others[i].Pin != WindowPin.Front)
+                {
+                    continue;
+                }
+
+                var r = others[i].Rect;
+                float w = System.Math.Min(chosen.X + chosen.W, r.X + r.W) - System.Math.Max(chosen.X, r.X);
+                float h = System.Math.Min(chosen.Y + chosen.H, r.Y + r.H) - System.Math.Max(chosen.Y, r.Y);
+                if (w > 0 && h > 0 && w * h >= area * CoveredFraction)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        /// <summary>The status line for a window left behind a pinned one.</summary>
+        internal static string BehindPinnedText(string chosen, string pinned)
+            => chosen + " is behind the pinned " + pinned + ": unpin it to bring " + chosen + " forward";
+
+        /// <summary>
+        /// After a window is chosen from the View list (ezmuze #647): when a
+        /// front-pinned window still covers it, as the pin rule says it must,
+        /// say so and flash that window's pin square, so the choice does not
+        /// look like it did nothing. The pin is NOT overridden: the owner's
+        /// call was that a pinned window stays on top.
+        /// </summary>
+        private static void NoticeIfBehindPinned(ModalWindowElement chosen, string chosenTitle)
+        {
+            Element root = Resources.StaticResources?.RootWindow;
+            if (root?.Children == null || chosen.Parent == null)
+            {
+                return;
+            }
+
+            var others = new List<ModalWindowElement>();
+            var rects = new List<(WindowPin Pin, (float X, float Y, float W, float H) Rect)>();
+            foreach (ModalWindowElement window in root.Children.Items.OfType<ModalWindowElement>())
+            {
+                if (ReferenceEquals(window, chosen) || !window.Visible || window.closing)
+                {
+                    continue;
+                }
+
+                others.Add(window);
+                rects.Add((window.Pin, Rect(window)));
+            }
+
+            int covering = CoveringPinned(chosen.Pin, Rect(chosen), rects);
+            if (covering < 0)
+            {
+                return;
+            }
+
+            ModalWindowElement cover = others[covering];
+            cover.FlashPin();
+            string coverTitle = string.IsNullOrWhiteSpace(cover.ListTitle) ? cover.Title : cover.ListTitle;
+            BehindPinnedNotice?.Invoke(BehindPinnedText(chosenTitle, coverTitle));
+        }
+
+        private static (float X, float Y, float W, float H) Rect(Element element)
+        {
+            Vector2 pos = element.GetActualXnaPosition();
+            TVVector size = element.GetSize();
+            return (pos.X, pos.Y, size.X, size.Y);
+        }
+
+        /// <summary>Pulses the pin square in the title bar (the whole bar when
+        /// the square is not showing): "this is why".</summary>
+        public void FlashPin() => titleBarElement?.FlashPin();
 
         /// <summary>What choosing a window from the Window list does: selects
         /// <paramref name="tab"/> if given, brings the window to the top and

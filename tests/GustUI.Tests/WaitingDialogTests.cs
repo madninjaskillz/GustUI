@@ -234,5 +234,55 @@ namespace GustUI.Tests
 
             Assert.Same(panel, root.Children.Items[^1]);
         }
+
+        // #647: the owner's call is "pinned stays on top". A normal window
+        // chosen from View stays under a front-pinned one that covers it, and
+        // that is said rather than left looking like nothing happened.
+        [Fact]
+        public void AWindowMostlyUnderAFrontPinnedOneIsReportedAsCovered()
+        {
+            var panel = (100f, 100f, 400f, 300f);
+            var others = new List<(Pin, (float, float, float, float))>
+            {
+                (Pin.Normal, (0f, 0f, 2000f, 1000f)),
+                (Pin.Front, (0f, 0f, 2000f, 1000f)),
+            };
+            Assert.Equal(1, ModalWindowElement.CoveringPinned(Pin.Normal, panel, others));
+        }
+
+        [Fact]
+        public void AFrontPinnedChoiceIsNeverReportedAsCovered()
+        {
+            const Pin chosen = Pin.Front;
+            var others = new List<(Pin, (float, float, float, float))> { (Pin.Front, (0f, 0f, 2000f, 1000f)) };
+            Assert.Equal(-1, ModalWindowElement.CoveringPinned(chosen, (100f, 100f, 400f, 300f), others));
+        }
+
+        [Fact]
+        public void APinnedWindowClippingACornerOrANormalOneOverItIsNotReported()
+        {
+            var panel = (100f, 100f, 400f, 300f);
+            var corner = new List<(Pin, (float, float, float, float))> { (Pin.Front, (400f, 300f, 400f, 300f)) };
+            Assert.Equal(-1, ModalWindowElement.CoveringPinned(Pin.Normal, panel, corner));
+            var normal = new List<(Pin, (float, float, float, float))> { (Pin.Normal, (0f, 0f, 2000f, 1000f)) };
+            Assert.Equal(-1, ModalWindowElement.CoveringPinned(Pin.Normal, panel, normal));
+        }
+
+        [Fact]
+        public void TheNoticeSaysWhatCoversItAndWhatToDo()
+        {
+            Assert.Equal("Chip - Chip is behind the pinned Sequencer: unpin it to bring Chip - Chip forward",
+                ModalWindowElement.BehindPinnedText("Chip - Chip", "Sequencer"));
+        }
+
+        [Fact]
+        public void ThePinSquareFlashesThreeTimesThenStops()
+        {
+            double step = ModalTitleBarElement.FlashStepSeconds;
+            Assert.True(ModalTitleBarElement.PinFlashLevel(step) > 0.9f);
+            Assert.True(ModalTitleBarElement.PinFlashLevel(5 * step) > 0.9f);
+            Assert.Equal(0f, ModalTitleBarElement.PinFlashLevel(6 * step + 0.01));
+            Assert.Equal(0f, ModalTitleBarElement.PinFlashLevel(-1));
+        }
     }
 }
