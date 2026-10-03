@@ -140,9 +140,20 @@ public class FilledRectangleElement : RectangleElement
                 // question: is the cost in GetTexture() (frame decode +
                 // texture upload) or in the draw call itself?
                 Texture2D videoTexture;
-                using (Managers.Telemetry.Scope("Draw.VideoBackground.GetTexture"))
+                if (video.Blur > 0)
                 {
-                    videoTexture = video.GetTexture();
+                    // Decoded and blurred in the pre-pass (tagged there): this
+                    // asks for the next frame and draws the last. Sized in
+                    // device pixels, which is what the blur radius is in.
+                    float scale = Resources.StaticResources.DrawManager.RenderScale;
+                    videoTexture = video.GetBlurredTexture((int)(rect.Width * scale), (int)(rect.Height * scale));
+                }
+                else
+                {
+                    using (Managers.Telemetry.Scope("Draw.VideoBackground.GetTexture"))
+                    {
+                        videoTexture = video.GetTexture();
+                    }
                 }
 
                 if (videoTexture != null)

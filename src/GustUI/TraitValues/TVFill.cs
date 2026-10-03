@@ -358,9 +358,78 @@ namespace GustUI.TraitValues
             // always the same, was pure waste.
             player.Volume = 0.0f;
             player.IsMuted = true;
+            renderBlur = RenderBlur;
         }
 
         private bool stopped;
+
+        /// <summary>
+        /// How soft to draw the video: the number of horizontal+vertical
+        /// Gaussian pairs (DrawManager's backdrop blur) run over it at a
+        /// quarter of the size it is drawn at. 0, the default, draws it
+        /// sharp. Each pair is two small passes, run only while the fill is
+        /// being drawn; the blur lands one frame behind, like any pre-pass,
+        /// so the first frame after the fill appears draws nothing.
+        ///
+        /// For a small video stretched over a big area, which is what this is
+        /// for: blurring AFTER the stretch hides the stretched texel grid, so
+        /// a 256x144 clip can stand in for a 720p one behind a window.
+        /// </summary>
+        public int Blur { get; set; }
+
+        private readonly Action renderBlur;
+        private RenderTarget2D blurTarget;
+        private RenderTarget2D blurScratch;
+        private Texture2D blurred;
+        private bool blurQueued;
+        private int blurWidth;
+        private int blurHeight;
+
+        /// <summary>
+        /// The blurred frame to draw over an area of <paramref name="width"/> x
+        /// <paramref name="height"/> device pixels, and a request to render the
+        /// next one before the coming frame. Null until the first blurred
+        /// frame exists, and once stopped. Called from Draw(); allocates
+        /// nothing after the first call at a given size.
+        /// </summary>
+        public Texture2D GetBlurredTexture(int width, int height)
+        {
+            if (stopped)
+            {
+                return null;
+            }
+
+            blurWidth = Math.Max(1, width / 4);
+            blurHeight = Math.Max(1, height / 4);
+            if (!blurQueued)
+            {
+                blurQueued = true;
+                Resources.StaticResources.DrawManager.QueuePrePass(renderBlur);
+            }
+
+            return blurred;
+        }
+
+        private void RenderBlur()
+        {
+            blurQueued = false;
+            Texture2D frame;
+            using (Managers.Telemetry.Scope("Draw.VideoBackground.GetTexture"))
+            {
+                frame = GetTexture();
+            }
+
+            if (frame == null)
+            {
+                return;
+            }
+
+            using (Managers.Telemetry.Scope("Draw.VideoBackground.Blur"))
+            {
+                blurred = Resources.StaticResources.DrawManager.RenderBlurred(frame,
+                    ref blurTarget, ref blurScratch, blurWidth, blurHeight, Blur);
+            }
+        }
 
         /// <summary>
         /// Stops playback for good: <see cref="GetTexture"/> hands back nothing
@@ -387,6 +456,13 @@ namespace GustUI.TraitValues
             catch
             {
             }
+
+            // Nothing draws the blur after this, so its targets go now.
+            blurred = null;
+            blurTarget?.Dispose();
+            blurTarget = null;
+            blurScratch?.Dispose();
+            blurScratch = null;
         }
 
         public Texture2D GetTexture()

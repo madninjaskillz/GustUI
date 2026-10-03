@@ -1042,6 +1042,75 @@ namespace GustUI.Managers
             }
         }
 
+        /// <summary>
+        /// The backdrop blur, for anything else that wants one: draws
+        /// <paramref name="source"/> stretched into a <paramref name="width"/>
+        /// x <paramref name="height"/> target, runs <paramref name="iterations"/>
+        /// horizontal+vertical pairs of the same 9-tap Gaussian over it, and
+        /// returns that target (<paramref name="target"/>) to draw like any
+        /// other texture, or null when the backdrop effect is missing or
+        /// nothing was asked for.
+        ///
+        /// Call it from a <see cref="QueuePrePass"/> render, not from Draw():
+        /// it swaps render targets, which in the middle of the tree costs a
+        /// flush. The caller owns both targets (allocated here, re-allocated
+        /// when the size changes, disposed by the caller) and passes the same
+        /// two fields every frame, so nothing is allocated per frame. Their
+        /// contents are rewritten in full every call, so a device that throws
+        /// them away (a reset, a lost GL context) costs one frame at most.
+        ///
+        /// Blurring AFTER the stretch is the point: a small source bilinearly
+        /// stretched to a big window shows its texel grid as a blocky
+        /// cross-hatch, and only a blur at (a fraction of) the drawn size
+        /// smooths that out. Blurring the source at its own size first leaves
+        /// the grid in place. Size the target like the backdrop does, a
+        /// quarter of the size it will be drawn at: the radius then stays the
+        /// same fraction of the picture at any window size.
+        /// </summary>
+        public Texture2D RenderBlurred(Texture2D source, ref RenderTarget2D target, ref RenderTarget2D scratch,
+            int width, int height, int iterations)
+        {
+            Effect fx = GetBackdropEffect();
+            if (fx == null || source == null || iterations <= 0)
+            {
+                return null;
+            }
+
+            EnsureTarget(ref target, width, height, RenderTargetUsage.DiscardContents);
+            EnsureTarget(ref scratch, width, height, RenderTargetUsage.DiscardContents);
+
+            bool wasInBatch = IsInBatch;
+            if (wasInBatch)
+            {
+                End();
+            }
+
+            RenderTarget2D previousTarget = currentTarget;
+            try
+            {
+                RunBackdropPass(fx, "Copy", target, source, null);
+
+                EffectParameter step = fx.Parameters["TexelStep"];
+                for (int i = 0; i < iterations; i++)
+                {
+                    step?.SetValue(new Vector2(1f / target.Width, 0f));
+                    RunBackdropPass(fx, "Blur", scratch, target, null);
+                    step?.SetValue(new Vector2(0f, 1f / target.Height));
+                    RunBackdropPass(fx, "Blur", target, scratch, null);
+                }
+            }
+            finally
+            {
+                SetRenderTarget(previousTarget);
+                if (wasInBatch)
+                {
+                    Begin();
+                }
+            }
+
+            return target;
+        }
+
         /// <summary>Copies a captured frame to the backbuffer untouched, when
         /// the scrim that asked for it never drew.</summary>
         private void FinishBackdropCapture()
