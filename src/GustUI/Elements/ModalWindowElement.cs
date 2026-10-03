@@ -4329,6 +4329,16 @@ namespace GustUI.Elements
             return (active as ModalWindowElement)?.Title;
         }
 
+        /// <summary>
+        /// Whether this window is the ACTIVE one (see
+        /// <see cref="IsActiveWindow"/>). Public for a host's own keyboard
+        /// shortcuts: a window that stays open beside others without a hook
+        /// scope of its own (ezmuze's preset browser, #689) should answer a key
+        /// only while it is the window you are using — and asking here gives
+        /// the answer its lit title bar shows, not a second guess at it.
+        /// </summary>
+        public bool IsActive => IsActiveWindow(this);
+
         /// <summary>Whether <paramref name="host"/> is the ACTIVE window — the
         /// one clicked or activated last, which has the keyboard — and so
         /// draws its title bar lit. Pins play no part (see
