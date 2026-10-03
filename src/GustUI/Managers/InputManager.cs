@@ -1778,6 +1778,27 @@ namespace GustUI.Managers
             return best;
         }
 
+        /// <summary>
+        /// Everything under <paramref name="point"/> inside
+        /// <paramref name="within"/>, outermost first and deepest last — the
+        /// same walk the hover pass makes (invisible and detached elements are
+        /// not hit), asked of one subtree and touching no hover state. For a
+        /// question the pointer is not answering, such as where an OS file drop
+        /// landed (ezmuze #683): the mouse is not tracked during one.
+        /// </summary>
+        public static List<Element> ElementsAt(Element within, Vector2 point)
+        {
+            var into = new List<Element>();
+            if (within == null)
+            {
+                return into;
+            }
+
+            Vector2 contribution = within.Parent != null ? within.Parent.GetActualXnaPosition() : Vector2.Zero;
+            CollectHovered(within, point, contribution, into);
+            return into;
+        }
+
         private static void CollectHovered(Element element, Vector2 position, Vector2 parentContribution, List<Element> into)
         {
             // Invisible means unhittable, subtree included -- a hidden thing

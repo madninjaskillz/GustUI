@@ -335,10 +335,31 @@ namespace GustUI.Elements
         internal static Element MergeTargetAt(IReadOnlyList<Element> drawOrder, Element self, Vector2 point,
             Func<Element, bool> isWindow, Func<Element, bool> acceptsTabs, Func<Element, (Vector2 Position, Vector2 Size)> bounds, float titleBarHeight)
         {
+            Element window = TopmostWindowAt(drawOrder, point, w => !ReferenceEquals(w, self) && isWindow(w), bounds);
+            if (window == null)
+            {
+                return null;
+            }
+
+            // The topmost window here decides: its title bar or nothing.
+            return acceptsTabs(window) && point.Y <= bounds(window).Position.Y + titleBarHeight ? window : null;
+        }
+
+        /// <summary>
+        /// The window DRAWN on top at <paramref name="point"/>: the last one in
+        /// <paramref name="drawOrder"/> (the root's children, bottom to top)
+        /// that is visible, that <paramref name="isWindow"/> counts, and whose
+        /// <paramref name="bounds"/> contain the point. Null for none. What a
+        /// tab merge (#357) and an OS file drop (#683) both mean by "the
+        /// window under the pointer".
+        /// </summary>
+        internal static Element TopmostWindowAt(IReadOnlyList<Element> drawOrder, Vector2 point,
+            Func<Element, bool> isWindow, Func<Element, (Vector2 Position, Vector2 Size)> bounds)
+        {
             for (int i = drawOrder.Count - 1; i >= 0; i--)
             {
                 Element window = drawOrder[i];
-                if (window == null || ReferenceEquals(window, self) || !window.Visible || !isWindow(window))
+                if (window == null || !window.Visible || !isWindow(window))
                 {
                     continue;
                 }
@@ -349,12 +370,34 @@ namespace GustUI.Elements
                     continue;
                 }
 
-                // The topmost window here decides: its title bar or nothing.
-                return acceptsTabs(window) && point.Y <= pos.Y + titleBarHeight ? window : null;
+                return window;
             }
 
             return null;
         }
+
+        /// <summary>The window drawn on top at <paramref name="point"/> among
+        /// <paramref name="root"/>'s children (see
+        /// <see cref="TopmostWindowAt"/>), ignoring popups, tooltips and other
+        /// chrome that is not a window, and windows on their way out.</summary>
+        public static ModalWindowElement WindowAt(Element root, Vector2 point)
+        {
+            if (root?.Children == null)
+            {
+                return null;
+            }
+
+            return TopmostWindowAt(root.Children.Items, point,
+                w => w is ModalWindowElement window && !window.closing,
+                w => (w.GetActualXnaPosition(), w.GetSize().AsXna)) as ModalWindowElement;
+        }
+
+        /// <summary>What this window is showing, by name: its active tab's
+        /// title when it has tabs, else its own <see cref="Title"/>.</summary>
+        public string ActiveTitle => tabs.Count > 0 && activeIndex >= 0 && activeIndex < tabs.Count
+            && !string.IsNullOrEmpty(tabs[activeIndex].Title)
+            ? tabs[activeIndex].Title
+            : Title;
 
         /// <summary>Whether <paramref name="scope"/> belongs to a view window
         /// -- a window that takes part in <see cref="ClaimKeyboard"/>, or one
