@@ -414,11 +414,12 @@ public class KnobElement : Element
             }
 
             // Modulation arc, UNDER the pointer so the pointer stays the
-            // primary read. Drawn as a run of small quads along the rim rather
-            // than as a baked annulus texture: the arc's start angle and sweep
-            // both change continuously (with the knob's value and with the
-            // depth), so a texture cache keyed on them would thrash, and a
-            // couple of dozen quads is cheaper than one texture upload.
+            // primary read. A real antialiased ring slice (DrawRingArc), not a
+            // baked annulus: the arc's start angle and sweep both change
+            // continuously (with the knob's value and with the depth), so a
+            // texture cache keyed on them would thrash. It was a run of
+            // whole-pixel squares until 2026-10-05, which read as a jagged
+            // bead chain at every angle but the four axes.
             if (ModDepth.HasValue && Math.Abs(ModDepth.Value) > 0.001f)
             {
                 float depth = MathHelper.Clamp(ModDepth.Value, -1f, 1f);
@@ -429,19 +430,15 @@ public class KnobElement : Element
                 Color arcColor = depth >= 0f ? ModColor : ModNegativeColor;
 
                 float arcRadius = diameter / 2f - Math.Max(1.5f, diameter * 0.045f);
-                int steps = Math.Max(3, (int)(Math.Abs(endDeg - startDeg) / 4f) + 2);
-                int thickness = Math.Max(2, (int)(diameter * 0.07f));
-                for (int s = 0; s <= steps; s++)
-                {
-                    float t = s / (float)steps;
-                    float deg = startDeg + (endDeg - startDeg) * t;
-                    float rad = MathHelper.ToRadians(deg);
-                    var dir = new Vector2(-(float)Math.Sin(rad), (float)Math.Cos(rad));
-                    Vector2 p = center + dir * arcRadius;
-                    manager.DrawFilledRectangle(
-                        new Rectangle((int)(p.X - thickness / 2f), (int)(p.Y - thickness / 2f), thickness, thickness),
-                        arcColor);
-                }
+                float thickness = Math.Max(2, (int)(diameter * 0.07f));
+
+                // The value angle runs from 6 o'clock (dir = (-sin, cos)); a
+                // ring arc's angle from 3 o'clock (dir = (cos, sin)), a quarter
+                // turn behind. Swept forwards from whichever end is smaller.
+                float fromRad = MathHelper.ToRadians(Math.Min(startDeg, endDeg) + 90f);
+                float sweep = MathHelper.ToRadians(Math.Abs(endDeg - startDeg));
+                manager.DrawRingArc(center, arcRadius - (thickness / 2f), arcRadius + (thickness / 2f),
+                    arcColor, fromRad, sweep);
             }
 
             // Ghost pointer: where the modulation has actually put the value.
@@ -455,10 +452,9 @@ public class KnobElement : Element
                 float ghostAngle = MathHelper.ToRadians(
                     45f + MathHelper.Clamp(ModValue.Value, 0f, 1f) * SweepDegrees);
 
-                var ghostRect = new Rectangle((int)center.X, (int)center.Y, 3, (int)(diameter * PointerLength));
-                manager.DrawRotatedFilledRectangle(ghostRect,
+                manager.DrawRotatedFilledRectangle(center, new Vector2(3f, diameter * PointerLength),
                     (ModDepth ?? 0f) >= 0f ? ModColor : ModNegativeColor,
-                    ghostAngle, new Vector2(0.5f, 0f));
+                    ghostAngle, new Vector2(1.5f, 0f));
             }
 
             // Pointer: thin rect rotated about its top-center, angle 0 = 6
@@ -488,8 +484,12 @@ public class KnobElement : Element
                 ? Color.Lerp(FaceColor, Color.White, 0.72f)
                 : PointerColor;
 
-            var pointerRect = new Rectangle((int)center.X, (int)center.Y, pointerWidth, length);
-            manager.DrawRotatedFilledRectangle(pointerRect, pointerColor, angle, new Vector2(0.5f, 0f));
+            // At the float centre and pivoting on its own middle, antialiased
+            // (2026-10-05) — it was an integer rect pivoting half a pixel in
+            // from its left edge, so a wide pointer sat off-centre and every
+            // pointer had a hard, stepped edge.
+            manager.DrawRotatedFilledRectangle(center, new Vector2(pointerWidth, length), pointerColor, angle,
+                new Vector2(pointerWidth / 2f, 0f));
 
             if (LiveValue.HasValue)
             {

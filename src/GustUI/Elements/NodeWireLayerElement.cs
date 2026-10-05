@@ -342,7 +342,8 @@ namespace GustUI.Elements
         /// The dashed stroke along any polyline: every other run of
         /// <see cref="DashLength"/>, split exactly at the dash boundaries
         /// (a straight wire's runs are long, so stepping point to point would
-        /// make each dash a whole run). Each dash is coloured by where it is
+        /// make each dash a whole run). Each dash is ONE antialiased stroke
+        /// through every corner it crosses, coloured by where its points are
         /// along the whole line, as the solid gradient is.
         /// </summary>
         private static void DrawDashedPolyline(DrawManager manager, List<Vector2> points, Color fromColor, Color toColor)
@@ -358,6 +359,7 @@ namespace GustUI.Elements
                 return;
             }
 
+            var dash = new DashBuffer();
             float travelled = 0f;
             float run = 0f;
             bool on = true;
@@ -372,10 +374,12 @@ namespace GustUI.Elements
                     float piece = Math.Min(DashLength - run, length - done);
                     if (on)
                     {
-                        Vector2 p = Vector2.Lerp(a, b, done / length);
-                        Vector2 q = Vector2.Lerp(a, b, (done + piece) / length);
-                        float at = (travelled + done + piece * 0.5f) / total;
-                        manager.DrawThickLine(p, q, Color.Lerp(fromColor, toColor, at), 2);
+                        if (dash.Count == 0)
+                        {
+                            dash.Add(Vector2.Lerp(a, b, done / length), Color.Lerp(fromColor, toColor, (travelled + done) / total));
+                        }
+
+                        dash.Add(Vector2.Lerp(a, b, (done + piece) / length), Color.Lerp(fromColor, toColor, (travelled + done + piece) / total));
                     }
 
                     done += piece;
@@ -384,11 +388,14 @@ namespace GustUI.Elements
                     {
                         run = 0f;
                         on = !on;
+                        dash.Flush(manager);
                     }
                 }
 
                 travelled += length;
             }
+
+            dash.Flush(manager);
         }
 
         /// <summary>Dash length in pixels, and the gap the same, so the
@@ -398,10 +405,11 @@ namespace GustUI.Elements
 
         /// <summary>
         /// The dashed stroke: the curve is walked in short straight steps
-        /// and every other run of <see cref="DashLength"/> is drawn. Each
-        /// dash takes the gradient colour at its own position, so a dashed
-        /// wire still leaves wearing the output's colour and arrives
-        /// wearing the input's, the way a solid one does.
+        /// and every other run of <see cref="DashLength"/> is drawn, each as
+        /// one antialiased stroke through its steps. Each point takes the
+        /// gradient colour at its own position, so a dashed wire still leaves
+        /// wearing the output's colour and arrives wearing the input's, the
+        /// way a solid one does.
         /// </summary>
         private static void DrawDashedBezier(DrawManager manager, Vector2 p0, Vector2 c0, Vector2 c1, Vector2 p1,
             Color fromColor, Color toColor)
@@ -410,6 +418,7 @@ namespace GustUI.Elements
             // are what have to look right, and they land between samples.
             float chord = Vector2.Distance(p0, p1);
             int steps = Math.Max(24, (int)(chord / 3f));
+            var dash = new DashBuffer();
             Vector2 previous = p0;
             float run = 0f;
             bool on = true;
@@ -426,7 +435,12 @@ namespace GustUI.Elements
                 float length = Vector2.Distance(previous, point);
                 if (on)
                 {
-                    manager.DrawThickLine(previous, point, Color.Lerp(fromColor, toColor, t), 2);
+                    if (dash.Count == 0)
+                    {
+                        dash.Add(previous, Color.Lerp(fromColor, toColor, (i - 1) / (float)steps));
+                    }
+
+                    dash.Add(point, Color.Lerp(fromColor, toColor, t));
                 }
 
                 run += length;
@@ -434,9 +448,46 @@ namespace GustUI.Elements
                 {
                     run = 0f;
                     on = !on;
+                    dash.Flush(manager);
                 }
 
                 previous = point;
+            }
+
+            dash.Flush(manager);
+        }
+
+        /// <summary>The points of the dash being built, drawn as one stroke
+        /// when it ends. Backed by per-thread arrays: the wire layer redraws
+        /// every wire every frame.</summary>
+        private struct DashBuffer
+        {
+            [ThreadStatic] private static Vector2[] points;
+            [ThreadStatic] private static Color[] colors;
+
+            public int Count;
+
+            public void Add(Vector2 point, Color color)
+            {
+                if (points == null || points.Length <= Count)
+                {
+                    Array.Resize(ref points, Math.Max(32, Count * 2));
+                    Array.Resize(ref colors, Math.Max(32, Count * 2));
+                }
+
+                points[Count] = point;
+                colors[Count] = color;
+                Count++;
+            }
+
+            public void Flush(DrawManager manager)
+            {
+                if (Count >= 2)
+                {
+                    manager.DrawStroke(new ReadOnlySpan<Vector2>(points, 0, Count), new ReadOnlySpan<Color>(colors, 0, Count), 2f);
+                }
+
+                Count = 0;
             }
         }
     }

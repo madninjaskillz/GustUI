@@ -58,25 +58,109 @@ namespace GustUI.Extensions
 
         private static readonly float[] RoundedCornerStartAngles = { 180f, 270f, 0f, 90f };
 
+        /// <summary>A one-pixel antialiased line. See <see cref="DrawStroke(DrawManager, Vector2, Vector2, Color, float)"/>.</summary>
         public static void DrawLine(this DrawManager manager, Vector2 start, Vector2 end, Color color)
+            => manager.DrawStroke(start, end, color, 1f);
+
+        /// <summary>
+        /// An antialiased straight stroke between two FLOAT points, square
+        /// (butt) ends — <see cref="StrokeGeometry"/> over two points.
+        /// </summary>
+        public static void DrawStroke(this DrawManager manager, Vector2 start, Vector2 end, Color color, float thickness)
         {
-            Vector2 edge = end - start;
-            float angle = (float)Math.Atan2(edge.Y, edge.X);
-            var rect = new Rectangle((int)start.X, (int)start.Y, (int)edge.Length(), 1);
+            Span<Vector2> points = stackalloc Vector2[] { start, end };
+            Span<Color> colors = stackalloc Color[] { color };
+            DrawStroke(manager, points, colors, thickness, manager.GetClipRectForGeometry());
+        }
+
+        /// <summary>
+        /// An antialiased stroke along a polyline, joined (mitred) at every
+        /// point rather than drawn a segment at a time — see
+        /// <see cref="StrokeGeometry"/> for what that buys.
+        /// <paramref name="colors"/> is one colour per point, or one colour for
+        /// the whole line.
+        /// </summary>
+        public static void DrawStroke(this DrawManager manager, ReadOnlySpan<Vector2> points, ReadOnlySpan<Color> colors, float thickness)
+            => DrawStroke(manager, points, colors, thickness, manager.GetClipRectForGeometry());
+
+        /// <summary>Points per append: indices are 16-bit and relative to a
+        /// segment, so a very long line (a curve thousands of columns wide) is
+        /// laid down in pieces that share their end points.</summary>
+        private const int StrokeChunk = 2048;
+
+        private static void DrawStroke(DrawManager manager, ReadOnlySpan<Vector2> points, ReadOnlySpan<Color> colors,
+            float thickness, Vector4 clip)
+        {
+            int n = points.Length;
+            if (n < 2 || colors.Length == 0)
+            {
+                return;
+            }
 
             AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
-            manager.GeometryBatch.AppendRotatedQuad(white.Texture, rect, white.Pixels, color, angle, new Vector2(0, 0), manager.GetClipRectForGeometry(), manager.CurrentBlend);
+            var uv = new Vector2(
+                (white.Pixels.X + 0.5f) / white.Texture.Width,
+                (white.Pixels.Y + 0.5f) / white.Texture.Height);
+
+            for (int start = 0; start < n - 1; start += StrokeChunk)
+            {
+                int end = Math.Min(n - 1, start + StrokeChunk);
+                ReadOnlySpan<Vector2> piece = points.Slice(start, end - start + 1);
+                ReadOnlySpan<Color> pieceColors = colors.Length == n ? colors.Slice(start, end - start + 1) : colors;
+
+                GeometryVertex[] verts = Scratch(ref scratchVerts, StrokeGeometry.MaxVertices(piece.Length));
+                short[] idx = Scratch(ref scratchIndices, StrokeGeometry.MaxIndices(piece.Length));
+                StrokeGeometry.Write(piece, pieceColors, thickness, manager.RenderScale, uv, clip,
+                    verts, 0, idx, 0, 0, out int vertexCount, out int indexCount,
+                    capStart: start == 0, capEnd: end == n - 1);
+
+                manager.GeometryBatch.AppendTriangles(white.Texture, verts, vertexCount, idx, indexCount / 3, clip, manager.CurrentBlend);
+            }
         }
 
         /// <summary>Rotated filled rectangle around an arbitrary DEST-LOCAL
-        /// origin — the KnobElement pointer/needle idiom (DrawThickLine's
-        /// rotated-rect append, generalized past a line's implied
-        /// thickness/length to any rect+origin), using the shared white
-        /// atlas texel instead of a private per-element pixel texture.</summary>
+        /// origin — the KnobElement pointer/needle idiom. See the float
+        /// overload.</summary>
         public static void DrawRotatedFilledRectangle(this DrawManager manager, Rectangle rectangle, Color color, float angle, Vector2 origin)
+            => manager.DrawRotatedFilledRectangle(
+                new Vector2(rectangle.X, rectangle.Y), new Vector2(rectangle.Width, rectangle.Height), color, angle, origin);
+
+        /// <summary>
+        /// Rotated filled rectangle at a FLOAT position, around
+        /// <paramref name="origin"/> in the rectangle's own unrotated space,
+        /// with an antialiased edge — the four corners pushed out and in along
+        /// the sum of their two edge normals (which moves each EDGE by exactly
+        /// half a feather) and filled the way every other convex shape here is.
+        /// </summary>
+        public static void DrawRotatedFilledRectangle(this DrawManager manager, Vector2 position, Vector2 size,
+            Color color, float angle, Vector2 origin)
         {
-            AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
-            manager.GeometryBatch.AppendRotatedQuad(white.Texture, rectangle, white.Pixels, color, angle, origin, manager.GetClipRectForGeometry(), manager.CurrentBlend);
+            if (size.X <= 0.0001f || size.Y <= 0.0001f)
+            {
+                return;
+            }
+
+            float cos = (float)Math.Cos(angle);
+            float sin = (float)Math.Sin(angle);
+            Vector2 Turn(float x, float y) => new Vector2((x * cos) - (y * sin), (x * sin) + (y * cos));
+            Vector2 Corner(float x, float y) => position + Turn(x - origin.X, y - origin.Y);
+
+            Vector2 up = Turn(0f, -1f);
+            Vector2 right = Turn(1f, 0f);
+
+            Vector2[] points = Scratch(ref scratchPoints, 4);
+            Vector2[] normals = Scratch(ref scratchNormals, 4);
+            points[0] = Corner(0f, 0f);
+            points[1] = Corner(size.X, 0f);
+            points[2] = Corner(size.X, size.Y);
+            points[3] = Corner(0f, size.Y);
+            normals[0] = up - right;
+            normals[1] = up + right;
+            normals[2] = right - up;
+            normals[3] = -up - right;
+
+            Vector2 centroid = (points[0] + points[2]) * 0.5f;
+            AppendFeatheredFill(manager, points, normals, 4, centroid, color);
         }
 
         /// <summary>
@@ -98,22 +182,23 @@ namespace GustUI.Extensions
                 return;
             }
 
-            AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
             Vector4 clip = manager.GetClipRectForGeometry(rectangle);
 
             // Long enough to cross the box from any start on the bottom edge,
             // whatever the angle: the diagonal plus a stripe's own width.
-            int length = rectangle.Width + rectangle.Height + (int)thickness;
+            float length = rectangle.Width + rectangle.Height + thickness;
+            var along = new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle)) * length;
+            Span<Vector2> stripe = stackalloc Vector2[2];
+            Span<Color> colors = stackalloc Color[] { color };
 
             // Start left of the box by its height, so the stripes that enter
             // through the LEFT edge are drawn too rather than beginning
             // abruptly at the corner.
             for (float x = rectangle.Left - rectangle.Height; x < rectangle.Right; x += spacing)
             {
-                var stripe = new Rectangle((int)x, rectangle.Bottom, length, (int)Math.Max(1f, thickness));
-                manager.GeometryBatch.AppendRotatedQuad(
-                    white.Texture, stripe, white.Pixels, color, angle,
-                    new Vector2(0, 0), clip, manager.CurrentBlend);
+                stripe[0] = new Vector2(x, rectangle.Bottom);
+                stripe[1] = stripe[0] + along;
+                DrawStroke(manager, stripe, colors, thickness, clip);
             }
         }
 
@@ -211,10 +296,9 @@ namespace GustUI.Extensions
         /// feathered geometry — the same capsule <see cref="DrawFilledCapsule"/>
         /// draws, but at any angle and at sub-pixel positions.
         ///
-        /// <see cref="DrawThickLine"/> truncates its start to whole pixels and
-        /// squares its ends, which is fine for a wire and wrong for anything
-        /// that moves or turns: a stroke rotating a little every frame steps
-        /// from pixel to pixel instead of turning.
+        /// <see cref="DrawStroke(DrawManager, Vector2, Vector2, Color, float)"/>
+        /// has square ends; this one is rounded, for a mark that reads as a
+        /// pen stroke (chevrons, the EQ curve).
         /// </summary>
         public static void DrawRoundCapLine(this DrawManager manager, Vector2 start, Vector2 end, Color color, float thickness)
         {
@@ -667,27 +751,14 @@ namespace GustUI.Extensions
             manager.GeometryBatch.AppendQuadGradient(white.Texture, rectangle, white.Pixels, topLeft, topRight, bottomRight, bottomLeft, manager.GetClipRectForGeometry(), manager.CurrentBlend);
         }
 
-        /// <summary>DrawLine with a pixel thickness (rotated filled rect).</summary>
-        public static void DrawThickLine(this DrawManager manager, Vector2 start, Vector2 end, Color color, int thickness)
-        {
-            ThickLineQuad(start, end, thickness, out Rectangle rect, out float angle);
-
-            AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
-            manager.GeometryBatch.AppendRotatedQuad(white.Texture, rect, white.Pixels, color, angle, new Vector2(0, thickness / 2f), manager.GetClipRectForGeometry(), manager.CurrentBlend);
-        }
-
         /// <summary>
-        /// The rotated rect <see cref="DrawThickLine"/> draws a segment as —
-        /// shared with anything that builds the same stroke ahead of time
-        /// (GlowCurveElement's cached geometry), so the two cannot drift. Pivot
-        /// is <c>(0, thickness / 2)</c>, as DrawThickLine passes.
+        /// A straight line of the given thickness — antialiased, at float
+        /// positions, since 2026-10-05 (<see cref="StrokeGeometry"/>). It was a
+        /// rotated quad with its start truncated to whole pixels, which is
+        /// what made every wire and curve a staircase.
         /// </summary>
-        public static void ThickLineQuad(Vector2 start, Vector2 end, int thickness, out Rectangle rect, out float angle)
-        {
-            Vector2 edge = end - start;
-            angle = (float)Math.Atan2(edge.Y, edge.X);
-            rect = new Rectangle((int)start.X, (int)start.Y, (int)edge.Length() + 1, thickness);
-        }
+        public static void DrawThickLine(this DrawManager manager, Vector2 start, Vector2 end, Color color, int thickness)
+            => manager.DrawStroke(start, end, color, thickness);
 
         /// <summary>
         /// Cubic Bézier as a sampled polyline of thick segments — the house
@@ -811,7 +882,6 @@ namespace GustUI.Extensions
             }
 
             float total = lengths[segments];
-            bool graded = fromColor != toColor;
 
             // A zero-length curve would divide by zero below, and there is
             // nothing to draw anyway.
@@ -820,21 +890,36 @@ namespace GustUI.Extensions
                 return;
             }
 
-            for (int i = 1; i <= segments; i++)
+            if (fromColor == toColor)
             {
-                Color color = fromColor;
-                if (graded)
-                {
-                    // The MIDPOINT of the segment, so a segment is the colour
-                    // of where it is rather than of where it started — which
-                    // matters most at the ends, where the first segment would
-                    // otherwise be pure fromColor for its whole length.
-                    float at = (lengths[i - 1] + lengths[i]) * 0.5f / total;
-                    color = Color.Lerp(fromColor, toColor, at);
-                }
-
-                manager.DrawThickLine(points[i - 1], points[i], color, thickness);
+                Span<Color> flat = stackalloc Color[] { fromColor };
+                manager.DrawStroke(points, flat, thickness);
+                return;
             }
+
+            // One colour per POINT, by how far along the line it is; the GPU
+            // blends between them, so the gradient is continuous rather than a
+            // colour per segment.
+            Color[] colors = RentBezierColors(points.Length);
+            for (int i = 0; i <= segments; i++)
+            {
+                colors[i] = Color.Lerp(fromColor, toColor, lengths[i] / total);
+            }
+
+            manager.DrawStroke(points, new ReadOnlySpan<Color>(colors, 0, points.Length), thickness);
+        }
+
+        [ThreadStatic]
+        private static Color[] bezierColors;
+
+        private static Color[] RentBezierColors(int count)
+        {
+            if (bezierColors == null || bezierColors.Length < count)
+            {
+                bezierColors = new Color[Math.Max(count, MaxSegments + 1)];
+            }
+
+            return bezierColors;
         }
 
         // Two scratch arrays rather than an allocation per curve. The wire

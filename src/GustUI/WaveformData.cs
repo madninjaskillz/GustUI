@@ -201,7 +201,8 @@ namespace GustUI
         /// "tile face" concept — draw the block's own fill separately).
         /// </summary>
         public (VertexPositionColor[] Vertices, short[] Indices, int PrimitiveCount) BuildGeometry(
-            int level, Rectangle rect, Color tint, float sourceFraction = 1f, float sourceStart = 0f)
+            int level, Rectangle rect, Color tint, float sourceFraction = 1f, float sourceStart = 0f,
+            float renderScale = 1f)
         {
             float[] minMax = levels[level];
             int columns = minMax.Length / 2;
@@ -231,12 +232,22 @@ namespace GustUI
             columns = Math.Clamp((int)Math.Round(columns * sourceFraction), first + 1, columns) - first;
 
             // short indices (DrawManager.DrawTriangles) cap this at 32767
-            // vertices — a block would need >16383 columns to hit that,
-            // wildly past any practical zoom level's column count.
-            columns = Math.Min(columns, short.MaxValue / 2);
+            // vertices, four a column - a block would need >8191 columns to
+            // hit that, wildly past any practical zoom level's column count.
+            columns = Math.Min(columns, short.MaxValue / 4);
 
-            var vertices = new VertexPositionColor[columns * 2];
-            var indices = new short[Math.Max(0, columns - 1) * 6];
+            // ANTIALIASED (2026-10-05): four vertices a column, not two - the
+            // top and bottom edges each pushed half a physical pixel out
+            // (transparent) and half in (opaque), along the edge's own normal,
+            // so the envelope gets the same one-pixel soft edge every other
+            // shape has. It was a hard-edged strip, and at any zoom where the
+            // columns are a pixel or two apart that is a staircase.
+            float feather = 1f / Math.Max(0.01f, renderScale);
+            float half = feather * 0.5f;
+
+            float[] tops = new float[columns];
+            float[] bottoms = new float[columns];
+            Color[] colors = new Color[columns];
             float colWidth = rect.Width / (float)columns;
 
             for (int c = 0; c < columns; c++)
@@ -247,7 +258,7 @@ namespace GustUI
                 float top = rect.Y + (1f - maxV) * 0.5f * rect.Height;
                 float bottom = rect.Y + (1f - minV) * 0.5f * rect.Height;
 
-                // Silence still reads as a waveform: at least a 1px band —
+                // Silence still reads as a waveform: at least a 1px band -
                 // GetTexture's same rule, in float pixels instead of texels.
                 if (bottom - top < 1f)
                 {
@@ -258,32 +269,72 @@ namespace GustUI
 
                 float loudness = MathHelper.Clamp((maxV - minV) * 0.5f, 0f, 1f);
                 float brightness = PeakBrightWaveform ? MathHelper.Lerp(0.5f, 1f, loudness) : 1f;
-                Color vColor = tint * brightness;
+                tops[c] = top;
+                bottoms[c] = bottom;
+                colors[c] = tint * brightness;
+            }
 
+            var vertices = new VertexPositionColor[columns * 4];
+            var indices = new short[Math.Max(0, columns - 1) * 18];
+
+            for (int c = 0; c < columns; c++)
+            {
                 float x = rect.X + c * colWidth;
-                vertices[c * 2] = new VertexPositionColor(new Vector3(x, top, 0f), vColor);
-                vertices[c * 2 + 1] = new VertexPositionColor(new Vector3(x, bottom, 0f), vColor);
+
+                // Each edge's normal from its neighbours either side (one-sided
+                // at the ends), so a steep attack is feathered across its slope
+                // rather than only vertically.
+                int l = Math.Max(0, c - 1);
+                int r = Math.Min(columns - 1, c + 1);
+                float dx = Math.Max(0.0001f, (r - l) * colWidth);
+                Vector2 upNormal = Vector2.Normalize(new Vector2(tops[r] - tops[l], -dx));
+                Vector2 downNormal = Vector2.Normalize(new Vector2(-(bottoms[r] - bottoms[l]), dx));
+
+                var upper = new Vector2(x, tops[c]);
+                var lower = new Vector2(x, bottoms[c]);
+                Vector2 outerUpper = upper + upNormal * half;
+                Vector2 outerLower = lower + downNormal * half;
+                Vector2 innerUpper, innerLower;
+                if (bottoms[c] - tops[c] < feather)
+                {
+                    // Thinner than the feather: collapse the solid middle to a
+                    // line rather than let the two bands cross (DrawRing's rule).
+                    innerUpper = innerLower = (upper + lower) * 0.5f;
+                }
+                else
+                {
+                    innerUpper = upper - upNormal * half;
+                    innerLower = lower - downNormal * half;
+                }
+
+                Color color = colors[c];
+                Color clear = color * 0f;
+                vertices[c * 4] = new VertexPositionColor(new Vector3(outerUpper, 0f), clear);
+                vertices[c * 4 + 1] = new VertexPositionColor(new Vector3(innerUpper, 0f), color);
+                vertices[c * 4 + 2] = new VertexPositionColor(new Vector3(innerLower, 0f), color);
+                vertices[c * 4 + 3] = new VertexPositionColor(new Vector3(outerLower, 0f), clear);
 
                 if (c < columns - 1)
                 {
-                    // Triangle-strip-to-list for this column-to-column
-                    // segment: (top_c, bottom_c, top_c+1), (bottom_c,
-                    // bottom_c+1, top_c+1) — CW winding after the Y-down
-                    // ortho projection (DrawManager.DrawTriangles sets
-                    // CullMode.None regardless, so winding is belt-and-
-                    // braces here, not load-bearing).
-                    short vi = (short)(c * 2);
-                    int ii = c * 6;
-                    indices[ii + 0] = vi;
-                    indices[ii + 1] = (short)(vi + 1);
-                    indices[ii + 2] = (short)(vi + 2);
-                    indices[ii + 3] = (short)(vi + 1);
-                    indices[ii + 4] = (short)(vi + 3);
-                    indices[ii + 5] = (short)(vi + 2);
+                    // Three bands (feather, body, feather) from this column to
+                    // the next. DrawManager.DrawTriangles sets CullMode.None,
+                    // so winding is not load-bearing.
+                    int a = c * 4;
+                    int b = a + 4;
+                    int ii = c * 18;
+                    for (int row = 0; row < 3; row++)
+                    {
+                        indices[ii++] = (short)(a + row);
+                        indices[ii++] = (short)(b + row);
+                        indices[ii++] = (short)(b + row + 1);
+                        indices[ii++] = (short)(a + row);
+                        indices[ii++] = (short)(b + row + 1);
+                        indices[ii++] = (short)(a + row + 1);
+                    }
                 }
             }
 
-            return (vertices, indices, Math.Max(0, columns - 1) * 2);
+            return (vertices, indices, Math.Max(0, columns - 1) * 6);
         }
 
         /// <summary>
@@ -341,9 +392,11 @@ namespace GustUI
 
             public float Start;
 
-            public bool Matches(int level, int width, int height, float fraction, float start)
+            public float RenderScale;
+
+            public bool Matches(int level, int width, int height, float fraction, float start, float renderScale)
                 => Vertices != null && Level == level && Width == width && Height == height
-                    && Fraction.Equals(fraction) && Start.Equals(start);
+                    && Fraction.Equals(fraction) && Start.Equals(start) && RenderScale.Equals(renderScale);
         }
 
         /// <summary>
@@ -373,11 +426,12 @@ namespace GustUI
         /// the input this method's own cache key already is.
         /// </summary>
         public (GeometryVertex[] Vertices, short[] Indices, int PrimitiveCount) GetGeometryVertices(
-            int level, int width, int height, float sourceFraction = 1f, float sourceStart = 0f)
+            int level, int width, int height, float sourceFraction = 1f, float sourceStart = 0f,
+            float renderScale = 1f)
         {
             foreach (GeometrySlot hit in geometrySlots)
             {
-                if (hit.Matches(level, width, height, sourceFraction, sourceStart))
+                if (hit.Matches(level, width, height, sourceFraction, sourceStart, renderScale))
                 {
                     hit.LastUsed = ++geometryClock;
                     return (hit.Vertices, hit.Indices, hit.PrimitiveCount);
@@ -390,7 +444,7 @@ namespace GustUI
             using var miss = Managers.Telemetry.Scope("Draw.Waveform.Triangulate");
 
             (VertexPositionColor[] raw, short[] indices, int primitiveCount) =
-                BuildGeometry(level, new Rectangle(0, 0, width, height), Color.White, sourceFraction, sourceStart);
+                BuildGeometry(level, new Rectangle(0, 0, width, height), Color.White, sourceFraction, sourceStart, renderScale);
             var verts = new GeometryVertex[raw.Length];
             for (int i = 0; i < raw.Length; i++)
             {
@@ -438,6 +492,7 @@ namespace GustUI
             slot.Height = height;
             slot.Fraction = sourceFraction;
             slot.Start = sourceStart;
+            slot.RenderScale = renderScale;
 
             return (slot.Vertices, slot.Indices, slot.PrimitiveCount);
         }

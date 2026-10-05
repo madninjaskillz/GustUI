@@ -276,7 +276,7 @@ public class WaveformElement : Element
                 float end = at + take;
                 if (RenderMode == WaveformRenderMode.Geometry)
                 {
-                    (VertexPositionColor[] v, short[] i, int p) = data.BuildGeometry(level, rect, Tint, end, at);
+                    (VertexPositionColor[] v, short[] i, int p) = data.BuildGeometry(level, rect, Tint, end, at, manager.RenderScale);
                     manager.DrawTriangles(v, i, p);
                 }
                 else if (RenderMode == WaveformRenderMode.Columns)
@@ -285,7 +285,7 @@ public class WaveformElement : Element
                 }
                 else
                 {
-                    (GeometryVertex[] v, short[] i, int p) = data.GetGeometryVertices(level, rect.Width, rect.Height, end, at);
+                    (GeometryVertex[] v, short[] i, int p) = data.GetGeometryVertices(level, rect.Width, rect.Height, end, at, manager.RenderScale);
                     manager.DrawCachedTriangles(v, i, p, new Vector2(rect.X, rect.Y), Tint);
                 }
             }
@@ -298,7 +298,7 @@ public class WaveformElement : Element
                 if (ghostWidth > 0)
                 {
                     var ghostRect = new Rectangle((int)pos.X + drawnWidth, (int)pos.Y, ghostWidth, height);
-                    (GeometryVertex[] v, short[] i, int p) = GhostData.GetGeometryVertices(ghostLevel, ghostRect.Width, ghostRect.Height);
+                    (GeometryVertex[] v, short[] i, int p) = GhostData.GetGeometryVertices(ghostLevel, ghostRect.Width, ghostRect.Height, 1f, 0f, manager.RenderScale);
                     manager.DrawCachedTriangles(v, i, p, new Vector2(ghostRect.X, ghostRect.Y), GhostTint);
                 }
             }
@@ -313,14 +313,97 @@ public class WaveformElement : Element
         int total = minMax.Length / 2;
         int first = Math.Clamp((int)Math.Floor(total * from), 0, total - 1);
         int columns = Math.Clamp((int)Math.Round(total * to), first + 1, total) - first;
-        for (int x = 0; x < rect.Width; x++)
+        DrawColumnBars(manager, minMax, rect, tint, first, columns);
+    }
+
+    [ThreadStatic] private static GeometryVertex[] columnVertices;
+    [ThreadStatic] private static short[] columnIndices;
+
+    /// <summary>
+    /// Columns mode's one-pixel bars, ANTIALIASED (2026-10-05): each bar runs
+    /// between its true float top and bottom, with half a physical pixel of
+    /// soft edge either side of each end, instead of being truncated to whole
+    /// rows. Built into one buffer and appended once per block rather than as a
+    /// rectangle per pixel column.
+    /// </summary>
+    private static void DrawColumnBars(
+        Managers.DrawManager manager, float[] minMax, Rectangle rect, Color tint, int first, int columns)
+    {
+        int width = rect.Width;
+        int height = rect.Height;
+        if (width <= 0 || height <= 0)
         {
-            int c = first + (int)((long)x * columns / rect.Width);
-            float top = (1f - MathHelper.Clamp(minMax[c * 2 + 1], -1f, 1f)) * 0.5f * rect.Height;
-            float bottom = (1f - MathHelper.Clamp(minMax[c * 2], -1f, 1f)) * 0.5f * rect.Height;
-            int y0 = (int)top;
-            int y1 = Math.Max(y0 + 1, (int)Math.Ceiling(bottom));
-            manager.DrawFilledRectangle(new Rectangle(rect.X + x, rect.Y + y0, 1, Math.Min(y1, rect.Height) - y0), tint);
+            return;
+        }
+
+        Managers.AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
+        var uv = new Vector2(
+            (white.Pixels.X + 0.5f) / white.Texture.Width,
+            (white.Pixels.Y + 0.5f) / white.Texture.Height);
+        Vector4 clip = manager.GetClipRectForGeometry();
+        float half = 0.5f / Math.Max(0.01f, manager.RenderScale);
+        Color clear = tint * 0f;
+
+        // 8 vertices a bar; a chunk stays well inside 16-bit indices.
+        const int Chunk = 2048;
+        for (int start = 0; start < width; start += Chunk)
+        {
+            int count = Math.Min(Chunk, width - start);
+            if (columnVertices == null || columnVertices.Length < count * 8)
+            {
+                columnVertices = new GeometryVertex[Chunk * 8];
+                columnIndices = new short[Chunk * 18];
+            }
+
+            int v = 0;
+            int ii = 0;
+            for (int i = 0; i < count; i++)
+            {
+                int x = start + i;
+                int c = first + (int)((long)x * columns / width);
+                float top = (1f - MathHelper.Clamp(minMax[c * 2 + 1], -1f, 1f)) * 0.5f * height;
+                float bottom = (1f - MathHelper.Clamp(minMax[c * 2], -1f, 1f)) * 0.5f * height;
+                if (bottom - top < 1f)
+                {
+                    // At least a pixel, so silence stays visible.
+                    float mid = (top + bottom) * 0.5f;
+                    top = mid - 0.5f;
+                    bottom = mid + 0.5f;
+                }
+
+                top = Math.Max(0f, top);
+                bottom = Math.Min(height, bottom);
+                float innerTop = top + half;
+                float innerBottom = bottom - half;
+                if (innerBottom < innerTop)
+                {
+                    innerTop = innerBottom = (top + bottom) * 0.5f;
+                }
+
+                float left = rect.X + x;
+                float right = left + 1f;
+                float y = rect.Y;
+                int b = v;
+                columnVertices[v++] = new GeometryVertex(new Vector2(left, y + top - half), clear, uv, clip);
+                columnVertices[v++] = new GeometryVertex(new Vector2(left, y + innerTop), tint, uv, clip);
+                columnVertices[v++] = new GeometryVertex(new Vector2(left, y + innerBottom), tint, uv, clip);
+                columnVertices[v++] = new GeometryVertex(new Vector2(left, y + bottom + half), clear, uv, clip);
+                columnVertices[v++] = new GeometryVertex(new Vector2(right, y + top - half), clear, uv, clip);
+                columnVertices[v++] = new GeometryVertex(new Vector2(right, y + innerTop), tint, uv, clip);
+                columnVertices[v++] = new GeometryVertex(new Vector2(right, y + innerBottom), tint, uv, clip);
+                columnVertices[v++] = new GeometryVertex(new Vector2(right, y + bottom + half), clear, uv, clip);
+                for (int row = 0; row < 3; row++)
+                {
+                    columnIndices[ii++] = (short)(b + row);
+                    columnIndices[ii++] = (short)(b + 4 + row);
+                    columnIndices[ii++] = (short)(b + 4 + row + 1);
+                    columnIndices[ii++] = (short)(b + row);
+                    columnIndices[ii++] = (short)(b + 4 + row + 1);
+                    columnIndices[ii++] = (short)(b + row + 1);
+                }
+            }
+
+            manager.GeometryBatch.AppendTriangles(white.Texture, columnVertices, v, columnIndices, ii / 3, clip, manager.CurrentBlend);
         }
     }
 
@@ -353,7 +436,7 @@ public class WaveformElement : Element
     private static void DrawGeometry(
         Managers.DrawManager manager, WaveformData data, int level, Rectangle rect, Color tint, float sourceFraction)
     {
-        (VertexPositionColor[] vertices, short[] indices, int primitiveCount) = data.BuildGeometry(level, rect, tint, sourceFraction);
+        (VertexPositionColor[] vertices, short[] indices, int primitiveCount) = data.BuildGeometry(level, rect, tint, sourceFraction, 0f, manager.RenderScale);
         manager.DrawTriangles(vertices, indices, primitiveCount);
     }
 
@@ -366,7 +449,7 @@ public class WaveformElement : Element
         using (Managers.Telemetry.Scope("Draw.Waveform.Lookup"))
         {
             (vertices, indices, primitiveCount) =
-                data.GetGeometryVertices(level, rect.Width, rect.Height, sourceFraction);
+                data.GetGeometryVertices(level, rect.Width, rect.Height, sourceFraction, 0f, manager.RenderScale);
         }
 
         using (Managers.Telemetry.Scope("Draw.Waveform.Append"))
@@ -380,18 +463,7 @@ public class WaveformElement : Element
     {
         // Same leading-window rule as BuildGeometry's, in the per-pixel path.
         int columns = Math.Clamp((int)Math.Round(minMax.Length / 2 * sourceFraction), 1, minMax.Length / 2);
-        int height = rect.Height;
-
-        for (int x = 0; x < rect.Width; x++)
-        {
-            int c = (int)((long)x * columns / rect.Width);
-            float top = (1f - MathHelper.Clamp(minMax[c * 2 + 1], -1f, 1f)) * 0.5f * height;
-            float bottom = (1f - MathHelper.Clamp(minMax[c * 2], -1f, 1f)) * 0.5f * height;
-
-            int y0 = (int)top;
-            int y1 = Math.Max(y0 + 1, (int)Math.Ceiling(bottom)); // ≥1px so silence stays visible
-            manager.DrawFilledRectangle(new Rectangle(rect.X + x, rect.Y + y0, 1, Math.Min(y1, height) - y0), tint);
-        }
+        DrawColumnBars(manager, minMax, rect, tint, 0, columns);
     }
 }
 

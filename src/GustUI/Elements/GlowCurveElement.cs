@@ -118,7 +118,7 @@ namespace GustUI.Elements
                 Vector2 origin = this.GetActualXnaPosition();
                 Vector2 size = this.GetSize().AsXna;
 
-                if (EnsureGeometry(origin, size))
+                if (EnsureGeometry(origin, size, manager.RenderScale))
                 {
                     DrawCached(manager, origin - builtOrigin);
                 }
@@ -162,8 +162,8 @@ namespace GustUI.Elements
         // InvalidateGeometry() — there is no way to see that cheaply.
         //
         // PIXEL-IDENTICAL, not approximately so. The vertices come from the
-        // same helpers the immediate path calls (ShapeDrawExtensions.
-        // ThickLineQuad, GeometryBatch.WriteRotatedQuad/WriteQuadGradient),
+        // same builders the immediate path calls (StrokeGeometry.Write for
+        // every stroke, WriteFill for the area under it),
         // built in ABSOLUTE coordinates at the origin they were built for, so
         // at rest the offset handed to the shader is exactly zero and every
         // vertex is the float the immediate path would have produced. Colours
@@ -174,10 +174,10 @@ namespace GustUI.Elements
         // MOVING does not invalidate — scrolling a panel or relaying it out
         // shifts the whole curve by a whole number of pixels, and the shader
         // adds the offset. That is only equivalent to rebuilding while the
-        // (int) truncations the immediate path makes (DrawThickLine's segment
-        // start, the fill's column origin) move by the same whole number, i.e.
-        // while nothing crosses zero, so a fractional move or one that crosses
-        // zero rebuilds instead. And it is only NEARLY exact (float rounding
+        // pixel-grid decisions the build makes (StrokeGeometry snapping a flat
+        // run onto the grid, the fill's whole-pixel columns) move by the same
+        // whole number, so a fractional move rebuilds instead, and so - kept
+        // from when the build truncated - does one that crosses zero. And it is only NEARLY exact (float rounding
         // differs at the edges of a few pixels), so the first frame the curve
         // holds still after moving, it rebuilds where it came to rest: exact
         // at rest, cheap in motion. See IsCurrent.
@@ -204,6 +204,7 @@ namespace GustUI.Elements
             public bool Glow;
             public Color? GlowColor;
             public int Version;
+            public float RenderScale;
 
             public bool Equals(GeometryKey other) =>
                 Size == other.Size && LineColor == other.LineColor && Thickness == other.Thickness
@@ -211,7 +212,8 @@ namespace GustUI.Elements
                 && ReferenceEquals(FillColorAt, other.FillColorAt) && ReferenceEquals(LineColorAt, other.LineColorAt)
                 && FillTopAlpha == other.FillTopAlpha && FillBottomAlpha == other.FillBottomAlpha
                 && FadeFillAcrossElement == other.FadeFillAcrossElement && Baseline == other.Baseline
-                && Glow == other.Glow && GlowColor == other.GlowColor && Version == other.Version;
+                && Glow == other.Glow && GlowColor == other.GlowColor && Version == other.Version
+                && RenderScale == other.RenderScale;
         }
 
         private struct CachedPass
@@ -256,7 +258,7 @@ namespace GustUI.Elements
         /// </summary>
         public void InvalidateGeometry() => version++;
 
-        private GeometryKey CurrentKey(Vector2 size) => new GeometryKey
+        private GeometryKey CurrentKey(Vector2 size, float renderScale) => new GeometryKey
         {
             Size = size,
             LineColor = LineColor,
@@ -272,6 +274,7 @@ namespace GustUI.Elements
             Glow = Glow,
             GlowColor = GlowColor,
             Version = version,
+            RenderScale = renderScale,
         };
 
         /// <summary>
@@ -281,20 +284,20 @@ namespace GustUI.Elements
         /// too big to cache). Internal so the tests can drive it without a
         /// graphics device.
         /// </summary>
-        internal bool EnsureGeometry(Vector2 origin, Vector2 size)
+        internal bool EnsureGeometry(Vector2 origin, Vector2 size, float renderScale = 1f)
         {
-            if (!hasGeometry || !IsCurrent(origin, size))
+            if (!hasGeometry || !IsCurrent(origin, size, renderScale))
             {
-                BuildGeometry(origin, size);
+                BuildGeometry(origin, size, renderScale);
             }
 
             lastOrigin = origin;
             return geometryCacheable;
         }
 
-        private bool IsCurrent(Vector2 origin, Vector2 size)
+        private bool IsCurrent(Vector2 origin, Vector2 size, float renderScale)
         {
-            if (!builtKey.Equals(CurrentKey(size)) || Points.Count != builtPointCount)
+            if (!builtKey.Equals(CurrentKey(size, renderScale)) || Points.Count != builtPointCount)
             {
                 return false;
             }
@@ -351,11 +354,11 @@ namespace GustUI.Elements
             return delta == MathF.Round(delta) && from + min >= 0f && to + min >= 0f;
         }
 
-        private void BuildGeometry(Vector2 origin, Vector2 size)
+        private void BuildGeometry(Vector2 origin, Vector2 size, float renderScale)
         {
             GeometryBuilds++;
             hasGeometry = true;
-            builtKey = CurrentKey(size);
+            builtKey = CurrentKey(size, renderScale);
             builtOrigin = origin;
             builtFrom = Points;
             builtPointCount = Points.Count;
@@ -385,19 +388,24 @@ namespace GustUI.Elements
             int vertexCount = 0, indexCount = 0;
             if (ShowFill)
             {
-                WriteFill(origin, size, ref vertexCount, ref indexCount);
+                int width = (int)size.X;
+                Reserve(vertexCount + FillVertices(width), indexCount + FillIndices(width));
+                WriteFill(origin, size, renderScale, 0, width, Vector2.Zero, GeometryBatch.NoClip,
+                    scratchVertices, vertexCount, scratchIndices, indexCount, vertexCount, out int fv, out int fi);
+                vertexCount += fv;
+                indexCount += fi;
             }
 
             if (Glow)
             {
                 FinishPass(ref vertexCount, ref indexCount, additive: false);
                 Color glow = GlowColor ?? LineColor;
-                WritePolyline(origin, glow * 0.12f, Thickness + 6, ref vertexCount, ref indexCount);
-                WritePolyline(origin, glow * 0.22f, Thickness + 3, ref vertexCount, ref indexCount);
+                WritePolyline(origin, glow * 0.12f, Thickness + 6, renderScale, ref vertexCount, ref indexCount);
+                WritePolyline(origin, glow * 0.22f, Thickness + 3, renderScale, ref vertexCount, ref indexCount);
                 FinishPass(ref vertexCount, ref indexCount, additive: true);
             }
 
-            WritePolyline(origin, LineColor, Thickness, ref vertexCount, ref indexCount);
+            WritePolyline(origin, LineColor, Thickness, renderScale, ref vertexCount, ref indexCount);
             FinishPass(ref vertexCount, ref indexCount, additive: false);
         }
 
@@ -435,87 +443,142 @@ namespace GustUI.Elements
             indexCount = 0;
         }
 
-        private static void ReserveQuad(int vertexCount, int indexCount)
+        private static void Reserve(int vertices, int indices)
         {
-            if (scratchVertices == null || scratchVertices.Length < vertexCount + 4)
+            if (scratchVertices == null || scratchVertices.Length < vertices)
             {
-                Array.Resize(ref scratchVertices, Math.Max(256, Math.Max(vertexCount + 4, (scratchVertices?.Length ?? 0) * 2)));
+                Array.Resize(ref scratchVertices, Math.Max(256, Math.Max(vertices, (scratchVertices?.Length ?? 0) * 2)));
             }
 
-            if (scratchIndices == null || scratchIndices.Length < indexCount + 6)
+            if (scratchIndices == null || scratchIndices.Length < indices)
             {
-                Array.Resize(ref scratchIndices, Math.Max(384, Math.Max(indexCount + 6, (scratchIndices?.Length ?? 0) * 2)));
+                Array.Resize(ref scratchIndices, Math.Max(384, Math.Max(indices, (scratchIndices?.Length ?? 0) * 2)));
             }
         }
 
-        /// <summary><see cref="DrawFill"/>, written into the scratch buffers
-        /// instead of the batch. Keep the two in step.</summary>
-        private void WriteFill(Vector2 origin, Vector2 size, ref int vertexCount, ref int indexCount)
+        // ---- the fill -------------------------------------------------------
+        //
+        // A strip, not a rect per column (2026-10-05): three vertices at every
+        // whole-pixel X — just above the curve (transparent), just below it
+        // (the fill's top colour) and the baseline (its bottom colour) — so the
+        // fill's top edge follows the curve at float precision with a
+        // one-physical-pixel soft edge, instead of stepping a whole pixel at a
+        // time under the line. Same per-column tint and alpha rules as before.
+
+        private static int FillVertices(int columns) => (columns + 1) * 3;
+
+        private static int FillIndices(int columns) => columns * 12;
+
+        /// <summary>Writes the fill for columns <paramref name="from"/> through
+        /// <paramref name="to"/> (inclusive edges, element-relative X) — the one
+        /// builder both the cached and the immediate path use.</summary>
+        private void WriteFill(Vector2 origin, Vector2 size, float renderScale, int from, int to, Vector2 uv, Vector4 clip,
+            GeometryVertex[] verts, int vAt, short[] indices, int iAt, int indexBase, out int vertexCount, out int indexCount)
         {
-            int width = (int)size.X;
+            vertexCount = 0;
+            indexCount = 0;
             int height = (int)size.Y;
-            if (width < 1 || height < 2)
+            if (to <= from || height < 2)
             {
                 return;
             }
 
+            float half = 0.5f / Math.Max(0.01f, renderScale);
             float baselineY = Math.Clamp(Baseline ?? size.Y, 0f, size.Y);
             int cursor = 1;
-            for (int x = 0; x < width; x++)
+            int v = vAt;
+            for (int x = from; x <= to; x++)
             {
                 float y = Math.Clamp(SampleY(Points, x, ref cursor), 0f, baselineY);
-                int y0 = (int)y;
-                int fillHeight = (int)baselineY - y0;
-                if (fillHeight <= 0)
+                float outer = Math.Max(0f, y - half);
+                float inner = Math.Min(baselineY, y + half);
+
+                Color tint = FillColorAt?.Invoke(x) ?? FillColor;
+                float topAlpha = FadeFillAcrossElement ? FillAlphaAt(inner, height) : FillTopAlpha;
+                float bottomAlpha = FadeFillAcrossElement ? FillAlphaAt(baselineY, height) : FillBottomAlpha;
+                if (baselineY - y <= 0.0001f)
                 {
-                    continue;
+                    topAlpha = bottomAlpha = 0f;
                 }
 
-                var dest = new Rectangle((int)origin.X + x, (int)origin.Y + y0, 1, fillHeight);
-                Color tint = FillColorAt?.Invoke(x) ?? FillColor;
-                float topAlpha = FadeFillAcrossElement ? FillAlphaAt(y0, height) : FillTopAlpha;
-                float bottomAlpha = FadeFillAcrossElement
-                    ? FillAlphaAt(y0 + fillHeight, height)
-                    : FillBottomAlpha;
-
-                Color top = tint * topAlpha;
-                Color bottom = tint * bottomAlpha;
-                ReserveQuad(vertexCount, indexCount);
-                GeometryBatch.WriteQuadGradient(scratchVertices, vertexCount, dest, top, top, bottom, bottom, 0f, 0f, 0f, 0f, GeometryBatch.NoClip);
-                GeometryBatch.WriteQuadIndices(scratchIndices, indexCount, vertexCount);
-                vertexCount += 4;
-                indexCount += 6;
+                float px = origin.X + x;
+                verts[v++] = new GeometryVertex(new Vector2(px, origin.Y + outer), Color.Transparent, uv, clip);
+                verts[v++] = new GeometryVertex(new Vector2(px, origin.Y + inner), tint * topAlpha, uv, clip);
+                verts[v++] = new GeometryVertex(new Vector2(px, origin.Y + baselineY), tint * bottomAlpha, uv, clip);
             }
+
+            int ii = iAt;
+            for (int c = 0; c < to - from; c++)
+            {
+                int a = indexBase + (c * 3);
+                int b = a + 3;
+                for (int row = 0; row < 2; row++)
+                {
+                    indices[ii++] = (short)(a + row);
+                    indices[ii++] = (short)(b + row);
+                    indices[ii++] = (short)(b + row + 1);
+                    indices[ii++] = (short)(a + row);
+                    indices[ii++] = (short)(b + row + 1);
+                    indices[ii++] = (short)(a + row + 1);
+                }
+            }
+
+            vertexCount = v - vAt;
+            indexCount = ii - iAt;
         }
 
-        /// <summary><see cref="DrawPolyline"/>, written into the scratch
-        /// buffers instead of the batch. Keep the two in step.</summary>
-        private void WritePolyline(Vector2 origin, Color color, int thickness, ref int vertexCount, ref int indexCount)
+        // ---- the line -------------------------------------------------------
+
+        [ThreadStatic] private static Vector2[] strokePoints;
+        [ThreadStatic] private static Color[] strokeColors;
+
+        /// <summary>The curve's points at <paramref name="origin"/> and their
+        /// colours (one, or one per point with <see cref="LineColorAt"/>), in
+        /// the per-thread scratch both paths stroke from.</summary>
+        private int StrokeInputs(Vector2 origin, Color color, out Vector2[] points, out Color[] colors)
         {
-            var pivot = new Vector2(0, thickness / 2f);
-            Vector2 previous = origin + Points[0];
-            for (int i = 1; i < Points.Count; i++)
+            int n = Points.Count;
+            if (strokePoints == null || strokePoints.Length < n)
             {
-                Vector2 next = origin + Points[i];
-                Color segment = LineColorAt != null
-                    ? LineColorAt((Points[i - 1].X + Points[i].X) * 0.5f) * (color.A / 255f)
-                    : color;
-
-                ShapeDrawExtensions.ThickLineQuad(previous, next, thickness, out Rectangle rect, out float angle);
-                previous = next;
-
-                // AppendRotatedQuad draws nothing for an empty rect.
-                if (rect.Width == 0 || rect.Height == 0)
-                {
-                    continue;
-                }
-
-                ReserveQuad(vertexCount, indexCount);
-                GeometryBatch.WriteRotatedQuad(scratchVertices, vertexCount, rect, segment, angle, pivot, 0f, 0f, 0f, 0f, GeometryBatch.NoClip);
-                GeometryBatch.WriteQuadIndices(scratchIndices, indexCount, vertexCount);
-                vertexCount += 4;
-                indexCount += 6;
+                strokePoints = new Vector2[Math.Max(64, n * 2)];
+                strokeColors = new Color[Math.Max(64, n * 2)];
             }
+
+            points = strokePoints;
+            colors = strokeColors;
+            for (int i = 0; i < n; i++)
+            {
+                points[i] = origin + Points[i];
+                if (LineColorAt != null)
+                {
+                    colors[i] = LineColorAt(Points[i].X) * (color.A / 255f);
+                }
+            }
+
+            if (LineColorAt == null)
+            {
+                colors[0] = color;
+                return 1;
+            }
+
+            return n;
+        }
+
+        /// <summary>The stroke, written into the scratch buffers for the
+        /// cache — the same <see cref="StrokeGeometry"/> the immediate
+        /// <see cref="DrawPolyline"/> goes through.</summary>
+        private void WritePolyline(Vector2 origin, Color color, int thickness, float renderScale, ref int vertexCount, ref int indexCount)
+        {
+            int colorCount = StrokeInputs(origin, color, out Vector2[] points, out Color[] colors);
+            int n = Points.Count;
+            Reserve(vertexCount + StrokeGeometry.MaxVertices(n), indexCount + StrokeGeometry.MaxIndices(n));
+            StrokeGeometry.Write(
+                new ReadOnlySpan<Vector2>(points, 0, n), new ReadOnlySpan<Color>(colors, 0, colorCount),
+                thickness, renderScale, Vector2.Zero, GeometryBatch.NoClip,
+                scratchVertices, vertexCount, scratchIndices, indexCount, vertexCount,
+                out int written, out int writtenIndices);
+            vertexCount += written;
+            indexCount += writtenIndices;
         }
 
         private void DrawCached(Managers.DrawManager manager, Vector2 offset)
@@ -541,68 +604,43 @@ namespace GustUI.Elements
         /// Tests only.</summary>
         internal int CachedPassCount => passCount;
 
-        /// <summary>Column-fill area under the curve (the same "one 1px rect
-        /// per x-column" idiom <see cref="WaveformElement"/>.DrawColumns
-        /// established), each column a 2-color vertical vertex-color
-        /// gradient (<see cref="SpriteBatchExtensions.DrawFilledRectangleGradient"/>)
-        /// sampling the SAME fixed absolute-row alpha curve
-        /// (<see cref="FillAlphaAt"/>) at its own y0/baseline — real GPU
-        /// interpolation, not a texture slice, so a short quiet column
-        /// reads the same opacity-at-a-given-panel-height as a tall loud
-        /// one, with no bake/DPI mismatch to go soft on.</summary>
+        /// <summary>The area under the curve, drawn the immediate way (a curve
+        /// too big to cache) — <see cref="WriteFill"/> in pieces small enough
+        /// for 16-bit indices, each appended as it is built.</summary>
         private void DrawFill(Managers.DrawManager manager, Vector2 origin, Vector2 size)
         {
             int width = (int)size.X;
-            int height = (int)size.Y;
-            if (width < 1 || height < 2)
+            if (width < 1 || size.Y < 2)
             {
                 return;
             }
 
-            float baselineY = Math.Clamp(Baseline ?? size.Y, 0f, size.Y);
+            AtlasRegion white = manager.GeometryAtlas.WhiteRegion;
+            var uv = new Vector2(
+                (white.Pixels.X + 0.5f) / white.Texture.Width,
+                (white.Pixels.Y + 0.5f) / white.Texture.Height);
+            Vector4 clip = manager.GetClipRectForGeometry();
 
-            // One cursor walked left to right with the columns, not a search
-            // from the start per column: the columns only ever move right and
-            // the points are non-decreasing in X, so every column resumes
-            // where the last one stopped. A search per column was
-            // width x points — a 400px wavetable frame of 192 points is 38,000
-            // steps a frame, and Bifrost draws three of them plus envelopes.
-            int cursor = 1;
-            for (int x = 0; x < width; x++)
+            const int Chunk = 4096;
+            for (int from = 0; from < width; from += Chunk)
             {
-                float y = Math.Clamp(SampleY(Points, x, ref cursor), 0f, baselineY);
-                int y0 = (int)y;
-                int fillHeight = (int)baselineY - y0;
-                if (fillHeight <= 0)
-                {
-                    continue;
-                }
-
-                var dest = new Rectangle((int)origin.X + x, (int)origin.Y + y0, 1, fillHeight);
-                Color tint = FillColorAt?.Invoke(x) ?? FillColor;
-
-                // Across the element, or across this column's own fill: the
-                // second keeps a fill readable wherever the curve happens to
-                // sit, which is what a spectrum needs.
-                float topAlpha = FadeFillAcrossElement ? FillAlphaAt(y0, height) : FillTopAlpha;
-                float bottomAlpha = FadeFillAcrossElement
-                    ? FillAlphaAt(y0 + fillHeight, height)
-                    : FillBottomAlpha;
-
-                manager.DrawFilledRectangleGradient(dest, tint * topAlpha, tint * bottomAlpha, Direction.Vertically);
+                int to = Math.Min(width, from + Chunk);
+                Reserve(FillVertices(to - from), FillIndices(to - from));
+                WriteFill(origin, size, manager.RenderScale, from, to, uv, clip,
+                    scratchVertices, 0, scratchIndices, 0, 0, out int vertexCount, out int indexCount);
+                manager.GeometryBatch.AppendTriangles(white.Texture, scratchVertices, vertexCount, scratchIndices,
+                    indexCount / 3, clip, manager.CurrentBlend);
             }
         }
 
         /// <summary>Fixed opaque-top/transparent-bottom alpha curve over the
-        /// element's absolute row range — the same fade
-        /// <see cref="GetFillGradientTexture"/> used to bake into a texture,
-        /// now evaluated directly per column endpoint.</summary>
-        private float FillAlphaAt(int y, int height)
+        /// element's absolute row range, evaluated at a float row.</summary>
+        private float FillAlphaAt(float y, int height)
         {
             return height <= 1
                 ? FillTopAlpha
                 : MathHelper.Lerp(FillTopAlpha, FillBottomAlpha,
-                    MathHelper.Clamp(y, 0, height - 1) / (float)(height - 1));
+                    MathHelper.Clamp(y, 0, height - 1) / (height - 1));
         }
 
         /// <summary>Linear-interpolated curve Y at element-relative X (points
@@ -651,22 +689,13 @@ namespace GustUI.Elements
 
         private void DrawPolyline(Managers.DrawManager manager, Vector2 origin, Color color, int thickness)
         {
-            Vector2 previous = origin + Points[0];
-            for (int i = 1; i < Points.Count; i++)
-            {
-                Vector2 next = origin + Points[i];
-
-                // Tinted per SEGMENT when a caller asks, sampled at the
-                // segment's midpoint — a segment spans a few pixels, so one
-                // colour for it is indistinguishable from a gradient and costs
-                // one call instead of one per pixel.
-                Color segment = LineColorAt != null
-                    ? LineColorAt((Points[i - 1].X + Points[i].X) * 0.5f) * (color.A / 255f)
-                    : color;
-
-                manager.DrawThickLine(previous, next, segment, thickness);
-                previous = next;
-            }
+            // Coloured per POINT when a caller asks (LineColorAt), and the GPU
+            // blends between them, so the tint is a true gradient along the line.
+            int colorCount = StrokeInputs(origin, color, out Vector2[] points, out Color[] colors);
+            manager.DrawStroke(
+                new ReadOnlySpan<Vector2>(points, 0, Points.Count),
+                new ReadOnlySpan<Color>(colors, 0, colorCount),
+                thickness);
         }
 
         private void DrawLiveMarker(Managers.DrawManager manager, Vector2 center)

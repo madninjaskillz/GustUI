@@ -191,11 +191,11 @@ namespace GustUI.Tests
             // A fill wider than 16-bit indices can address in one pass.
             var curve = new GlowCurveElement
             {
-                Points = new List<Vector2> { new Vector2(0, 10), new Vector2(9000, 10) },
+                Points = new List<Vector2> { new Vector2(0, 10), new Vector2(12000, 10) },
                 Glow = false,
             };
 
-            Assert.False(curve.EnsureGeometry(Vector2.Zero, new Vector2(9000, 40)));
+            Assert.False(curve.EnsureGeometry(Vector2.Zero, new Vector2(12000, 40)));
             Assert.Equal(0, curve.CachedPassCount);
         }
     }

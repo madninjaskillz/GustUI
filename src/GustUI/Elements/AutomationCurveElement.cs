@@ -30,6 +30,8 @@ namespace GustUI.Elements
 
         public int Thickness = 1;
 
+        [System.ThreadStatic] private static Vector2[] scratch;
+
         public override void Draw()
         {
             if (Points.Count >= 2)
@@ -37,13 +39,21 @@ namespace GustUI.Elements
                 var manager = Resources.StaticResources.DrawManager;
                 Vector2 origin = this.GetActualXnaPosition();
 
-                Vector2 previous = origin + Points[0];
-                for (int i = 1; i < Points.Count; i++)
+                // One joined, antialiased stroke (StrokeGeometry) rather than a
+                // quad per segment: no notch or overlap at the points, and a
+                // flat run stays on the pixel grid.
+                if (scratch == null || scratch.Length < Points.Count)
                 {
-                    Vector2 next = origin + Points[i];
-                    manager.DrawThickLine(previous, next, LineColor, Thickness);
-                    previous = next;
+                    scratch = new Vector2[System.Math.Max(64, Points.Count * 2)];
                 }
+
+                for (int i = 0; i < Points.Count; i++)
+                {
+                    scratch[i] = origin + Points[i];
+                }
+
+                System.Span<Color> color = stackalloc Color[] { LineColor };
+                manager.DrawStroke(new System.ReadOnlySpan<Vector2>(scratch, 0, Points.Count), color, Thickness);
             }
 
             base.Draw();
