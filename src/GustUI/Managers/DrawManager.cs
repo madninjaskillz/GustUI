@@ -1111,6 +1111,145 @@ namespace GustUI.Managers
             return target;
         }
 
+        /// <summary>
+        /// <see cref="RenderBlurred"/> for a crossfade between two cells of a
+        /// sprite sheet: <paramref name="fromSource"/> of <paramref name="from"/>
+        /// and <paramref name="toSource"/> of <paramref name="to"/>, mixed
+        /// <paramref name="weight"/> of the way towards the second, stretched
+        /// into the <paramref name="width"/> x <paramref name="height"/>
+        /// target and blurred there by <paramref name="iterations"/> pairs (0
+        /// leaves it sharp).
+        ///
+        /// The mix is the blur's own first pass, done twice: the backdrop
+        /// effect's Copy technique draws the first cell opaque, then the
+        /// second over it with the blend factor set to the weight
+        /// (src*w + dst*(1-w)). No new shader; the cell is picked by the
+        /// triangle's texture coordinates, inset half a texel on every edge
+        /// so bilinear filtering never reaches into the neighbouring frame.
+        ///
+        /// Same rules as <see cref="RenderBlurred"/>: call from a pre-pass,
+        /// the caller owns both targets. <paramref name="target"/> is kept
+        /// (PreserveContents) because the caller draws it again on frames
+        /// that do not redraw it.
+        /// </summary>
+        public Texture2D RenderCrossfadeBlurred(Texture2D from, Rectangle fromSource, Texture2D to, Rectangle toSource,
+            float weight, ref RenderTarget2D target, ref RenderTarget2D scratch, int width, int height, int iterations)
+        {
+            Effect fx = GetBackdropEffect();
+            if (fx == null || from == null || to == null)
+            {
+                return null;
+            }
+
+            EnsureTarget(ref target, width, height, RenderTargetUsage.PreserveContents);
+            if (iterations > 0)
+            {
+                EnsureTarget(ref scratch, width, height, RenderTargetUsage.DiscardContents);
+            }
+
+            bool wasInBatch = IsInBatch;
+            if (wasInBatch)
+            {
+                End();
+            }
+
+            RenderTarget2D previousTarget = currentTarget;
+            try
+            {
+                SetCellTriangle(cellTriangleFrom, from, fromSource);
+                RunCellPass(fx, target, from, cellTriangleFrom, BlendState.Opaque, 0f);
+
+                weight = MathHelper.Clamp(weight, 0f, 1f);
+                if (weight > 0f)
+                {
+                    SetCellTriangle(cellTriangleTo, to, toSource);
+                    RunCellPass(fx, target, to, cellTriangleTo, CrossfadeBlend, weight);
+                }
+
+                EffectParameter step = fx.Parameters["TexelStep"];
+                for (int i = 0; i < iterations; i++)
+                {
+                    step?.SetValue(new Vector2(1f / target.Width, 0f));
+                    RunBackdropPass(fx, "Blur", scratch, target, null);
+                    step?.SetValue(new Vector2(0f, 1f / target.Height));
+                    RunBackdropPass(fx, "Blur", target, scratch, null);
+                }
+            }
+            finally
+            {
+                SetRenderTarget(previousTarget);
+                if (wasInBatch)
+                {
+                    Begin();
+                }
+            }
+
+            return target;
+        }
+
+        /// <summary>src * factor + dst * (1 - factor), the factor being the
+        /// device's BlendFactor: a crossfade with no shader of its own.</summary>
+        private static readonly BlendState CrossfadeBlend = new BlendState
+        {
+            Name = "GustUI.Crossfade",
+            ColorSourceBlend = Blend.BlendFactor,
+            ColorDestinationBlend = Blend.InverseBlendFactor,
+            AlphaSourceBlend = Blend.BlendFactor,
+            AlphaDestinationBlend = Blend.InverseBlendFactor,
+        };
+
+        private readonly VertexPositionTexture[] cellTriangleFrom = new VertexPositionTexture[3];
+        private readonly VertexPositionTexture[] cellTriangleTo = new VertexPositionTexture[3];
+
+        /// <summary>The fullscreen triangle, its texture coordinates mapped
+        /// so the target's 0..1 covers <paramref name="cell"/> of
+        /// <paramref name="sheet"/>, inset half a texel each side.</summary>
+        private static void SetCellTriangle(VertexPositionTexture[] triangle, Texture2D sheet, Rectangle cell)
+        {
+            float u0 = (cell.X + 0.5f) / sheet.Width;
+            float v0 = (cell.Y + 0.5f) / sheet.Height;
+            float du = (cell.Width - 1f) / sheet.Width;
+            float dv = (cell.Height - 1f) / sheet.Height;
+            triangle[0] = new VertexPositionTexture(new Vector3(-1, 1, 0), new Vector2(u0, v0));
+            triangle[1] = new VertexPositionTexture(new Vector3(3, 1, 0), new Vector2(u0 + (2 * du), v0));
+            triangle[2] = new VertexPositionTexture(new Vector3(-1, -3, 0), new Vector2(u0, v0 + (2 * dv)));
+        }
+
+        /// <summary>One Copy-technique draw of a sheet cell into
+        /// <paramref name="target"/>. The blend state goes on BEFORE the blend
+        /// factor: setting a BlendState resets the device's factor to the
+        /// state's own.</summary>
+        private void RunCellPass(Effect fx, RenderTarget2D target, Texture2D sheet, VertexPositionTexture[] triangle,
+            BlendState blend, float factor)
+        {
+            GraphicsDevice device = Resources.StaticResources.GraphicsDevice;
+            if (currentTarget != target)
+            {
+                SetRenderTarget(target);
+            }
+
+            device.BlendState = blend;
+            if (blend == CrossfadeBlend)
+            {
+                byte f = (byte)Math.Round(factor * 255f);
+                device.BlendFactor = new Color(f, f, f, f);
+            }
+
+            device.RasterizerState = RasterizerState.CullNone;
+            device.DepthStencilState = DepthStencilState.None;
+            fx.CurrentTechnique = fx.Techniques["Copy"];
+            foreach (EffectPass pass in fx.CurrentTechnique.Passes)
+            {
+                pass.Apply();
+                device.Textures[0] = sheet;
+                device.SamplerStates[0] = SamplerState.LinearClamp;
+                device.DrawUserPrimitives(PrimitiveType.TriangleList, triangle, 0, 1);
+            }
+
+            device.Textures[0] = null;
+            device.BlendState = BlendState.Opaque;
+        }
+
         /// <summary>Copies a captured frame to the backbuffer untouched, when
         /// the scrim that asked for it never drew.</summary>
         private void FinishBackdropCapture()

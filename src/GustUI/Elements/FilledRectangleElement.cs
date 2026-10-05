@@ -85,6 +85,11 @@ public class FilledRectangleElement : RectangleElement
             fillType = smartFill.Resolve(Resources.StaticResources.InputManager.GetElementState(this));
         }
 
+        DrawFillValue(fillType, rect);
+    }
+
+    private static void DrawFillValue(TVFill fillType, Rectangle rect)
+    {
         switch (fillType)
         {
             case TVFillSolidColor solidColor:
@@ -165,6 +170,27 @@ public class FilledRectangleElement : RectangleElement
                 }
 
                 break;
+            case TVSpriteSheetFill sheet:
+            {
+                // Sized in device pixels, which is what the blur radius is in.
+                float sheetScale = Resources.StaticResources.DrawManager.RenderScale;
+                Texture2D picture = sheet.GetTexture((int)(rect.Width * sheetScale), (int)(rect.Height * sheetScale));
+                float shown = sheet.PictureOpacity;
+                if (shown < 1f && sheet.Underlay != null && !(sheet.Underlay is TVSpriteSheetFill))
+                {
+                    DrawFillValue(sheet.Underlay, rect);
+                }
+
+                if (picture != null && shown > 0f)
+                {
+                    using (Managers.Telemetry.Scope("Draw.SpriteSheetBackground.Blit"))
+                    {
+                        Resources.StaticResources.DrawManager.Draw(picture, rect, Color.White * (sheet.Opacity * shown));
+                    }
+                }
+
+                break;
+            }
         }
     }
 }

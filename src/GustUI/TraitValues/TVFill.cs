@@ -491,6 +491,210 @@ namespace GustUI.TraitValues
     }
 
     /// <summary>
+    /// A looping background drawn from SPRITE SHEETS instead of a video: the
+    /// frames of a short clip baked offline into a grid of small cells on one
+    /// or more textures, crossfaded by time and drawn blurred over the fill's
+    /// whole area. It needs no codec, so it runs on every platform KNI does,
+    /// and it is cheap enough to sit behind a whole app:
+    ///
+    /// * The picture is composed and blurred into a target a quarter of the
+    ///   drawn size (<see cref="Managers.DrawManager.RenderCrossfadeBlurred"/>:
+    ///   two cell draws then <see cref="Blur"/> blur pairs, in the frame's
+    ///   pre-pass) and that target is drawn stretched, one quad.
+    /// * That target is only redrawn when <see cref="SpriteSheetTimeline.Due"/>
+    ///   says so: at most <see cref="SpriteSheetTimeline.MaxUpdatesPerSecond"/>
+    ///   times a second whatever the app's frame rate, never when the picture
+    ///   would not change, and at once when the size does. Every other frame
+    ///   costs the one stretched quad.
+    /// * Nothing at all happens while the fill is not drawn (out of the tree,
+    ///   or the window minimised to nothing), and nothing is allocated per
+    ///   frame once the targets exist.
+    ///
+    /// <see cref="Underlay"/> is drawn beneath until the first picture exists
+    /// and while it fades in over <see cref="FadeInSeconds"/>.
+    /// </summary>
+    public class TVSpriteSheetFill : TVFill
+    {
+        private readonly Texture2D[] sheets;
+        private readonly Func<double> clock;
+        private readonly Action render;
+        private RenderTarget2D target;
+        private RenderTarget2D scratch;
+        private Texture2D picture;
+        private bool queued;
+        private bool released;
+        private bool sheetsReady;
+        private int width;
+        private int height;
+        private double firstPictureAt = -1;
+
+        /// <summary>Real time for the fade-in, apart from the loop's clock,
+        /// which a caller may hold still.</summary>
+        private readonly System.Diagnostics.Stopwatch fadeClock = System.Diagnostics.Stopwatch.StartNew();
+
+        public SpriteSheetTimeline Timeline { get; }
+
+        /// <summary>Blur pairs run at a quarter of the drawn size, as for
+        /// <see cref="TVVideoFill.Blur"/>. 0 draws the cells sharp.</summary>
+        public int Blur { get; set; }
+
+        /// <summary>Drawn beneath until the first picture has faded in. Null
+        /// draws nothing there.</summary>
+        public TVFill Underlay { get; set; }
+
+        public float FadeInSeconds { get; set; } = 0.6f;
+
+        /// <summary>
+        /// Asked before each redraw (so at most
+        /// <see cref="SpriteSheetTimeline.MaxUpdatesPerSecond"/> times a
+        /// second): true skips it and keeps the last picture. For a host that
+        /// knows its window is minimised when the window itself does not say
+        /// so - on DirectX a minimised window lays itself out at nothing and
+        /// the timeline stops by itself, but SDL (DesktopGL) keeps reporting
+        /// the old size while the app goes on drawing to nobody.
+        /// </summary>
+        public Func<bool> Paused { get; set; }
+
+        /// <param name="sheets">The sheets, in frame order, as many as
+        /// <paramref name="timeline"/> needs. Slots may be null when the fill
+        /// is made and filled in later (a download): nothing is drawn but the
+        /// <see cref="Underlay"/> until every one is there.</param>
+        /// <param name="clock">Where the loop is, in seconds on any monotonic
+        /// clock; a Stopwatch when null. A clock held still shows one moment
+        /// (for screenshots).</param>
+        public TVSpriteSheetFill(Texture2D[] sheets, SpriteSheetTimeline timeline, Func<double> clock = null)
+        {
+            if (sheets == null || sheets.Length < timeline.SheetCount)
+            {
+                throw new ArgumentException($"the timeline needs {timeline.SheetCount} sheet(s)", nameof(sheets));
+            }
+
+            this.sheets = sheets;
+            Timeline = timeline;
+            if (clock == null)
+            {
+                System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+                clock = () => watch.Elapsed.TotalSeconds;
+            }
+
+            this.clock = clock;
+            render = Render;
+        }
+
+        /// <summary>How opaque to draw the picture right now: 0 until it
+        /// exists, then rising to 1 over <see cref="FadeInSeconds"/>.</summary>
+        public float PictureOpacity
+        {
+            get
+            {
+                if (picture == null || firstPictureAt < 0)
+                {
+                    return 0f;
+                }
+
+                if (FadeInSeconds <= 0f)
+                {
+                    return 1f;
+                }
+
+                return (float)Math.Min(1.0, (fadeClock.Elapsed.TotalSeconds - firstPictureAt) / FadeInSeconds);
+            }
+        }
+
+        /// <summary>
+        /// The picture to draw over <paramref name="deviceWidth"/> x
+        /// <paramref name="deviceHeight"/> device pixels, and, when the
+        /// timeline says it is due, a request to redraw it before the next
+        /// frame. Null until the first one exists. Called from Draw().
+        /// </summary>
+        public Texture2D GetTexture(int deviceWidth, int deviceHeight)
+        {
+            released = false;
+            if (!sheetsReady)
+            {
+                for (int i = 0; i < Timeline.SheetCount; i++)
+                {
+                    if (sheets[i] == null)
+                    {
+                        return null;
+                    }
+                }
+
+                sheetsReady = true;
+            }
+
+            if (target != null && (target.IsDisposed || target.IsContentLost))
+            {
+                Timeline.Invalidate();
+            }
+
+            // A quarter of the drawn size, as the backdrop blur does. Under 4
+            // device pixels (a minimised window lays itself out at nothing)
+            // that is 0, and the timeline never asks for a redraw.
+            int w = deviceWidth / 4;
+            int h = deviceHeight / 4;
+            if (!queued && Timeline.Due(clock(), w, h, out _))
+            {
+                if (Paused != null && Paused())
+                {
+                    // Not drawn, so not recorded: due again on the next frame,
+                    // and drawn on the first one after it stops being paused.
+                    Timeline.Invalidate();
+                    return picture;
+                }
+
+                width = w;
+                height = h;
+                queued = true;
+                Resources.StaticResources.DrawManager.QueuePrePass(render);
+            }
+
+            return picture;
+        }
+
+        private void Render()
+        {
+            queued = false;
+            if (released)
+            {
+                // Asked for, then put away before the frame it was for: making
+                // the targets now would hold them for as long as it stays away.
+                return;
+            }
+
+            SpriteSheetTimeline.FramePair pair = Timeline.LastPair;
+            (int fromSheet, int fromX, int fromY) = Timeline.CellOf(pair.From);
+            (int toSheet, int toX, int toY) = Timeline.CellOf(pair.To);
+            using (Managers.Telemetry.Scope("Draw.SpriteSheetBackground.Render"))
+            {
+                picture = Resources.StaticResources.DrawManager.RenderCrossfadeBlurred(
+                    sheets[fromSheet], new Rectangle(fromX, fromY, Timeline.CellWidth, Timeline.CellHeight),
+                    sheets[toSheet], new Rectangle(toX, toY, Timeline.CellWidth, Timeline.CellHeight),
+                    pair.Weight, ref target, ref scratch, width, height, Blur);
+            }
+
+            if (picture != null && firstPictureAt < 0)
+            {
+                firstPictureAt = fadeClock.Elapsed.TotalSeconds;
+            }
+        }
+
+        /// <summary>Drops the render targets (the sheets belong to whoever
+        /// loaded them). The fill still works afterwards: the next draw makes
+        /// new targets, without a second fade-in.</summary>
+        public void ReleaseTargets()
+        {
+            released = true;
+            picture = null;
+            target?.Dispose();
+            target = null;
+            scratch?.Dispose();
+            scratch = null;
+            Timeline.Invalidate();
+        }
+    }
+
+    /// <summary>
     /// A linear 2-color gradient fill, drawn via per-vertex color
     /// interpolation on the shared white atlas texel (FilledRectangleElement/
     /// SpriteBatchExtensions.DrawFilledRectangleGradient) — no texture is
