@@ -13,6 +13,14 @@ namespace GustUI.Elements
     [ElementTraits(typeof(OnHoverTrait), typeof(OnEnterTrait), typeof(OnExitTrait), typeof(OnMouseButtonHeldDown))]
     public class BackdropElement : FilledRectangleElement
     {
+        /// <summary>
+        /// How dark the backdrop is: black at this alpha, over everything the
+        /// root window draws beneath its children (its background fill). 0.75
+        /// by default, which is what it has always been. Read every frame, so
+        /// a host can set it at any time.
+        /// </summary>
+        public static float Darkness { get; set; } = 0.75f;
+
         int timeout = 0;
         public BackdropElement()
         {
@@ -24,7 +32,7 @@ namespace GustUI.Elements
             // except a permanent 40px strip that never darkened.
             Set<SizeTrait>(new TVVector(Resources.StaticResources.RootWindow.GetSize().X, Resources.StaticResources.RootWindow.GetSize().Y));
             Set<PositionTrait>(new TVVector(0, 0));
-            Set<BackgroundFillTrait>(new TVFillSolidColor(Microsoft.Xna.Framework.Color.Black * 0.75f));
+            Set<BackgroundFillTrait>(new TVFillSolidColor(() => Microsoft.Xna.Framework.Color.Black * Darkness));
             Set<OnHoverTrait>(new TVEvent<ClickEventArgs>((x) =>
             {
                 timeout = timeout + 2;

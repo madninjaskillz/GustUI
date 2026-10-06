@@ -3801,6 +3801,28 @@ namespace GustUI.Elements
         // language rather than the framework's old light-mode default.
         // Reads Theme LIVE (not cached) so a modal built after a theme
         // switch picks up the current palette — design-guide.md §1.
+        /// <summary>
+        /// Makes this window's body (and its button footer, when it has one)
+        /// ACRYLIC: the app's moving background shows through, blurred further
+        /// and darkened (<see cref="TVAcrylicFill"/>). The title bar stays
+        /// solid. Each fill's <see cref="TVAcrylicFill.Fallback"/> defaults to
+        /// the window's usual gradient, drawn until the glass exists.
+        /// </summary>
+        public void UseAcrylic(TVAcrylicFill body, TVAcrylicFill footer = null)
+        {
+            if (body != null)
+            {
+                body.Fallback ??= new TVFillSimpleGradient(() => BodyFillTop, () => BodyFillBottom, Direction.Vertically);
+                Set<BackgroundFillTrait>(body);
+            }
+
+            if (footer != null && buttonBackgroundElement != null && buttons.Count > 0)
+            {
+                footer.Fallback ??= new TVFillSimpleGradient(() => FooterFillTop, () => FooterFillBottom, Direction.Vertically);
+                buttonBackgroundElement.Set<BackgroundFillTrait>(footer);
+            }
+        }
+
         private static Color BodyFillTop => Resources.StaticResources.Theme.SurfaceRaised;
         private static Color BodyFillBottom => Resources.StaticResources.Theme.SurfacePanel;
         private static Color FooterFillTop => Resources.StaticResources.Theme.SurfaceHeader;

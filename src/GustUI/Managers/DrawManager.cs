@@ -176,6 +176,10 @@ namespace GustUI.Managers
         {
         }
 
+        /// <summary>Counts drawn frames, for something asked many times in a
+        /// frame that should do its work once.</summary>
+        public int FrameNumber { get; private set; }
+
         float debugBottom = 0;
 
         public void DrawLoop(GameTime gameTime)
@@ -183,6 +187,7 @@ namespace GustUI.Managers
             var deltaTime = (float)gameTime.ElapsedGameTime.TotalSeconds;
 
             _frameCounter.Update(deltaTime);
+            FrameNumber++;
 
             GeometryBatch.BeginFrame();
 
@@ -1069,6 +1074,13 @@ namespace GustUI.Managers
         /// </summary>
         public Texture2D RenderBlurred(Texture2D source, ref RenderTarget2D target, ref RenderTarget2D scratch,
             int width, int height, int iterations)
+            => RenderBlurred(source, ref target, ref scratch, width, height, iterations, false);
+
+        /// <summary>As above; <paramref name="keep"/> makes the target
+        /// PreserveContents, for a caller that draws the result again on
+        /// frames that do not blur it again (<see cref="TraitValues.AcrylicLayer"/>).</summary>
+        public Texture2D RenderBlurred(Texture2D source, ref RenderTarget2D target, ref RenderTarget2D scratch,
+            int width, int height, int iterations, bool keep)
         {
             Effect fx = GetBackdropEffect();
             if (fx == null || source == null || iterations <= 0)
@@ -1076,7 +1088,7 @@ namespace GustUI.Managers
                 return null;
             }
 
-            EnsureTarget(ref target, width, height, RenderTargetUsage.DiscardContents);
+            EnsureTarget(ref target, width, height, keep ? RenderTargetUsage.PreserveContents : RenderTargetUsage.DiscardContents);
             EnsureTarget(ref scratch, width, height, RenderTargetUsage.DiscardContents);
 
             bool wasInBatch = IsInBatch;

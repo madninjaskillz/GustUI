@@ -535,6 +535,15 @@ namespace GustUI.TraitValues
 
         public SpriteSheetTimeline Timeline { get; }
 
+        /// <summary>The last blurred picture (covering the whole area the
+        /// fill was last asked for), or null. For an <see cref="AcrylicLayer"/>
+        /// that blurs it again behind a window.</summary>
+        public Texture2D Picture => picture;
+
+        /// <summary>Moves on every redraw of <see cref="Picture"/>, so a
+        /// consumer can tell whether it has changed without comparing pixels.</summary>
+        public int PictureVersion { get; private set; }
+
         /// <summary>Blur pairs run at a quarter of the drawn size, as for
         /// <see cref="TVVideoFill.Blur"/>. 0 draws the cells sharp.</summary>
         public int Blur { get; set; }
@@ -682,6 +691,11 @@ namespace GustUI.TraitValues
                     pair.Weight, ref target, ref scratch, width, height, Blur);
             }
 
+            if (picture != null)
+            {
+                PictureVersion++;
+            }
+
             if (picture != null && firstPictureAt < 0)
             {
                 firstPictureAt = fadeClock.Elapsed.TotalSeconds;
@@ -701,6 +715,168 @@ namespace GustUI.TraitValues
             scratch = null;
             Timeline.Invalidate();
         }
+    }
+
+    /// <summary>
+    /// The frosted glass behind <see cref="TVAcrylicFill"/>s: a
+    /// <see cref="TVSpriteSheetFill"/>'s already-blurred picture, blurred
+    /// AGAIN at half its size (so an eighth of the window's), and kept.
+    ///
+    /// Cheap by construction. It reblurs only when the background's picture
+    /// has changed (<see cref="TVSpriteSheetFill.PictureVersion"/>, at most
+    /// 15 times a second) or the window's size has; every other frame each
+    /// acrylic surface is one textured quad and one tint. One layer serves
+    /// any number of surfaces, which simply draw their own part of it.
+    ///
+    /// It keeps the background moving even while that background is hidden
+    /// under opaque windows - the glass shows it, so it must stay alive.
+    /// </summary>
+    public sealed class AcrylicLayer
+    {
+        private readonly Action render;
+        private RenderTarget2D target;
+        private RenderTarget2D scratch;
+        private Texture2D blurred;
+        private bool queued;
+        private int doneVersion = -1;
+        private int lastFrameAsked = -1;
+
+        public AcrylicLayer(TVSpriteSheetFill source)
+        {
+            Source = source ?? throw new ArgumentNullException(nameof(source));
+            render = Render;
+        }
+
+        public TVSpriteSheetFill Source { get; }
+
+        /// <summary>Blur pairs run over the background's picture at
+        /// 1/<see cref="Downsample"/> of its size, on top of the background's own.</summary>
+        public int Blur { get; set; } = 2;
+
+        /// <summary>How much smaller than the background's picture (itself a
+        /// quarter of the window) the glass is blurred at. Each step down
+        /// doubles the reach of every blur pair and quarters its cost.</summary>
+        public int Downsample { get; set; } = 2;
+
+        private static Texture2D grain;
+
+        /// <summary>
+        /// The acrylic GRAIN tile (<see cref="AcrylicMath.FillGrain"/>): 128x128 black and white specks at
+        /// random low alpha, made once (fixed seed, so every run is the same)
+        /// and shared by every acrylic surface. Drawn tiled over the glass at
+        /// <see cref="TVAcrylicFill.Grain"/>; it never moves, which is what
+        /// makes it read as the material rather than as noise on the picture.
+        /// </summary>
+        public static Texture2D GrainTile
+        {
+            get
+            {
+                if (grain == null || grain.IsDisposed)
+                {
+                    int size = AcrylicMath.GrainSize;
+                    var texels = new byte[size * size * 4];
+                    AcrylicMath.FillGrain(texels);
+                    grain = new Texture2D(Resources.StaticResources.GraphicsDevice, size, size, false, SurfaceFormat.Color);
+                    grain.SetData(texels);
+                }
+
+                return grain;
+            }
+        }
+
+        /// <summary>The glass, covering the whole root window; null until the
+        /// background has a picture. Called by every surface every frame;
+        /// does its scheduling once a frame however many ask.</summary>
+        public Texture2D GetTexture()
+        {
+            int frame = Resources.StaticResources.DrawManager.FrameNumber;
+            if (frame != lastFrameAsked)
+            {
+                lastFrameAsked = frame;
+
+                // Keep the background animating, covered or not: the size is
+                // the root's, which is what the root's own fill asks with.
+                float scale = Resources.StaticResources.DrawManager.RenderScale;
+                Vector2 root = Extensions.ElementExtensions.GetSize(Resources.StaticResources.RootWindow).AsXna;
+                Source.GetTexture((int)(root.X * scale), (int)(root.Y * scale));
+
+                if (!queued)
+                {
+                    queued = true;
+                    Resources.StaticResources.DrawManager.QueuePrePass(render);
+                }
+            }
+
+            return blurred;
+        }
+
+        private void Render()
+        {
+            queued = false;
+            Texture2D picture = Source.Picture;
+            if (picture == null || picture.IsDisposed)
+            {
+                return;
+            }
+
+            int down = Math.Max(1, Downsample);
+            int w = Math.Max(1, picture.Width / down);
+            int h = Math.Max(1, picture.Height / down);
+            bool sizeChanged = target == null || target.IsDisposed || target.IsContentLost
+                || target.Width != w || target.Height != h;
+            if (!AcrylicMath.ShouldReblur(doneVersion, Source.PictureVersion, sizeChanged))
+            {
+                return;
+            }
+
+            using (Managers.Telemetry.Scope("Draw.Acrylic.Blur"))
+            {
+                blurred = Resources.StaticResources.DrawManager.RenderBlurred(picture, ref target, ref scratch, w, h,
+                    Math.Max(1, Blur), keep: true);
+            }
+
+            doneVersion = Source.PictureVersion;
+        }
+    }
+
+    /// <summary>
+    /// ACRYLIC: a surface that shows the app's moving background through it,
+    /// blurred further and darkened, like frosted glass (Windows' acrylic
+    /// material). Draws its own part of an <see cref="AcrylicLayer"/> - the
+    /// piece of the glass under this element's rectangle, so it stays right
+    /// as the element moves or resizes - multiplied down by
+    /// <see cref="Darken"/>, with <see cref="Tint"/> laid over at
+    /// <see cref="TintAmount"/>. Text and controls on top draw as usual.
+    ///
+    /// <see cref="Fallback"/> draws until the glass exists (the background's
+    /// sheets still loading), so the surface is never see-through to nothing.
+    /// </summary>
+    public class TVAcrylicFill : TVFill
+    {
+        public TVAcrylicFill(AcrylicLayer layer)
+        {
+            Layer = layer ?? throw new ArgumentNullException(nameof(layer));
+        }
+
+        public AcrylicLayer Layer { get; }
+
+        /// <summary>0 leaves the glass as bright as the background; 1 is black.
+        /// Read every frame, so it can follow the theme.</summary>
+        public Func<float> Darken { get; set; } = () => 0.4f;
+
+        /// <summary>Colour laid over the glass, read every frame (a theme
+        /// token). Transparent draws nothing.</summary>
+        public Func<Color> Tint { get; set; } = () => Color.Transparent;
+
+        /// <summary>How strongly <see cref="Tint"/> is laid over, 0..1.</summary>
+        public Func<float> TintAmount { get; set; } = () => 0f;
+
+        /// <summary>Drawn instead until the glass exists. Null draws nothing.</summary>
+        public TVFill Fallback { get; set; }
+
+        /// <summary>How strongly the grain (<see cref="AcrylicLayer.GrainTile"/>)
+        /// is laid over the glass, 0..1. 0 draws none.</summary>
+        public float Grain { get; set; }
     }
 
     /// <summary>

@@ -146,6 +146,35 @@ public class FilledRectangleElement : RectangleElement
             new ReadOnlySpan<int>(coverRects, 0, n * 4));
     }
 
+    /// <summary>The acrylic grain, tiled over <paramref name="rect"/> at
+    /// one tile texel per device pixel, anchored to the screen so it does not
+    /// crawl as a window moves. Quads in the one geometry batch; no new state.</summary>
+    private static void DrawGrain(Rectangle rect, float strength)
+    {
+        Texture2D tile = AcrylicLayer.GrainTile;
+        float scale = Resources.StaticResources.DrawManager.RenderScale;
+        int step = Math.Max(1, (int)Math.Round(tile.Width / Math.Max(0.25f, scale)));
+        Color colour = Color.White * MathHelper.Clamp(strength, 0f, 1f);
+        int startX = rect.X - (((rect.X % step) + step) % step);
+        int startY = rect.Y - (((rect.Y % step) + step) % step);
+        for (int y = startY; y < rect.Bottom; y += step)
+        {
+            for (int x = startX; x < rect.Right; x += step)
+            {
+                Rectangle cell = Rectangle.Intersect(new Rectangle(x, y, step, step), rect);
+                if (cell.Width <= 0 || cell.Height <= 0)
+                {
+                    continue;
+                }
+
+                Rectangle source = new Rectangle(
+                    (int)((cell.X - x) * (float)tile.Width / step), (int)((cell.Y - y) * (float)tile.Height / step),
+                    Math.Max(1, (int)(cell.Width * (float)tile.Width / step)), Math.Max(1, (int)(cell.Height * (float)tile.Height / step)));
+                Resources.StaticResources.DrawManager.Draw(tile, cell, source, colour);
+            }
+        }
+    }
+
     private static void DrawFillValue(TVFill fillType, Rectangle rect, FilledRectangleElement owner)
     {
         switch (fillType)
@@ -228,6 +257,54 @@ public class FilledRectangleElement : RectangleElement
                 }
 
                 break;
+            case TVAcrylicFill acrylic:
+            {
+                Texture2D glass = acrylic.Layer.GetTexture();
+                if (glass == null)
+                {
+                    if (acrylic.Fallback != null && !(acrylic.Fallback is TVAcrylicFill))
+                    {
+                        float keep = acrylic.Fallback.Opacity;
+                        acrylic.Fallback.Opacity = acrylic.Opacity;
+                        DrawFillValue(acrylic.Fallback, rect, null);
+                        acrylic.Fallback.Opacity = keep;
+                    }
+
+                    break;
+                }
+
+                // The glass covers the whole root window: take the piece
+                // under this rectangle, in the glass's own texels.
+                Vector2 root = Resources.StaticResources.RootWindow.GetSize().AsXna;
+                if (root.X < 1f || root.Y < 1f)
+                {
+                    break;
+                }
+
+                float sx = glass.Width / root.X;
+                float sy = glass.Height / root.Y;
+                Rectangle piece = new Rectangle((int)Math.Round(rect.X * sx), (int)Math.Round(rect.Y * sy),
+                    Math.Max(1, (int)Math.Round(rect.Width * sx)), Math.Max(1, (int)Math.Round(rect.Height * sy)));
+                float darken = MathHelper.Clamp(acrylic.Darken(), 0f, 1f);
+                byte lum = (byte)Math.Round(255f * (1f - darken));
+                using (Managers.Telemetry.Scope("Draw.Acrylic.Blit"))
+                {
+                    Resources.StaticResources.DrawManager.Draw(glass, rect, piece, new Color(lum, lum, lum, (byte)255) * acrylic.Opacity);
+                    float amount = MathHelper.Clamp(acrylic.TintAmount(), 0f, 1f);
+                    Color tint = acrylic.Tint();
+                    if (amount > 0f && tint.A > 0)
+                    {
+                        Resources.StaticResources.DrawManager.DrawFilledRectangle(rect, tint * (amount * acrylic.Opacity));
+                    }
+
+                    if (acrylic.Grain > 0f)
+                    {
+                        DrawGrain(rect, acrylic.Grain * acrylic.Opacity);
+                    }
+                }
+
+                break;
+            }
             case TVSpriteSheetFill sheet:
             {
                 // Under opaque windows that leave no gap there is nothing to
