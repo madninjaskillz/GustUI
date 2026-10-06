@@ -549,8 +549,26 @@ namespace GustUI.Extensions
             Vector2[] upper, Vector2[] lower, Vector2[] upperNormals, Vector2[] lowerNormals,
             Color from, Color to, Vector2 gradientFrom, Vector2 gradientTo)
         {
-            int n = upper.Length;
-            if (n < 2 || lower.Length != n || upperNormals.Length != n || lowerNormals.Length != n)
+            if (lower.Length != upper.Length || upperNormals.Length != upper.Length || lowerNormals.Length != upper.Length)
+            {
+                return;
+            }
+
+            manager.DrawMonotoneRegion(upper, lower, upperNormals, lowerNormals, upper.Length, from, to, gradientFrom, gradientTo);
+        }
+
+        /// <summary>
+        /// <see cref="DrawMonotoneRegion(DrawManager, Vector2[], Vector2[], Vector2[], Vector2[], Color, Color, Vector2, Vector2)"/>
+        /// over only the first <paramref name="count"/> columns, for a caller
+        /// building into reused arrays longer than this shape (a region that
+        /// grows frame by frame, like a line being drawn on).
+        /// </summary>
+        public static void DrawMonotoneRegion(this DrawManager manager,
+            Vector2[] upper, Vector2[] lower, Vector2[] upperNormals, Vector2[] lowerNormals, int count,
+            Color from, Color to, Vector2 gradientFrom, Vector2 gradientTo)
+        {
+            int n = count;
+            if (n < 2 || lower.Length < n || upper.Length < n || upperNormals.Length < n || lowerNormals.Length < n)
             {
                 return;
             }

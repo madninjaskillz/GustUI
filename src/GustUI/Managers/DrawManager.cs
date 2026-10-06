@@ -803,6 +803,56 @@ namespace GustUI.Managers
                 white.Texture, vertices, vertexCount, indices, primitiveCount, uv, GetClipRectForGeometry(), CurrentBlend);
         }
 
+        /// <summary>
+        /// Additive blending for this pipeline: (One, One) on colour, the
+        /// destination's alpha left alone. The geometry shader already
+        /// outputs PREMULTIPLIED colour (rgb * a), so XNA's stock
+        /// <see cref="BlendState.Additive"/>, which multiplies by source alpha
+        /// again, adds rgb * a * a: every soft edge of a glow falls off twice
+        /// as fast as authored and its middle comes out dimmer. This adds
+        /// exactly what the texel and the vertex colour say.
+        /// </summary>
+        public static readonly BlendState PremultipliedAdditive = new BlendState
+        {
+            Name = "GustUI.PremultipliedAdditive",
+            ColorSourceBlend = Blend.One,
+            ColorDestinationBlend = Blend.One,
+            AlphaSourceBlend = Blend.Zero,
+            AlphaDestinationBlend = Blend.One,
+        };
+
+        /// <summary>
+        /// Draws indexed triangles that sample <paramref name="texture"/>, with
+        /// each vertex's own UV and colour: a textured mesh, for art that has
+        /// to be warped, rotated or coloured per vertex rather than drawn as
+        /// one quad (ezmuze's welcome smoke turns its picture under a mesh that
+        /// stays still, so the colour across it can stay fixed to the screen).
+        ///
+        /// Positions are in the same logical pixel space as every other draw
+        /// here. The texture is sampled as STRAIGHT alpha and premultiplied by
+        /// the shader, like every texture in this pipeline, and each vertex's
+        /// colour multiplies it. The current clip is stamped onto every vertex
+        /// and Element.Opacity applies, as for <see cref="DrawTriangles"/>.
+        /// <paramref name="blend"/> null means <see cref="CurrentBlend"/>
+        /// (alpha blending unless inside <see cref="BeginAdditive"/>).
+        ///
+        /// Costs no flush of its own, but a texture other than the atlas opens
+        /// a new segment, so it is one draw call per run of the same texture.
+        /// The sampler is LinearClamp with no mipmaps: art drawn much smaller
+        /// than it is stored will alias, so store it near the size it is drawn.
+        /// </summary>
+        public void DrawTexturedTriangles(Texture2D texture, GeometryVertex[] vertices, int vertexCount,
+            short[] indices, int primitiveCount, BlendState blend = null)
+        {
+            if (texture == null || primitiveCount <= 0)
+            {
+                return;
+            }
+
+            GeometryBatch.AppendTriangles(
+                texture, vertices, vertexCount, indices, primitiveCount, GetClipRectForGeometry(), blend ?? CurrentBlend);
+        }
+
         // A single "big triangle" covering the whole clip space (-1,-1) to
         // (3,-1) to (-1,3) — the standard fullscreen-pass trick: it covers
         // every pixel of whatever viewport is bound (same as a quad would)

@@ -135,6 +135,8 @@ namespace GustUI.Managers
                        // the price actually being asked. Baked here rather
                        // than worked around in one caller, because every
                        // future price has exactly the same problem.
+            '\u00A9',  // copyright sign: "(c)" is a workaround, not a
+                       // spelling, and an app's About box wants the real one
             '\u00B0',  // degree — used by anything showing an angle
             '\u00D7',  // multiplication sign, for "2 × 4"
             '\u2013',  // en dash
