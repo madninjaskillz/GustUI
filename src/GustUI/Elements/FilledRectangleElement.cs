@@ -85,10 +85,68 @@ public class FilledRectangleElement : RectangleElement
             fillType = smartFill.Resolve(Resources.StaticResources.InputManager.GetElementState(this));
         }
 
-        DrawFillValue(fillType, rect);
+        DrawFillValue(fillType, rect, this);
     }
 
-    private static void DrawFillValue(TVFill fillType, Rectangle rect)
+    /// <summary>The children's rectangles for <see cref="IsCoveredByOpaqueChildren"/>,
+    /// reused every frame.</summary>
+    private int[] coverRects;
+
+    /// <summary>
+    /// Whether this element's own children hide every pixel of it: visible,
+    /// fully opaque, solid-filled children whose rectangles together leave no
+    /// gap (<see cref="RectCover"/>, exact). For a fill too costly to draw
+    /// for nobody - a <see cref="TVSpriteSheetFill"/> behind a maximised
+    /// window. Allocates nothing after the first call.
+    /// </summary>
+    public bool IsCoveredByOpaqueChildren()
+    {
+        TVElements children = Children;
+        if (children == null || children.Count == 0 || CachedSizeTrait == null)
+        {
+            return false;
+        }
+
+        coverRects ??= new int[RectCover.MaxRects * 4];
+        int n = 0;
+        foreach (Element child in children.Items)
+        {
+            if (!child.Visible || child.Opacity < 1f || child.CachedSizeTrait == null
+                || !(child is FilledRectangleElement filled) || filled.backgroundFillTrait == null
+                || !(filled.backgroundFillTrait.Value() is TVFillSolidColor solid)
+                || solid.Opacity < 1f || solid.ResolvedColor.A < 255)
+            {
+                continue;
+            }
+
+            if (n == RectCover.MaxRects)
+            {
+                return false;
+            }
+
+            Vector2 at = child.GetActualXnaPosition();
+            TVVector size = child.CachedSizeTrait.Value();
+            coverRects[n * 4] = (int)Math.Round(at.X);
+            coverRects[(n * 4) + 1] = (int)Math.Round(at.Y);
+            coverRects[(n * 4) + 2] = (int)Math.Round(at.X + size.X) - coverRects[n * 4];
+            coverRects[(n * 4) + 3] = (int)Math.Round(at.Y + size.Y) - coverRects[(n * 4) + 1];
+            n++;
+        }
+
+        if (n == 0)
+        {
+            return false;
+        }
+
+        Vector2 self = this.GetActualXnaPosition();
+        TVVector own = CachedSizeTrait.Value();
+        int sx = (int)Math.Round(self.X);
+        int sy = (int)Math.Round(self.Y);
+        return RectCover.Covers(sx, sy, (int)Math.Round(self.X + own.X) - sx, (int)Math.Round(self.Y + own.Y) - sy,
+            new ReadOnlySpan<int>(coverRects, 0, n * 4));
+    }
+
+    private static void DrawFillValue(TVFill fillType, Rectangle rect, FilledRectangleElement owner)
     {
         switch (fillType)
         {
@@ -172,13 +230,22 @@ public class FilledRectangleElement : RectangleElement
                 break;
             case TVSpriteSheetFill sheet:
             {
+                // Under opaque windows that leave no gap there is nothing to
+                // see: no redraw, no stretched quad, no underlay.
+                if (owner != null && owner.IsCoveredByOpaqueChildren())
+                {
+                    sheet.Covered = true;
+                    break;
+                }
+
+                sheet.Covered = false;
                 // Sized in device pixels, which is what the blur radius is in.
                 float sheetScale = Resources.StaticResources.DrawManager.RenderScale;
                 Texture2D picture = sheet.GetTexture((int)(rect.Width * sheetScale), (int)(rect.Height * sheetScale));
                 float shown = sheet.PictureOpacity;
                 if (shown < 1f && sheet.Underlay != null && !(sheet.Underlay is TVSpriteSheetFill))
                 {
-                    DrawFillValue(sheet.Underlay, rect);
+                    DrawFillValue(sheet.Underlay, rect, null);
                 }
 
                 if (picture != null && shown > 0f)

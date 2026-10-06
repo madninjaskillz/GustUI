@@ -507,8 +507,9 @@ namespace GustUI.TraitValues
     ///   would not change, and at once when the size does. Every other frame
     ///   costs the one stretched quad.
     /// * Nothing at all happens while the fill is not drawn (out of the tree,
-    ///   or the window minimised to nothing), and nothing is allocated per
-    ///   frame once the targets exist.
+    ///   or the window minimised to nothing) or is hidden under opaque children
+    ///   that leave no gap (<see cref="Covered"/>), and nothing is allocated
+    ///   per frame once the targets exist.
     ///
     /// <see cref="Underlay"/> is drawn beneath until the first picture exists
     /// and while it fades in over <see cref="FadeInSeconds"/>.
@@ -554,6 +555,14 @@ namespace GustUI.TraitValues
         /// the old size while the app goes on drawing to nobody.
         /// </summary>
         public Func<bool> Paused { get; set; }
+
+        /// <summary>
+        /// Set by the element drawing this fill: true while its own opaque
+        /// children hide all of it, when it draws and redraws nothing
+        /// (FilledRectangleElement.IsCoveredByOpaqueChildren). Read it to
+        /// tell whether the background is costing anything right now.
+        /// </summary>
+        public bool Covered { get; set; }
 
         /// <param name="sheets">The sheets, in frame order, as many as
         /// <paramref name="timeline"/> needs. Slots may be null when the fill
