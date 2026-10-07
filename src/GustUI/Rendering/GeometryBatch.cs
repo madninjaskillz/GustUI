@@ -223,6 +223,11 @@ namespace GustUI.Rendering
             public DynamicVertexBuffer VertexBuffer;
             public DynamicIndexBuffer IndexBuffer;
 
+            /// <summary>Where the next chunk is written in each GPU buffer: they
+            /// are rings, written NoOverwrite and discarded only on a wrap.</summary>
+            public int VertexCursor;
+            public int IndexCursor;
+
             public bool IsEmpty => IndexCount == 0;
 
             public void BeginFrame()
@@ -913,29 +918,6 @@ namespace GustUI.Rendering
                 return;
             }
 
-            if (acc.VertexBuffer == null || acc.VertexBuffer.VertexCount < acc.Vertices.Length)
-            {
-                acc.VertexBuffer?.Dispose();
-                acc.VertexBuffer = new DynamicVertexBuffer(device, GeometryVertex.VertexDeclaration, acc.Vertices.Length, BufferUsage.WriteOnly);
-            }
-
-            if (acc.IndexBuffer == null || acc.IndexBuffer.IndexCount < acc.Indices.Length)
-            {
-                acc.IndexBuffer?.Dispose();
-                acc.IndexBuffer = new DynamicIndexBuffer(device, IndexElementSize.SixteenBits, acc.Indices.Length, BufferUsage.WriteOnly);
-            }
-
-            using (Managers.Telemetry.Scope("Draw.GeometryFlush.SetData"))
-            {
-                acc.VertexBuffer.SetData(acc.Vertices, 0, acc.VertexCount, SetDataOptions.Discard);
-                acc.IndexBuffer.SetData(acc.Indices, 0, acc.IndexCount, SetDataOptions.Discard);
-            }
-
-            device.SetVertexBuffer(acc.VertexBuffer);
-            device.Indices = acc.IndexBuffer;
-            device.DepthStencilState = DepthStencilState.None;
-            device.RasterizerState = RasterizerState.CullNone;
-
             // Looked up ONCE, not once per segment. Parameters is a
             // name-keyed collection and there are now several hundred
             // segments in a busy frame; four dictionary probes each would be
@@ -954,49 +936,78 @@ namespace GustUI.Rendering
             CachedParams appliedParams = default;
             float appliedWeight = -1f;
 
-            foreach (Segment segment in acc.Segments)
+            device.DepthStencilState = DepthStencilState.None;
+            device.RasterizerState = RasterizerState.CullNone;
+
+            // CHUNKED (2026-10-07). The whole frame's geometry used to go up in
+            // one SetData into a buffer as big as the frame: a sequencer full of
+            // waveforms grew it to 476,000 vertices, 20 MB, and a D3D11 driver
+            // keeps a renamed copy of a Discard-written buffer for every frame in
+            // flight - six of them, 120 MB of native memory, for one buffer.
+            // Now the segments go up in runs of at most ChunkVertices (and
+            // ChunkIndices), each written NoOverwrite into a ring that is only
+            // discarded when it wraps, so the GPU buffers stay ~3 MB whatever
+            // the frame holds. Segments are still drawn one by one in the order
+            // they were appended - chunking only decides where each one's
+            // vertices sit in the GPU buffer, never the draw order.
+            List<Segment> segments = acc.Segments;
+            int index = 0;
+            while (index < segments.Count)
             {
-                device.BlendState = segment.Blend ?? BlendState.AlphaBlend;
-                Effect effect = segment.IsText ? textEffect : flatEffect;
+                GeometryChunk chunk = NextChunk(segments, index, acc.VertexCount);
+                int baseVertex = UploadVertices(acc, chunk.VertexStart, chunk.VertexCount) - chunk.VertexStart;
+                int baseIndex = UploadIndices(acc, chunk.IndexStart, chunk.IndexCount) - chunk.IndexStart;
+                device.SetVertexBuffer(acc.VertexBuffer);
+                device.Indices = acc.IndexBuffer;
 
-                if (segment.IsText)
+                for (int si = chunk.First; si < chunk.End; si++)
                 {
-                    effect.Parameters["Smoothing"].SetValue(segment.TextParams.Smoothing);
-                    effect.Parameters["BorderWidth"].SetValue(segment.TextParams.BorderWidth);
-                    effect.Parameters["BorderColor"].SetValue(segment.TextParams.BorderColor.ToVector4());
-                }
-                else if (drawOffset != null)
-                {
-                    CachedParams want = segment.IsCached ? segment.Cached : IdentityParams;
-                    float wantWeight = segment.IsCached ? 1f : 0f;
+                    Segment segment = segments[si];
 
-                    if (!paramsKnown || !want.Equals(appliedParams) || wantWeight != appliedWeight)
+                    device.BlendState = segment.Blend ?? BlendState.AlphaBlend;
+                    Effect effect = segment.IsText ? textEffect : flatEffect;
+
+                    if (segment.IsText)
                     {
-                        drawOffset.SetValue(want.Offset);
-                        drawTint.SetValue(want.Tint);
-                        drawClip.SetValue(want.Clip);
-                        drawUV.SetValue(want.UV);
-                        drawUVWeight.SetValue(wantWeight);
-                        appliedParams = want;
-                        appliedWeight = wantWeight;
-                        paramsKnown = true;
+                        effect.Parameters["Smoothing"].SetValue(segment.TextParams.Smoothing);
+                        effect.Parameters["BorderWidth"].SetValue(segment.TextParams.BorderWidth);
+                        effect.Parameters["BorderColor"].SetValue(segment.TextParams.BorderColor.ToVector4());
+                    }
+                    else if (drawOffset != null)
+                    {
+                        CachedParams want = segment.IsCached ? segment.Cached : IdentityParams;
+                        float wantWeight = segment.IsCached ? 1f : 0f;
+
+                        if (!paramsKnown || !want.Equals(appliedParams) || wantWeight != appliedWeight)
+                        {
+                            drawOffset.SetValue(want.Offset);
+                            drawTint.SetValue(want.Tint);
+                            drawClip.SetValue(want.Clip);
+                            drawUV.SetValue(want.UV);
+                            drawUVWeight.SetValue(wantWeight);
+                            appliedParams = want;
+                            appliedWeight = wantWeight;
+                            paramsKnown = true;
+                        }
+                    }
+
+                    foreach (EffectPass pass in effect.CurrentTechnique.Passes)
+                    {
+                        // Texture/sampler MUST be (re-)bound AFTER Apply(), not
+                        // before — see the long GOTCHA comment in GeometryBatch.fx.
+                        // On this KNI DesktopGL target, EffectPass.Apply() resets
+                        // texture/sampler bindings for an Effect with its own
+                        // declared `sampler` object; binding before Apply() runs
+                        // with zero errors but every fragment samples fully
+                        // transparent, silently vanishing every shape.
+                        pass.Apply();
+                        device.Textures[0] = segment.Texture;
+                        device.SamplerStates[0] = SamplerState.LinearClamp;
+                        device.DrawIndexedPrimitives(PrimitiveType.TriangleList, baseVertex + segment.VertexStart, baseIndex + segment.IndexStart, segment.IndexCount / 3);
                     }
                 }
 
-                foreach (EffectPass pass in effect.CurrentTechnique.Passes)
-                {
-                    // Texture/sampler MUST be (re-)bound AFTER Apply(), not
-                    // before — see the long GOTCHA comment in GeometryBatch.fx.
-                    // On this KNI DesktopGL target, EffectPass.Apply() resets
-                    // texture/sampler bindings for an Effect with its own
-                    // declared `sampler` object; binding before Apply() runs
-                    // with zero errors but every fragment samples fully
-                    // transparent, silently vanishing every shape.
-                    pass.Apply();
-                    device.Textures[0] = segment.Texture;
-                    device.SamplerStates[0] = SamplerState.LinearClamp;
-                    device.DrawIndexedPrimitives(PrimitiveType.TriangleList, segment.VertexStart, segment.IndexStart, segment.IndexCount / 3);
-                }
+                index = chunk.End;
             }
 
             SegmentsThisFrame += acc.Segments.Count;
@@ -1009,6 +1020,132 @@ namespace GustUI.Rendering
             acc.IndexCount = 0;
             acc.Segments.Clear();
             acc.HasOpenSegment = false;
+        }
+
+        /// <summary>Most vertices one chunk uploads: 65,536 x 44 bytes, about
+        /// 2.9 MB, and never less than one segment can hold
+        /// (<see cref="MaxVerticesPerSegment"/>).</summary>
+        internal const int ChunkVertices = 65536;
+
+        /// <summary>Most indices one chunk uploads (0.4 MB).</summary>
+        internal const int ChunkIndices = ChunkVertices * 3;
+
+        /// <summary>One run of consecutive segments uploaded together.</summary>
+        internal readonly struct GeometryChunk
+        {
+            public GeometryChunk(int first, int end, int vertexStart, int vertexCount, int indexStart, int indexCount)
+            {
+                First = first;
+                End = end;
+                VertexStart = vertexStart;
+                VertexCount = vertexCount;
+                IndexStart = indexStart;
+                IndexCount = indexCount;
+            }
+
+            public int First { get; }
+            public int End { get; }
+            public int VertexStart { get; }
+            public int VertexCount { get; }
+            public int IndexStart { get; }
+            public int IndexCount { get; }
+        }
+
+        /// <summary>
+        /// The longest run of segments from <paramref name="first"/> that fits in
+        /// one chunk - always at least one segment, however big. A segment's
+        /// vertices run to the next segment's start (or <paramref name="vertexCount"/>).
+        /// </summary>
+        private static GeometryChunk NextChunk(List<Segment> segments, int first, int vertexCount)
+            => NextChunk(segments.Count, first, vertexCount, segments, SegmentSpan);
+
+        private static readonly Func<List<Segment>, int, (int VertexStart, int IndexStart, int IndexCount)> SegmentSpan =
+            static (list, i) => (list[i].VertexStart, list[i].IndexStart, list[i].IndexCount);
+
+        /// <summary>The chunking rule, over any list of segment spans (so it can
+        /// be tested without a GPU).</summary>
+        internal static GeometryChunk NextChunk<TList>(int count, int first, int vertexCount, TList segments,
+            Func<TList, int, (int VertexStart, int IndexStart, int IndexCount)> span)
+        {
+            int v0 = span(segments, first).VertexStart;
+            int i0 = span(segments, first).IndexStart;
+            int end = first;
+            int vEnd = v0, iEnd = i0;
+            while (end < count)
+            {
+                var here = span(segments, end);
+                int segVEnd = end + 1 < count ? span(segments, end + 1).VertexStart : vertexCount;
+                int segIEnd = here.IndexStart + here.IndexCount;
+                if (end > first && (segVEnd - v0 > ChunkVertices || segIEnd - i0 > ChunkIndices))
+                {
+                    break;
+                }
+
+                vEnd = segVEnd;
+                iEnd = segIEnd;
+                end++;
+            }
+
+            return new GeometryChunk(first, end, v0, vEnd - v0, i0, iEnd - i0);
+        }
+
+        /// <summary>Writes vertices [start, start+count) into the ring and
+        /// returns where they landed.</summary>
+        private int UploadVertices(Accumulator acc, int start, int count)
+        {
+            if (acc.VertexBuffer == null || acc.VertexBuffer.VertexCount < count)
+            {
+                acc.VertexBuffer?.Dispose();
+                acc.VertexBuffer = new DynamicVertexBuffer(device, GeometryVertex.VertexDeclaration,
+                    Math.Max(ChunkVertices, count), BufferUsage.WriteOnly);
+                acc.VertexCursor = 0;
+            }
+
+            SetDataOptions options = SetDataOptions.NoOverwrite;
+            if (acc.VertexCursor + count > acc.VertexBuffer.VertexCount || acc.VertexCursor == 0)
+            {
+                options = SetDataOptions.Discard;
+                acc.VertexCursor = 0;
+            }
+
+            int at = acc.VertexCursor;
+            using (Managers.Telemetry.Scope("Draw.GeometryFlush.SetData"))
+            {
+                int stride = GeometryVertex.VertexDeclaration.VertexStride;
+                acc.VertexBuffer.SetData(at * stride, acc.Vertices, start, count, stride, options);
+            }
+
+            acc.VertexCursor = at + count;
+            return at;
+        }
+
+        /// <summary>Writes indices [start, start+count) into the ring and
+        /// returns where they landed.</summary>
+        private int UploadIndices(Accumulator acc, int start, int count)
+        {
+            if (acc.IndexBuffer == null || acc.IndexBuffer.IndexCount < count)
+            {
+                acc.IndexBuffer?.Dispose();
+                acc.IndexBuffer = new DynamicIndexBuffer(device, IndexElementSize.SixteenBits,
+                    Math.Max(ChunkIndices, count), BufferUsage.WriteOnly);
+                acc.IndexCursor = 0;
+            }
+
+            SetDataOptions options = SetDataOptions.NoOverwrite;
+            if (acc.IndexCursor + count > acc.IndexBuffer.IndexCount || acc.IndexCursor == 0)
+            {
+                options = SetDataOptions.Discard;
+                acc.IndexCursor = 0;
+            }
+
+            int at = acc.IndexCursor;
+            using (Managers.Telemetry.Scope("Draw.GeometryFlush.SetData"))
+            {
+                acc.IndexBuffer.SetData(at * sizeof(short), acc.Indices, start, count, options);
+            }
+
+            acc.IndexCursor = at + count;
+            return at;
         }
     }
 }
