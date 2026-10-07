@@ -282,20 +282,18 @@ namespace GustUI.TraitValues
     }
 
     /// <summary>
-    /// A 1px ROUNDED OUTLINE with a pinch at each repeat boundary — how a
-    /// sequencer block says where its pattern starts over (bug board #212).
+    /// A block OUTLINE with a notch at each repeat boundary — how a sequencer
+    /// block says where its pattern starts over (bug board #212).
     ///
     /// It draws no interior at all, only the line, so it goes over whatever
     /// face the element already has (a flat colour, a baked waveform, a mini
     /// piano roll) without knowing anything about it.
     ///
-    /// A PINCH, NOT A DIVIDER. The old answer was to darken every second
-    /// pass, which reads as stripes rather than as repeats and fights with
-    /// the content on the block. Here the outline simply follows the shape a
-    /// row of butted rounded rectangles would have: rounded at the two ends,
-    /// and where two passes meet, the two corner arcs and nothing between
-    /// them — a small cusp on the top edge and another on the bottom, with no
-    /// line across the middle. It marks the seam without cutting the block up.
+    /// Straight edges with each corner stepped off two strokes, and at each
+    /// seam a short tick down from the top edge and up from the bottom, with
+    /// nothing across the middle. All of it axis-aligned quads — see
+    /// <see cref="Extensions.LoopOutlineGeometry"/> for the shape and for why
+    /// the arcs it used to draw went.
     ///
     /// <see cref="Seams"/> is block-local x, and only the first
     /// <see cref="SeamCount"/> entries are read, so the array can be sized
@@ -312,8 +310,6 @@ namespace GustUI.TraitValues
 
         public Color ResolvedColor => colorFunc != null ? colorFunc() : Color;
 
-        public int Radius { get; set; } = 4;
-
         public int Thickness { get; set; } = 1;
 
         /// <summary>Where the pattern starts again, in this element's own x.
@@ -325,17 +321,23 @@ namespace GustUI.TraitValues
 
         public TVFillLoopOutline() { }
 
-        public TVFillLoopOutline(Color color, int radius = 4, int thickness = 1)
+        public TVFillLoopOutline(Color color)
         {
             Color = color;
-            Radius = radius;
-            Thickness = thickness;
         }
 
-        public TVFillLoopOutline(Func<Color> colorFunc, int radius = 4, int thickness = 1)
+        public TVFillLoopOutline(Func<Color> colorFunc)
         {
             this.colorFunc = colorFunc;
-            Radius = radius;
+        }
+
+        /// <summary>The corners stopped being arcs on 2026-10-07, so there is
+        /// no radius; kept so a caller built against the old signature still
+        /// gets the right thickness rather than its radius.</summary>
+        [Obsolete("The outline has no corner radius any more; use TVFillLoopOutline(color) { Thickness = n }.")]
+        public TVFillLoopOutline(Color color, int radius, int thickness = 1)
+        {
+            Color = color;
             Thickness = thickness;
         }
     }

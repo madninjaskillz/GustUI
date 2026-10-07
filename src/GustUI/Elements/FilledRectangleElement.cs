@@ -210,7 +210,7 @@ public class FilledRectangleElement : RectangleElement
                 break;
             case TVFillLoopOutline loop:
                 Resources.StaticResources.DrawManager.DrawLoopOutline(rect,
-                    loop.ResolvedColor * loop.Opacity, loop.Radius, loop.Thickness,
+                    loop.ResolvedColor * loop.Opacity, loop.Thickness,
                     loop.Seams == null ? System.ReadOnlySpan<float>.Empty
                         : new System.ReadOnlySpan<float>(loop.Seams, 0, System.Math.Min(loop.SeamCount, loop.Seams.Length)));
                 break;

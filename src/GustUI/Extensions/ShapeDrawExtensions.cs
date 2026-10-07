@@ -1189,95 +1189,25 @@ namespace GustUI.Extensions
         }
 
         /// <summary>
-        /// The outline of a row of butted rounded rectangles, drawn as a LINE
-        /// and nothing else (bug board #212) — rounded at the two ends, and at
-        /// every seam in <paramref name="seams"/> the two facing corner arcs
-        /// with no line between them, so the top and bottom edges each pinch
-        /// inwards and the block is never cut in half.
-        ///
-        /// Stroked rather than punched out of a fill, because what it goes
-        /// over is a block face that may be a baked waveform, a mini piano
-        /// roll or a live visualiser — anything that painted an interior would
-        /// have to know which, and would be wrong the moment that changed.
-        /// The cost is that the FACE behind it stays square; at the radius
-        /// this is drawn at the eye reads the line, not the corner behind it.
-        ///
-        /// <paramref name="seams"/> is in rectangle-local x, ascending. A seam
-        /// closer to an edge (or to its neighbour) than two radii is dropped:
-        /// two arcs that would overlap read as a blob rather than a cusp.
+        /// A sequencer block's outline with a notch at every seam in
+        /// <paramref name="seams"/> (bug board #212) — straight axis-aligned
+        /// quads and nothing else; see <see cref="LoopOutlineGeometry"/> for
+        /// the shape and why.
         /// </summary>
         public static void DrawLoopOutline(this DrawManager manager, Rectangle rectangle, Color color,
-            int radius, int thickness, ReadOnlySpan<float> seams)
+            int thickness, ReadOnlySpan<float> seams)
         {
             if (rectangle.Width <= 0 || rectangle.Height <= 0 || color.A == 0)
             {
                 return;
             }
 
-            float t = Math.Max(1, thickness);
-            float r = Math.Min(radius, Math.Min(rectangle.Width, rectangle.Height) / 2f);
-            if (r < t)
+            int count = Math.Min(seams.Length, LoopOutlineGeometry.MaxSeams);
+            Span<Rectangle> rects = stackalloc Rectangle[LoopOutlineGeometry.MaxRects(count)];
+            int n = LoopOutlineGeometry.Build(rectangle, thickness, seams.Slice(0, count), rects);
+            for (int i = 0; i < n; i++)
             {
-                manager.DrawRectangle(rectangle, color, (int)t);
-                return;
-            }
-
-            // The x of every edge, ends included: [left, seam, seam, ..., right].
-            Span<float> edges = stackalloc float[Math.Min(seams.Length, 64) + 2];
-            int n = 0;
-            edges[n++] = rectangle.Left;
-            for (int i = 0; i < seams.Length && n < edges.Length - 1; i++)
-            {
-                float x = rectangle.Left + seams[i];
-                if (x - edges[n - 1] >= r * 2f && rectangle.Right - x >= r * 2f)
-                {
-                    edges[n++] = x;
-                }
-            }
-
-            edges[n++] = rectangle.Right;
-
-            float top = rectangle.Top;
-            float bottom = rectangle.Bottom - t;
-            float quarter = MathHelper.PiOver2;
-
-            for (int i = 0; i < n - 1; i++)
-            {
-                float x0 = edges[i];
-                float x1 = edges[i + 1];
-                float straight = Math.Max(0f, (x1 - r) - (x0 + r));
-
-                if (straight > 0f)
-                {
-                    manager.DrawFilledRectangle(new Rectangle((int)(x0 + r), (int)top, (int)straight, (int)t), color);
-                    manager.DrawFilledRectangle(new Rectangle((int)(x0 + r), (int)bottom, (int)straight, (int)t), color);
-                }
-
-                // The four corner arcs of THIS pass. At a seam the two
-                // neighbouring passes each draw their own, and the pair is the
-                // cusp; at the two ends they are the rounded corners.
-                var tl = new Vector2(x0 + r, rectangle.Top + r);
-                var tr = new Vector2(x1 - r, rectangle.Top + r);
-                var br = new Vector2(x1 - r, rectangle.Bottom - r);
-                var bl = new Vector2(x0 + r, rectangle.Bottom - r);
-                manager.DrawRingArc(tl, r - t, r, color, MathHelper.Pi, quarter);
-                manager.DrawRingArc(tr, r - t, r, color, MathHelper.Pi + quarter, quarter);
-                manager.DrawRingArc(br, r - t, r, color, 0f, quarter);
-                manager.DrawRingArc(bl, r - t, r, color, quarter, quarter);
-
-                // The verticals close the two ENDS only. A seam is where the
-                // block does not end, so it does not get one — that is the
-                // whole difference between this and a row of separate boxes.
-                float side = Math.Max(0f, rectangle.Height - r * 2f);
-                if (side > 0f && i == 0)
-                {
-                    manager.DrawFilledRectangle(new Rectangle((int)x0, (int)(rectangle.Top + r), (int)t, (int)side), color);
-                }
-
-                if (side > 0f && i == n - 2)
-                {
-                    manager.DrawFilledRectangle(new Rectangle((int)(x1 - t), (int)(rectangle.Top + r), (int)t, (int)side), color);
-                }
+                manager.DrawFilledRectangle(rects[i], color);
             }
         }
 
