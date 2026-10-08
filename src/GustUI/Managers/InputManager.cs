@@ -203,6 +203,44 @@ namespace GustUI.Managers
         /// whatever is in front of it.</summary>
         public KeyboardState CurrentKeyboardState { get; private set; }
 
+        // ---- input activity -----------------------------------------------
+        // The last frame anybody used the window, for work that should wait
+        // until nobody is (ezmuze: a compacting garbage collection once a burst
+        // of loading or rendering settles, which must never land mid-gesture).
+        private MouseState activityMouse;
+        private KeyboardState activityKeyboard;
+        private long lastActivityTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        /// <summary>How long since the pointer last moved, a button or key was
+        /// pressed, held or released, or the wheel turned. Holding a button or
+        /// a key still counts as use, so a drag paused in place is not idle.
+        /// Starts at zero: a window that has just opened has not been idle.</summary>
+        public TimeSpan TimeSinceInput => System.Diagnostics.Stopwatch.GetElapsedTime(lastActivityTimestamp);
+
+        /// <summary>Whether this frame's states differ from the last frame's,
+        /// or anything is still held down. Internal for tests.</summary>
+        internal static bool IsActivity(MouseState previousMouse, MouseState mouse,
+            KeyboardState previousKeyboard, KeyboardState keyboard)
+        {
+            if (mouse.X != previousMouse.X || mouse.Y != previousMouse.Y
+                || mouse.ScrollWheelValue != previousMouse.ScrollWheelValue
+                || mouse.HorizontalScrollWheelValue != previousMouse.HorizontalScrollWheelValue)
+            {
+                return true;
+            }
+
+            if (mouse.LeftButton == ButtonState.Pressed || mouse.RightButton == ButtonState.Pressed
+                || mouse.MiddleButton == ButtonState.Pressed || mouse.XButton1 == ButtonState.Pressed
+                || mouse.XButton2 == ButtonState.Pressed
+                || previousMouse.LeftButton == ButtonState.Pressed || previousMouse.RightButton == ButtonState.Pressed
+                || previousMouse.MiddleButton == ButtonState.Pressed)
+            {
+                return true;
+            }
+
+            return keyboard.GetPressedKeyCount() > 0 || previousKeyboard.GetPressedKeyCount() > 0;
+        }
+
         /// <summary>
         /// Divides polled mouse coordinates before hit-testing — the general
         /// counterpart to <c>WindowElement.DevicePixelRatio</c> shrinking
@@ -984,6 +1022,18 @@ namespace GustUI.Managers
 
             KeyboardState keyboardState = syntheticKeyboardState ?? (realInputReaches ? Keyboard.GetState() : default(KeyboardState));
             CurrentKeyboardState = keyboardState;
+
+            // Somebody touching the window: moved, pressed, held, scrolled,
+            // typed. Read off the same states the tree sees, so a locked-out or
+            // inactive window is idle and the control API's synthetic input
+            // counts as use.
+            if (IsActivity(activityMouse, polledState, activityKeyboard, keyboardState))
+            {
+                lastActivityTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+            }
+
+            activityMouse = polledState;
+            activityKeyboard = keyboardState;
 
             // A field beneath a waiting dialog loses the keyboard (ezmuze
             // #368): the dialog is the only thing keys may reach, and a search

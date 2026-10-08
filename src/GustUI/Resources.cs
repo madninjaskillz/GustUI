@@ -31,7 +31,7 @@ namespace GustUI
             Pixel.SetData<Color>(new Color[1] { Color.White });
             VirtualContent = virtualContent;
             Content = content;
-            UUContent = new UUContent(new _Embedded.UUContentDictionary());
+            UUContent = new UUContent();
 
             FontManager = new FontManager(graphicsDevice, UUContent);
             InputManager = new InputManager();

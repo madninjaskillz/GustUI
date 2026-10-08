@@ -1,6 +1,7 @@
 # Third-party assets embedded in GustUI
 
-Fonts are embedded as base64 in `src/GustUI/_Embedded/UUContent.cs`. Their licences live here,
+Fonts are embedded as assembly resources from `src/GustUI/_Embedded/Content/` (base64 string literals in
+`_Embedded/UUContent.cs` until 2026-10-08; same files, byte for byte). Their licences live here,
 alongside a note of what was changed — several are modified for delivery, and the licences require
 that to be stated.
 

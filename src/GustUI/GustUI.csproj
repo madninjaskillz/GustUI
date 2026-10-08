@@ -13,6 +13,11 @@
     <InternalsVisibleTo Include="GustUI.Tests" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="_Embedded\" />
+    <!-- The default theme's fonts and nine-grid images, as manifest resources
+         read by UUContent. They were base64 string literals until 2026-10-08,
+         which kept ~13 MB of UTF-16 text resident for the life of the process;
+         a resource is read straight out of the mapped assembly when a font is
+         baked and costs nothing afterwards. Licences: THIRD-PARTY/. -->
+    <EmbeddedResource Include="_Embedded\Content\*" LogicalName="GustUI.Embedded.%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>
